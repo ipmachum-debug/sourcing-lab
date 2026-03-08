@@ -43,10 +43,6 @@
   ).forEach(el => el.remove());
 
   console.log(`%c[SH] v${VER} 마켓 대시보드 로드`, 'color:#16a34a;font-weight:bold;font-size:14px;');
-  console.log(`%c═══════════════════════════════════════`, 'color:#6366f1;font-weight:bold;');
-  console.log(`%c  🐢 소싱 헬퍼 v${VER} 로딩됨`, 'color:#6366f1;font-weight:bold;font-size:12px;');
-  console.log(`%c  1688 사전: ${Object.keys(CN).length}개 매핑`, 'color:#6366f1;');
-  console.log(`%c═══════════════════════════════════════`, 'color:#6366f1;font-weight:bold;');
 
   // ============================================================
   //  CSS
@@ -299,6 +295,8 @@
     '블라우풍트','유닉스','CKI','Rotima','SUNGDIN','SAMSEA',
     '쿠팡브랜드','곰곰','탐사','코멧','오뚜기','CJ','비비고',
   ]);
+
+  console.log(`%c[SH] v${VER} | 1688 사전: ${Object.keys(CN).length}개 | 브랜드: ${BRANDS.size}개 | 노이즈: ${NOISE.size}개`, 'color:#6366f1;font-weight:bold;');
 
   function extractKw(title) {
     if (!title) return { cn: '', ko: '' };
