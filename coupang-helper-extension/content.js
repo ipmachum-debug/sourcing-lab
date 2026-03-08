@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.5.0
+   Coupang Sourcing Helper — Content Script v5.5.1
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -7,10 +7,17 @@
    2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
+
+   v5.5.1 파싱 수정:
+   - 가격: price-value 클래스 우선, per-unit 가격(g당/ml당) 제외
+   - 평점: em.rating 클래스 직접 조회
+   - 리뷰: span.rating-total-count 클래스 직접 조회
+   - 광고: search-product__ad-badge 클래스 + ad-badge 엘리먼트 감지
+   - 로켓: badge-rocket, rocket-icon 클래스 + 텍스트 매칭
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.0';
+  const VER = '5.5.1';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -273,53 +280,162 @@
   function nm(s) { return parseInt((s || '').replace(/[^0-9]/g, ''), 10) || 0; }
   function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
+  /**
+   * 쿠팡 검색결과 DOM 구조 (2024-2026):
+   *   <ul id="productList">
+   *     <li class="search-product search-product__ad-badge">  ← 광고상품
+   *       <a class="search-product-link" href="/vp/products/12345...">
+   *         <div class="name">상품명</div>
+   *         <del class="base-price">30,000</del>           ← 정가
+   *         <strong class="price-value">21,880</strong>     ← 판매가 ★
+   *         <span class="unit-price">(100g당 547원)</span>  ← 단위가격 (무시해야 함!)
+   *         <em class="rating">4.5</em>                     ← 평점
+   *         <span class="rating-total-count">(1,234)</span> ← 리뷰수
+   *         <span class="ad-badge-text">AD</span>           ← 광고
+   *         <span class="badge-rocket">로켓배송</span>      ← 로켓
+   *         <span class="arrival-info">내일(월) 새벽 도착 보장</span>
+   */
   function parseProducts() {
     const items = [], seen = new Set(), q = getQ();
 
-    for (const a of document.querySelectorAll('a[href*="/vp/products/"]')) {
+    /* 방법 A: <li class="search-product"> 기반 탐색 (쿠팡 공식 구조) */
+    const productLis = document.querySelectorAll('li[class*="search-product"]');
+
+    /* 방법 B: fallback — a[href*="/vp/products/"] 기반 */
+    const productLinks = productLis.length > 0 ? [] : [...document.querySelectorAll('a[href*="/vp/products/"]')];
+
+    const sources = productLis.length > 0
+      ? [...productLis].map(li => ({ box: li, link: li.querySelector('a[href*="/vp/products/"]') }))
+      : productLinks.map(a => {
+          let box = a;
+          for (let i = 0; i < 6 && box.parentElement; i++) {
+            box = box.parentElement;
+            if (box.tagName === 'LI' || box.dataset?.productId) break;
+          }
+          return { box, link: a };
+        });
+
+    for (const { box, link } of sources) {
       if (items.length >= MAX) break;
-      const m = (a.href || '').match(/\/vp\/products\/(\d+)/);
+      if (!link) continue;
+
+      const m = (link.href || link.getAttribute('href') || '').match(/\/vp\/products\/(\d+)/);
       if (!m) continue;
       const pid = m[1];
       if (seen.has(pid)) continue;
       seen.add(pid);
 
-      let box = a;
-      for (let i = 0; i < 6 && box.parentElement; i++) {
-        box = box.parentElement;
-        if (box.tagName === 'LI' || box.dataset?.productId) break;
-      }
-
-      const nameEl = box.querySelector('[class*="name"],[class*="title"],[class*="Name"]');
-      const title = (nameEl ? tx(nameEl) : '') || tx(a) || (box.querySelector('img')?.alt || '');
+      // ── 상품명 ──────────────────────────────
+      const nameEl = box.querySelector('div.name, [class*="name"], [class*="title"], [class*="Name"]');
+      const title = (nameEl ? tx(nameEl) : '') || tx(link) || (box.querySelector('img')?.alt || '');
       if (!title || title.length < 3) continue;
 
+      // ── 가격 (핵심 수정) ────────────────────
+      // 1) price-value 클래스에서 판매가를 직접 추출 (g당/ml당 단위가격 아님)
+      // 2) base-price 는 정가(할인 전)이므로 이것도 fallback으로 사용
       let price = 0;
-      for (const el of box.querySelectorAll('[class*="price"],[class*="Price"]')) {
-        const ms = tx(el).match(/[\d,]+원/g);
-        if (ms) { const ns = ms.map(x => nm(x)).filter(n => n >= 100 && n < 1e8); if (ns.length) { price = Math.min(...ns); break; } }
+      const priceValueEl = box.querySelector('strong.price-value, .price-value');
+      if (priceValueEl) {
+        price = nm(tx(priceValueEl));
       }
       if (!price) {
-        const ms = tx(box).match(/[\d,]+원/g);
-        if (ms) { const ns = ms.map(x => nm(x)).filter(n => n >= 100 && n < 1e8); if (ns.length) price = Math.min(...ns); }
+        // base-price (정가)에서 가져오기
+        const basePriceEl = box.querySelector('del.base-price, .base-price');
+        if (basePriceEl) price = nm(tx(basePriceEl));
+      }
+      if (!price) {
+        // fallback: 텍스트에서 가격 추출하되 단위가격(g당, ml당 등)은 제외
+        const boxText = tx(box);
+        // "100g당 547원", "10g당 91원" 등의 패턴 제거
+        const cleanText = boxText.replace(/\d+\s*(g|kg|ml|l|개|매)\s*당\s*[\d,]+\s*원/gi, '');
+        const ms = cleanText.match(/([\d,]+)\s*원/g);
+        if (ms) {
+          const ns = ms.map(x => nm(x)).filter(n => n >= 1000 && n < 1e8);
+          if (ns.length) {
+            // 할인가가 있으면 가장 작은 값 (할인 후 가격), 아니면 첫 번째
+            price = Math.min(...ns);
+          }
+        }
       }
 
-      let rating = 0, reviewCount = 0;
-      const ratEl = box.querySelector('[class*="rating"],[class*="star"]');
-      if (ratEl) { const rm = tx(ratEl).match(/(\d+\.?\d*)/); if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; } }
-      const revEl = box.querySelector('[class*="review"],[class*="count"],.rating-total-count');
-      if (revEl) reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
+      // ── 평점 (수정) ────────────────────────
+      let rating = 0;
+      // 1) em.rating 직접 조회 (쿠팡 공식 구조)
+      const ratEl = box.querySelector('em.rating');
+      if (ratEl) {
+        const rm = tx(ratEl).match(/(\d+\.?\d*)/);
+        if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
+      }
+      if (!rating) {
+        // 2) fallback: class에 rating이 포함된 요소
+        for (const el of box.querySelectorAll('[class*="rating"],[class*="star"]')) {
+          if (el.classList.contains('rating-total-count')) continue; // 리뷰수 제외
+          const rm = tx(el).match(/(\d+\.?\d*)/);
+          if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) { rating = v; break; } }
+        }
+      }
 
+      // ── 리뷰수 (수정) ─────────────────────
+      let reviewCount = 0;
+      // 1) span.rating-total-count 직접 조회 — "(1,234)" 형태
+      const revEl = box.querySelector('span.rating-total-count, .rating-total-count');
+      if (revEl) {
+        reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
+      }
+      if (!reviewCount) {
+        // 2) fallback: class에 count/review 포함된 요소
+        for (const el of box.querySelectorAll('[class*="count"],[class*="review"]')) {
+          const v = nm(tx(el).replace(/[()]/g, ''));
+          if (v > 0 && v < 1e7) { reviewCount = v; break; }
+        }
+      }
+
+      // ── 이미지 ─────────────────────────────
       const img = box.querySelector('img');
-      const isAd = /ad[-_]?badge|광고|sponsored/i.test(box.innerHTML.substring(0, 500));
-      const isRocket = /로켓배송|로켓와우|rocket/i.test(tx(box));
-      const href = a.href.startsWith('http') ? a.href : 'https://www.coupang.com' + a.href;
+      const imageUrl = img?.src || img?.getAttribute('data-img-src') || img?.getAttribute('data-src') || '';
+
+      // ── 광고 감지 (수정) ───────────────────
+      // 1) li 클래스에 search-product__ad-badge 포함 여부
+      const boxClasses = box.className || '';
+      let isAd = /search-product__ad-badge/i.test(boxClasses);
+      if (!isAd) {
+        // 2) 내부에 ad-badge 엘리먼트 존재 여부
+        isAd = !!box.querySelector('.ad-badge, .ad-badge-text, [class*="ad-badge"], [class*="AdBadge"]');
+      }
+      if (!isAd) {
+        // 3) 텍스트 기반 (마지막 수단): "광고" 텍스트 또는 "AD" 배지
+        const snippet = box.innerHTML.substring(0, 800);
+        isAd = /class="[^"]*ad[_-]?badge/i.test(snippet) || /광고 서비스를 구매한 업체/i.test(snippet);
+      }
+
+      // ── 로켓배송 감지 (수정) ────────────────
+      // 1) badge-rocket, rocket 관련 클래스
+      let isRocket = !!box.querySelector('.badge-rocket, [class*="badge-rocket"], [class*="rocket-icon"], [class*="RocketBadge"], [class*="rocket_icon"]');
+      if (!isRocket) {
+        // 2) 이미지 alt 또는 src에 rocket 포함
+        for (const imgEl of box.querySelectorAll('img')) {
+          const alt = (imgEl.alt || '').toLowerCase();
+          const src = (imgEl.src || imgEl.getAttribute('data-img-src') || '').toLowerCase();
+          if (/rocket|로켓/i.test(alt) || /rocket/i.test(src)) { isRocket = true; break; }
+        }
+      }
+      if (!isRocket) {
+        // 3) 텍스트 기반: 로켓배송, 로켓와우, 로켓프레시, 새벽 도착 보장
+        const boxText = tx(box);
+        isRocket = /로켓배송|로켓와우|로켓프레시|로켓직구|새벽\s*도착\s*보장/i.test(boxText);
+      }
+
+      const href = (link.href || '').startsWith('http') ? link.href : 'https://www.coupang.com' + (link.getAttribute('href') || '');
 
       items.push({
         productId: pid, title, price, rating, reviewCount,
-        url: href, imageUrl: img?.src || img?.getAttribute('data-img-src') || '',
+        url: href, imageUrl,
         position: items.length + 1, query: q, isAd, isRocket, _box: box,
       });
+    }
+
+    if (items.length > 0) {
+      console.log(`%c[SH] 파싱 상세: 가격>${items.filter(i=>i.price>0).length}, 평점>${items.filter(i=>i.rating>0).length}, 리뷰>${items.filter(i=>i.reviewCount>0).length}, 광고>${items.filter(i=>i.isAd).length}, 로켓>${items.filter(i=>i.isRocket).length}`, 'color:#6366f1;');
     }
     return items;
   }

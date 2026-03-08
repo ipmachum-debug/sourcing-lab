@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.0";
+const EXTENSION_VERSION = "5.5.1";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,9 +586,14 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.0",
+                    version: "v5.5.1",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: ["가격 파싱 수정: price-value 클래스 우선 추출 — g당/ml당 단위가격 제외", "평점 파싱 수정: em.rating 직접 조회 → 정확한 별점 수집", "리뷰수 파싱 수정: span.rating-total-count 직접 조회", "광고 감지 수정: search-product__ad-badge 클래스 + ad-badge 엘리먼트 + 텍스트 감지", "로켓배송 감지 수정: badge-rocket 클래스 + 이미지 alt + 텍스트 매칭 (새벽 도착 보장 포함)", "파싱 결과 디버그 로그 추가 (가격/평점/리뷰/광고/로켓 각 개수 출력)"],
+                  },
+                  {
+                    version: "v5.5.0",
+                    date: "2026-03-08",
                     changes: ["마켓 대시보드 패널 — 시장 분석 + 미니 차트 + TOP3", "시장 개요: 상품수·평균가·평점·평균리뷰·광고·로켓", "경쟁 강도 시각화: 점수 + 진행 바", "미니 차트: 가격 분포 히스토그램 + 리뷰 분포 히스토그램", "TOP3 상품만 간결 표시 (1688/Ali/저장 버튼)", "패널 드래그 이동 + 접기/펼치기"],
                   },
                   {
