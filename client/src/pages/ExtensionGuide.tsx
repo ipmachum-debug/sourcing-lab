@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.3.0";
+const EXTENSION_VERSION = "5.4.0";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,9 +586,14 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.3.0",
+                    version: "v5.4.0",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: ["셀록홈즈 스타일 플로팅 패널 — 검색 시 자동으로 오른쪽에 패널 표시", "모든 상품을 스크롤 가능한 리스트로 한눈에 확인", "상품별 소싱점수·가격·리뷰·1688·Ali·저장 버튼", "상품 클릭 시 쿠팡 페이지에서 해당 상품 하이라이트", "더보기 토글: 1688 키워드, 광고/로켓 여부 상세 확인", "요약 통계: 평균가·평균평점·평균리뷰·광고수·S등급수", "패널 드래그 이동 + 접기/펼치기 지원"],
+                  },
+                  {
+                    version: "v5.3.0",
+                    date: "2026-03-08",
                     changes: ["카드별 플로팅 UI — 상품마다 자동 오버레이 표시", "소싱점수 + 가격 + 리뷰 + 1688/저장 버튼", "상단 상태바로 파싱 현황 확인", "서버 자동 전송 (UI는 가볍게, 서버는 무겁게)", "history.pushState 오버라이드 제거 → 쿠팡 React 충돌 해결", "background.js SPA 재주입 제거 → 서비스워커 안정화"],
                   },
                   {

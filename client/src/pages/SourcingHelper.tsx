@@ -144,7 +144,7 @@ export default function SourcingHelper() {
               <span className="font-semibold text-sm">다운로드</span>
               <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-green-400 ml-auto transition-colors" />
             </div>
-            <p className="text-xs text-gray-500">Chrome 확장프로그램 v5.3.0</p>
+            <p className="text-xs text-gray-500">Chrome 확장프로그램 v5.4.0</p>
           </a>
           <button onClick={() => setLocation("/extension")}
             className="text-left border rounded-xl p-4 hover:shadow-md hover:border-emerald-200 transition-all bg-gradient-to-br from-emerald-50 to-white group relative">
