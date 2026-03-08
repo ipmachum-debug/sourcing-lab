@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.1.6";
+const EXTENSION_VERSION = "5.2.0";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,10 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.1.6",
+                    version: "v5.2.0",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["데이터바 표시 버그 수정 — !important CSS로 쿠팡 스타일 오버라이드", "데이터바 가시성 검증 + 자동 재배치 (overflow:hidden 회피)", "실시간 디버그 패널 (좌측 하단) — 파싱/삽입 상태 모니터링", "시그니처 체크 개선: 바 미삽입 시 재스캔 허용", "부모 체인 overflow 자동 해제 (3단계)"],
+                    changes: ["플로팅 바 UX로 전면 전환 — 쿠팡 DOM에 절대 삽입 안함", "화면 하단 고정 바: 상품 호버 시 자동 정보 표시", "클릭 한번으로 1688/알리 검색, AI 분석, 후보 저장", "상품 카드 하이라이트 (outline) 표시", "사이드패널 데이터 전송 유지"],
                   },
                   {
                     version: "v4.0.0",
