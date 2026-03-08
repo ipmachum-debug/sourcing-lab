@@ -1749,6 +1749,302 @@ export const extensionRouter = router({
 
       return { success: true, count: input.queries.length };
     }),
+
+  // ===== AI 인사이트 — 축적 데이터 기반 분석 =====
+
+  // AI 인사이트: 놓친 기회 + 파생상품 제안 + 종합 분석
+  aiInsights: protectedProcedure
+    .input(z.object({
+      forceRefresh: z.boolean().default(false),
+    }).default({}))
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 1. 모든 스냅샷 데이터 가져오기
+      const snapshots = await db.select()
+        .from(extSearchSnapshots)
+        .where(eq(extSearchSnapshots.userId, ctx.user!.id))
+        .orderBy(desc(extSearchSnapshots.createdAt));
+
+      // 2. 일별 통계 가져오기
+      const dailyStats = await db.select()
+        .from(extKeywordDailyStats)
+        .where(eq(extKeywordDailyStats.userId, ctx.user!.id))
+        .orderBy(desc(extKeywordDailyStats.statDate));
+
+      if (!snapshots.length) {
+        return {
+          missedOpportunities: [],
+          derivativeProducts: [],
+          competitorAlerts: [],
+          insights: [],
+          summary: "검색 데이터가 아직 없습니다. 쿠팡에서 키워드를 검색하면 데이터가 자동으로 축적됩니다.",
+        };
+      }
+
+      // 3. 데이터 분석 — 규칙 기반 인사이트 생성
+      const insights: any[] = [];
+      const missedOpportunities: any[] = [];
+      const derivativeProducts: any[] = [];
+      const competitorAlerts: any[] = [];
+
+      // 키워드별 최신 스냅샷 그룹핑
+      const keywordMap = new Map<string, any>();
+      for (const s of snapshots) {
+        if (!keywordMap.has(s.query)) keywordMap.set(s.query, s);
+      }
+
+      // 키워드별 일별 통계 그룹핑
+      const dailyMap = new Map<string, any[]>();
+      for (const d of dailyStats) {
+        if (!dailyMap.has(d.query)) dailyMap.set(d.query, []);
+        dailyMap.get(d.query)!.push(d);
+      }
+
+      for (const [keyword, snapshot] of keywordMap) {
+        let items: any[] = [];
+        try { items = snapshot.itemsJson ? JSON.parse(snapshot.itemsJson) : []; } catch { items = []; }
+
+        const daily = dailyMap.get(keyword) || [];
+        const totalItems = snapshot.totalItems || 0;
+        const avgPrice = snapshot.avgPrice || 0;
+        const avgReview = snapshot.avgReview || 0;
+        const competitionScore = snapshot.competitionScore || 0;
+        const adCount = snapshot.adCount || 0;
+        const adRatio = totalItems > 0 ? (adCount / totalItems) * 100 : 0;
+
+        // === 놓친 기회 분석 ===
+        // 경쟁이 낮고 리뷰가 적은 키워드 = 진입 기회
+        if (competitionScore < 40 && avgReview < 200 && totalItems > 10) {
+          missedOpportunities.push({
+            keyword,
+            reason: `경쟁도 ${competitionScore}점으로 낮고, 평균 리뷰 ${avgReview}건으로 신규 진입 적합`,
+            score: 100 - competitionScore,
+            type: "low_competition",
+            avgPrice,
+            totalItems,
+          });
+        }
+
+        // 광고가 많은데 경쟁도가 낮은 경우 = 광고비로 순위를 사는 시장
+        if (adRatio > 25 && competitionScore < 50) {
+          missedOpportunities.push({
+            keyword,
+            reason: `광고 비율 ${Math.round(adRatio)}%이지만 경쟁도 ${competitionScore}점 — 광고 없이 진입 가능`,
+            score: Math.round(90 - competitionScore * 0.5),
+            type: "ad_opportunity",
+            avgPrice,
+            totalItems,
+          });
+        }
+
+        // 평균가가 높은데 리뷰가 적은 = 고마진 기회
+        if (avgPrice > 20000 && avgReview < 300) {
+          missedOpportunities.push({
+            keyword,
+            reason: `평균가 ${avgPrice.toLocaleString()}원으로 마진이 높고, 평균 리뷰 ${avgReview}건으로 경쟁이 적음`,
+            score: Math.min(95, Math.round(avgPrice / 500)),
+            type: "high_margin",
+            avgPrice,
+            totalItems,
+          });
+        }
+
+        // === 파생 상품 제안 ===
+        if (items.length > 0) {
+          // 상위 상품 분석 → 공통 키워드 추출
+          const titleWords = new Map<string, number>();
+          for (const item of items.slice(0, 20)) {
+            const title = item.title || "";
+            // 2글자 이상의 한글 단어 추출
+            const words = title.match(/[가-힣]{2,}/g) || [];
+            for (const w of words) {
+              if (w === keyword || keyword.includes(w) || w.length < 2) continue;
+              // 불용어 제거
+              if (/세트|개입|세트입|묶음|패키지|특가|인기|추천|프리미엄|신상|무료배송|당일|국내|주방|용품/.test(w)) continue;
+              titleWords.set(w, (titleWords.get(w) || 0) + 1);
+            }
+          }
+
+          // 2회 이상 등장하는 단어 = 관련 파생 상품 후보
+          const relatedWords = [...titleWords.entries()]
+            .filter(([_, count]) => count >= 2)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5);
+
+          for (const [word, count] of relatedWords) {
+            derivativeProducts.push({
+              keyword,
+              suggestion: `${keyword} ${word}`,
+              alternativeKeyword: word,
+              confidence: Math.min(95, count * 15),
+              reason: `"${keyword}" 검색 상위 상품 ${count}개에서 "${word}" 발견 — 파생 키워드 검색 추천`,
+              occurrences: count,
+            });
+          }
+
+          // 가격 세그먼트 기반 파생 — 가격대가 넓으면 특정 가격대 상품 추천
+          const prices = items.map((i: any) => i.price).filter((p: number) => p > 0);
+          if (prices.length > 5) {
+            const minP = Math.min(...prices);
+            const maxP = Math.max(...prices);
+            if (maxP > minP * 3) {
+              // 가격 대역이 넓으면 저가/고가 니치 제안
+              derivativeProducts.push({
+                keyword,
+                suggestion: `${keyword} (저가형 ${minP.toLocaleString()}~${Math.round(avgPrice * 0.6).toLocaleString()}원)`,
+                confidence: 70,
+                reason: `가격 범위가 ${minP.toLocaleString()}~${maxP.toLocaleString()}원으로 넓음 — 저가 틈새 진입 가능`,
+                type: "price_niche_low",
+              });
+              derivativeProducts.push({
+                keyword,
+                suggestion: `${keyword} (프리미엄 ${Math.round(avgPrice * 1.5).toLocaleString()}원+)`,
+                confidence: 65,
+                reason: `프리미엄 세그먼트에 리뷰 강자가 적을 수 있음`,
+                type: "price_niche_high",
+              });
+            }
+          }
+        }
+
+        // === 경쟁자 알림 ===
+        // 리뷰 급증 감지 (일별 데이터 필요)
+        if (daily.length >= 2) {
+          const latest = daily[0];
+          const prev = daily[1];
+          if (Number(latest.totalReviewSum) > Number(prev.totalReviewSum) * 1.1) {
+            competitorAlerts.push({
+              keyword,
+              type: "review_surge",
+              message: `총 리뷰가 10%+ 급증 (${Number(prev.totalReviewSum).toLocaleString()} → ${Number(latest.totalReviewSum).toLocaleString()})`,
+              severity: "warning",
+            });
+          }
+          // 가격 변동 감지
+          const priceChange = (Number(latest.avgPrice) - Number(prev.avgPrice));
+          if (Math.abs(priceChange) > Number(prev.avgPrice) * 0.05) {
+            competitorAlerts.push({
+              keyword,
+              type: "price_change",
+              message: `평균가 ${priceChange > 0 ? "상승" : "하락"}: ${Number(prev.avgPrice).toLocaleString()}원 → ${Number(latest.avgPrice).toLocaleString()}원 (${priceChange > 0 ? "+" : ""}${priceChange.toLocaleString()}원)`,
+              severity: priceChange > 0 ? "info" : "warning",
+            });
+          }
+        }
+      }
+
+      // === 종합 인사이트 ===
+      const allCompetitions = [...keywordMap.values()].map(s => s.competitionScore || 0);
+      const avgCompetition = allCompetitions.length ? Math.round(allCompetitions.reduce((a: number, b: number) => a + b, 0) / allCompetitions.length) : 0;
+
+      if (avgCompetition < 40) {
+        insights.push({
+          type: "positive",
+          icon: "🎯",
+          title: "전체적으로 경쟁이 낮은 키워드들",
+          message: `평균 경쟁도 ${avgCompetition}점 — 현재 추적 키워드들은 대체로 진입 장벽이 낮습니다.`,
+        });
+      } else if (avgCompetition > 70) {
+        insights.push({
+          type: "warning",
+          icon: "⚠️",
+          title: "경쟁이 치열한 키워드가 많습니다",
+          message: `평균 경쟁도 ${avgCompetition}점 — 경쟁이 낮은 니치 키워드를 추가로 탐색하세요.`,
+        });
+      }
+
+      // 데이터 축적 안내
+      if (dailyStats.length < keywordMap.size * 2) {
+        insights.push({
+          type: "info",
+          icon: "📊",
+          title: "데이터 축적이 필요합니다",
+          message: `리뷰증가, 판매추정, 수요점수는 매일 쿠팡에서 검색할 때마다 데이터가 축적됩니다. 2~3일간 같은 키워드를 검색하면 추이 분석이 시작됩니다.`,
+        });
+      }
+
+      // 파생 상품 안내
+      if (derivativeProducts.length > 0) {
+        insights.push({
+          type: "suggestion",
+          icon: "💡",
+          title: `${derivativeProducts.length}개 파생 키워드 발견`,
+          message: `현재 추적 중인 키워드에서 ${derivativeProducts.length}개의 파생/유사 상품 키워드가 발견되었습니다.`,
+        });
+      }
+
+      const summary = [
+        `📦 ${keywordMap.size}개 키워드 분석 완료`,
+        missedOpportunities.length ? `🎯 놓친 기회 ${missedOpportunities.length}건` : "",
+        derivativeProducts.length ? `💡 파생상품 제안 ${derivativeProducts.length}건` : "",
+        competitorAlerts.length ? `⚠️ 경쟁자 알림 ${competitorAlerts.length}건` : "",
+      ].filter(Boolean).join(" · ");
+
+      return {
+        missedOpportunities: missedOpportunities.sort((a, b) => b.score - a.score).slice(0, 10),
+        derivativeProducts: derivativeProducts.sort((a, b) => b.confidence - a.confidence).slice(0, 15),
+        competitorAlerts: competitorAlerts.slice(0, 10),
+        insights,
+        summary,
+      };
+    }),
+
+  // 데이터 축적 상태 확인
+  dataAccumulationStatus: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 스냅샷별 날짜 분포 확인
+      const dateStats = await db.select({
+        statDate: extKeywordDailyStats.statDate,
+        count: sql<number>`COUNT(*)`,
+      })
+        .from(extKeywordDailyStats)
+        .where(eq(extKeywordDailyStats.userId, ctx.user!.id))
+        .groupBy(extKeywordDailyStats.statDate)
+        .orderBy(desc(extKeywordDailyStats.statDate))
+        .limit(30);
+
+      const snapshotCount = await db.select({
+        total: sql<number>`COUNT(*)`,
+        keywords: sql<number>`COUNT(DISTINCT \`query\`)`,
+      })
+        .from(extSearchSnapshots)
+        .where(eq(extSearchSnapshots.userId, ctx.user!.id));
+
+      const dayCount = dateStats.length;
+      const totalKeywords = Number(snapshotCount[0]?.keywords || 0);
+      const totalSnapshots = Number(snapshotCount[0]?.total || 0);
+
+      // 리뷰 증가가 0이 아닌 키워드 수
+      const withGrowth = await db.select({
+        count: sql<number>`COUNT(DISTINCT \`query\`)`,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          sql`review_growth > 0`,
+        ));
+
+      return {
+        dayCount,
+        totalKeywords,
+        totalSnapshots,
+        keywordsWithGrowth: Number(withGrowth[0]?.count || 0),
+        dates: dateStats.map(d => ({ date: d.statDate, count: Number(d.count) })),
+        explanation: {
+          reviewGrowth: "매일 같은 키워드를 검색하면, 전일 대비 리뷰 총합 증가량을 계산합니다. 최소 2일 이상 데이터가 필요합니다.",
+          salesEstimate: "리뷰증가 × 20으로 추정합니다. 리뷰 1건 = 약 20건 판매 (리뷰 작성률 약 5% 기준).",
+          demandScore: "판매추정량을 기반으로 0~100점으로 환산합니다. 판매추정 500+ = 90점, 200+ = 75점, 100+ = 60점.",
+          competitorMonitor: "같은 키워드의 일별 총 리뷰수·평균가 변동을 추적하여 경쟁자 동향을 파악합니다.",
+          rankChanges: "순위추적에 등록된 키워드만 해당. 검색할 때마다 각 상품의 순위를 기록합니다.",
+          rating: "검색 결과 페이지에서 별점을 파싱합니다. v5.6.1에서 12단계 전략으로 파싱 정확도를 대폭 향상했습니다.",
+        },
+      };
+    }),
 });
 
 // ============================================================

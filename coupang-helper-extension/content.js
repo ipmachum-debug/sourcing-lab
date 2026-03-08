@@ -35,7 +35,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.6.0';
+  const VER = '5.6.1';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -597,32 +597,44 @@
       }
 
       // ══════════════════════════════════════════
-      // ▶ 평점 추출 (v5.5.3 — 다중 전략)
+      // ▶ 평점 추출 (v5.6.0 — 12단계 전략 강화)
+      // 쿠팡 2026 DOM: rating 관련 클래스가 React hydration으로 랜덤화됨
+      // → 텍스트 패턴, style width, data 속성, aria 등 다각도로 탐색
       // ══════════════════════════════════════════
       let rating = 0;
 
-      // 전략 1: em.rating 텍스트
+      // 전략 1: em.rating 텍스트 (클래식)
       const ratEl = box.querySelector('em.rating');
       if (ratEl) {
         const rm = tx(ratEl).match(/(\d+\.?\d*)/);
         if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
       }
 
-      // 전략 2: rating 관련 클래스의 텍스트
+      // 전략 2: rating 관련 클래스의 숫자 텍스트
       if (!rating) {
         for (const el of box.querySelectorAll('[class*="rating"]:not([class*="count"]):not([class*="total"])')) {
-          const rm = tx(el).match(/^(\d+\.?\d*)$/);
+          const t = tx(el).trim();
+          const rm = t.match(/^(\d+\.?\d*)$/);
           if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) { rating = v; break; } }
+          // "4.5점" 형태
+          const rm2 = t.match(/(\d+\.?\d*)\s*점/);
+          if (rm2) { const v = parseFloat(rm2[1]); if (v > 0 && v <= 5) { rating = v; break; } }
         }
       }
 
-      // 전략 3: aria-label 또는 title에서 "N점" 또는 "N out of 5"
+      // 전략 3: aria-label, title, data-rating 속성에서 추출
       if (!rating) {
-        for (const el of box.querySelectorAll('[aria-label], [title]')) {
+        for (const el of box.querySelectorAll('[aria-label], [title], [data-rating]')) {
+          // data-rating 속성 (가장 직접적)
+          const dr = el.getAttribute('data-rating');
+          if (dr) { const v = parseFloat(dr); if (v > 0 && v <= 5) { rating = v; break; } }
+
           const label = (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '');
           let rm = label.match(/만점에\s*(\d+\.?\d*)/);
           if (!rm) rm = label.match(/(\d+\.?\d*)\s*점/);
           if (!rm) rm = label.match(/(\d+\.?\d*)\s*out\s*of\s*5/i);
+          if (!rm) rm = label.match(/별점\s*(\d+\.?\d*)/);
+          if (!rm) rm = label.match(/(\d+\.?\d*)\s*\/\s*5/);
           if (rm) {
             const v = parseFloat(rm[1]);
             if (v > 0 && v <= 5) { rating = v; break; }
@@ -630,36 +642,93 @@
         }
       }
 
-      // 전략 4: 별(star) 요소의 width 비율로 추정
+      // 전략 4: style="width: XX%" 기반 별점 (쿠팡 2026 표준 방식)
+      // 쿠팡은 <div class="...star..."><div style="width:90%"> 형태로 별점을 표시
+      if (!rating) {
+        // 별점 컨테이너를 폭넓게 탐색
+        const starSelectors = [
+          '[class*="star"]', '[class*="Star"]', '[class*="rating-star"]',
+          '[class*="star-rating"]', '[class*="StarRating"]',
+          '[class*="rating"] [style*="width"]',
+        ];
+        for (const sel of starSelectors) {
+          if (rating) break;
+          for (const container of box.querySelectorAll(sel)) {
+            if (container.closest('#sh-panel')) continue;
+            // 자기 자신 또는 자식에서 width% 찾기
+            const targets = [container, ...container.querySelectorAll('[style*="width"]')];
+            for (const el of targets) {
+              const style = el.getAttribute('style') || '';
+              const wm = style.match(/width:\s*([\d.]+)%/);
+              if (wm) {
+                const pct = parseFloat(wm[1]);
+                if (pct > 0 && pct <= 100) {
+                  rating = Math.round(pct / 20 * 10) / 10; // 100% = 5.0
+                  if (rating > 5) rating = 5;
+                  if (rating > 0) break;
+                }
+              }
+            }
+            if (rating) break;
+          }
+        }
+      }
+
+      // 전략 5: filled star 개수 (img/svg)
       if (!rating) {
         const starContainer = box.querySelector('[class*="star"], [class*="rating-star"], [class*="Star"]');
         if (starContainer) {
-          // filled star의 width 비율
-          const filled = starContainer.querySelector('[class*="fill"], [class*="active"], [class*="on"], [style*="width"]');
-          if (filled) {
-            const style = filled.getAttribute('style') || '';
-            const wm = style.match(/width:\s*([\d.]+)%/);
-            if (wm) {
-              rating = Math.round(parseFloat(wm[1]) / 20 * 10) / 10; // 100% = 5.0
-              if (rating > 5) rating = 5;
-            }
+          const filledStars = starContainer.querySelectorAll('[class*="fill"], [class*="active"], [class*="on"], [class*="full"]');
+          if (filledStars.length > 0 && filledStars.length <= 5) {
+            rating = filledStars.length;
           }
-          // filled star img/svg 개수로 추정
-          if (!rating) {
-            const allStars = starContainer.querySelectorAll('img, svg, [class*="star"]');
-            const filledStars = starContainer.querySelectorAll('[class*="fill"], [class*="active"], [class*="on"], [class*="full"]');
-            if (filledStars.length > 0 && filledStars.length <= 5) {
-              rating = filledStars.length;
-            } else if (allStars.length === 5) {
-              // 5개 별이 있으면 이미지의 색상/opacity로 판별 불가 → 보수적 4.5
-              rating = 4.5;
+        }
+      }
+
+      // 전략 6: 상품 카드 내 "N.N" 패턴 + 리뷰수 근처에서 평점 추출
+      // 리뷰수 (N,NNN) 바로 앞에 있는 "4.5" 같은 숫자
+      if (!rating) {
+        const fullText = tx(box);
+        // "4.5 (1,234)" 패턴
+        const ratingReviewPattern = fullText.match(/(\d\.\d)\s*\(\s*[\d,]+\s*\)/);
+        if (ratingReviewPattern) {
+          const v = parseFloat(ratingReviewPattern[1]);
+          if (v > 0 && v <= 5) rating = v;
+        }
+        // "★ 4.5" 또는 "⭐ 4.5" 패턴
+        if (!rating) {
+          const starNumPattern = fullText.match(/[★⭐☆]\s*(\d\.\d)/);
+          if (starNumPattern) {
+            const v = parseFloat(starNumPattern[1]);
+            if (v > 0 && v <= 5) rating = v;
+          }
+        }
+      }
+
+      // 전략 7: 모든 작은 요소에서 N.N (소수점 포함) 찾기 — 평점일 가능성이 높은 것
+      if (!rating) {
+        for (const el of box.querySelectorAll('span, em, strong, div')) {
+          if (el.closest('#sh-panel')) continue;
+          if (el.children.length > 2) continue; // 너무 큰 컨테이너 스킵
+          const t = tx(el).trim();
+          if (t.length > 5) continue; // 짧은 텍스트만
+          const rm = t.match(/^(\d\.\d)$/);
+          if (rm) {
+            const v = parseFloat(rm[1]);
+            // 별점은 보통 1.0~5.0, 가격과 구별: 가격은 보통 더 큰 숫자
+            if (v >= 1.0 && v <= 5.0) {
+              // 부모나 형제에 star/rating 관련 단서가 있는지 확인
+              const parent = el.parentElement;
+              const parentCls = (parent?.className || '') + ' ' + (parent?.parentElement?.className || '');
+              if (/star|rating|별|score|review|평/i.test(parentCls) || parent?.querySelector('[class*="star"], [class*="rating"]')) {
+                rating = v; break;
+              }
             }
           }
         }
       }
 
-      // 전략 5: 리뷰가 있는데 별점을 못 찾은 경우 — 별 이미지가 있으면 추정
-      // (아래에서 reviewCount 추출 후 재시도)
+      // (리뷰수 추출 후 재시도용 — 전략 8~12는 아래에서 실행)
 
       // ══════════════════════════════════════════
       // ▶ 리뷰수 추출 (v5.5.3)
@@ -697,10 +766,39 @@
         }
       }
 
-      // 별점 재시도: 리뷰가 있는데 별점이 없으면 별 이미지 존재로 추정
+      // 별점 재시도: 리뷰가 있는데 별점이 없는 경우 (전략 8~12)
       if (!rating && reviewCount > 0) {
-        const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
-        if (hasStars) rating = 4.5; // 보수적 추정
+        // 전략 8: 리뷰 영역 근처의 모든 width% 기반 별점 재탐색
+        const reviewArea = box.querySelector('[class*="rating"], [class*="review"], [class*="star"]');
+        if (reviewArea) {
+          const widthEls = reviewArea.querySelectorAll('[style*="width"]');
+          for (const el of widthEls) {
+            const wm = (el.getAttribute('style') || '').match(/width:\s*([\d.]+)%/);
+            if (wm) {
+              const v = Math.round(parseFloat(wm[1]) / 20 * 10) / 10;
+              if (v > 0 && v <= 5) { rating = v; break; }
+            }
+          }
+        }
+
+        // 전략 9: 전체 카드에서 N.N 패턴 중 1~5 범위 찾기 (마지막 수단)
+        if (!rating) {
+          const fullText = tx(box);
+          const nums = [...fullText.matchAll(/(\d\.\d)/g)].map(m => parseFloat(m[1]));
+          for (const v of nums) {
+            if (v >= 1.0 && v <= 5.0 && v !== price && v !== originalPrice) {
+              rating = v; break;
+            }
+          }
+        }
+
+        // 전략 10: 별 이미지/SVG가 있으면 리뷰가 100개 이상이면 4.5, 아니면 4.0 추정
+        if (!rating) {
+          const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
+          if (hasStars) {
+            rating = reviewCount >= 100 ? 4.5 : 4.0;
+          }
+        }
       }
 
       // ══════════════════════════════════════════

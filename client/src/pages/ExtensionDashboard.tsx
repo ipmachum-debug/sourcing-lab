@@ -59,7 +59,7 @@ function ChangeIndicator({ value }: { value: number | null }) {
   return <span className="flex items-center gap-0.5 text-red-600 text-xs font-bold"><ArrowDownRight className="w-3 h-3" />{value}</span>;
 }
 
-type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "reviews" | "notifications" | "history" | "wing";
+type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "insights" | "reviews" | "notifications" | "history" | "wing";
 
 export default function ExtensionDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -209,6 +209,17 @@ export default function ExtensionDashboard() {
     { query: demandSelectedKw || "", days: demandDays },
     { enabled: !!demandSelectedKw && activeTab === "demand" }
   );
+
+  // AI 인사이트
+  const aiInsights = trpc.extension.aiInsights.useQuery(
+    undefined,
+    { enabled: activeTab === "insights" || activeTab === "overview" }
+  );
+  const dataAccumulation = trpc.extension.dataAccumulationStatus.useQuery(
+    undefined,
+    { enabled: activeTab === "insights" }
+  );
+
   const computeStats = trpc.extension.computeKeywordDailyStats.useMutation({
     onSuccess: (data) => {
       keywordStatsList.refetch();
@@ -238,6 +249,7 @@ export default function ExtensionDashboard() {
   const tabs: { key: TabKey; label: string; icon: any; badge?: number }[] = [
     { key: "overview", label: "대시보드", icon: BarChart3 },
     { key: "demand", label: "검색 수요", icon: Activity },
+    { key: "insights", label: "AI 인사이트", icon: Lightbulb },
     { key: "trends", label: "트렌드", icon: TrendingUp },
     { key: "candidates", label: "소싱 후보", icon: Star },
     { key: "ranking", label: "순위 추적", icon: Target },
@@ -1059,6 +1071,125 @@ export default function ExtensionDashboard() {
                 </Card>
               </div>
             </div>
+          </>
+        )}
+
+
+        {/* ===== AI 인사이트 탭 ===== */}
+        {activeTab === "insights" && (
+          <>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Lightbulb className="w-5 h-5 text-yellow-500" /> AI 인사이트
+              </h2>
+              <Badge variant="outline" className="text-xs">{aiInsights.data?.summary || "데이터 분석 중..."}</Badge>
+            </div>
+
+            {dataAccumulation.data && (
+              <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="w-5 h-5 text-blue-500 mt-0.5 shrink-0" />
+                    <div className="space-y-2 w-full">
+                      <h3 className="font-bold text-sm text-blue-800">데이터 축적 현황</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { v: dataAccumulation.data.dayCount + "일", l: "축적 기간", c: "text-blue-700" },
+                          { v: dataAccumulation.data.totalKeywords + "개", l: "추적 키워드", c: "text-blue-700" },
+                          { v: dataAccumulation.data.totalSnapshots + "건", l: "총 스냅샷", c: "text-blue-700" },
+                          { v: dataAccumulation.data.keywordsWithGrowth + "개", l: "리뷰증가 감지", c: "text-green-700" },
+                        ].map((d, i) => (
+                          <div key={i} className="text-center">
+                            <div className={`text-xl font-bold ${d.c}`}>{d.v}</div>
+                            <div className="text-xs text-blue-500">{d.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 space-y-1 text-xs text-blue-600">
+                        <p><strong>리뷰증가:</strong> {dataAccumulation.data.explanation?.reviewGrowth}</p>
+                        <p><strong>판매추정:</strong> {dataAccumulation.data.explanation?.salesEstimate}</p>
+                        <p><strong>수요점수:</strong> {dataAccumulation.data.explanation?.demandScore}</p>
+                        <p><strong>평점 파싱:</strong> {dataAccumulation.data.explanation?.rating}</p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {aiInsights.data?.insights && (aiInsights.data.insights as any[]).length > 0 && (
+              <div className="space-y-2">
+                {(aiInsights.data.insights as any[]).map((ins: any, i: number) => (
+                  <Card key={i} className={`border-l-4 ${ins.type === "positive" ? "border-l-green-500 bg-green-50" : ins.type === "warning" ? "border-l-orange-500 bg-orange-50" : ins.type === "suggestion" ? "border-l-purple-500 bg-purple-50" : "border-l-blue-500 bg-blue-50"}`}>
+                    <CardContent className="p-3 flex items-start gap-2">
+                      <span className="text-lg">{ins.icon}</span>
+                      <div><h4 className="font-bold text-sm">{ins.title}</h4><p className="text-xs text-gray-600 mt-0.5">{ins.message}</p></div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {aiInsights.data?.missedOpportunities && (aiInsights.data.missedOpportunities as any[]).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold flex items-center gap-2"><Target className="w-4 h-4 text-green-500" /> 놓친 기회 ({(aiInsights.data.missedOpportunities as any[]).length}건)</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {(aiInsights.data.missedOpportunities as any[]).map((opp: any, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-green-50 rounded-lg border border-green-100">
+                      <div className="text-center shrink-0"><div className={`text-lg font-bold ${opp.score >= 80 ? "text-green-600" : "text-yellow-600"}`}>{opp.score}</div><div className="text-[10px] text-gray-500">점수</div></div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2"><span className="font-bold text-sm">"{opp.keyword}"</span><Badge variant="outline" className="text-[10px]">{opp.type === "low_competition" ? "낮은 경쟁" : opp.type === "ad_opportunity" ? "광고 기회" : "고마진"}</Badge></div>
+                        <p className="text-xs text-gray-600 mt-1">{opp.reason}</p>
+                        <div className="flex gap-3 mt-1 text-[10px] text-gray-400"><span>상품 {opp.totalItems}개</span><span>평균가 {(opp.avgPrice||0).toLocaleString()}원</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {aiInsights.data?.derivativeProducts && (aiInsights.data.derivativeProducts as any[]).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold flex items-center gap-2"><Zap className="w-4 h-4 text-purple-500" /> 파생 상품 제안 ({(aiInsights.data.derivativeProducts as any[]).length}건)</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {(aiInsights.data.derivativeProducts as any[]).map((prod: any, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-purple-50 rounded-lg border border-purple-100">
+                      <div className="text-center shrink-0"><div className="text-lg font-bold text-purple-600">{prod.confidence}%</div><div className="text-[10px] text-gray-500">신뢰도</div></div>
+                      <div className="flex-1">
+                        <div className="font-bold text-sm text-purple-800">{prod.suggestion} <a href={`https://www.coupang.com/np/search?q=${encodeURIComponent(prod.suggestion)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-purple-500 hover:text-purple-700 ml-1"><ExternalLink className="w-3 h-3" /></a></div>
+                        <p className="text-xs text-gray-600 mt-1">{prod.reason}</p>
+                        <div className="text-[10px] text-gray-400 mt-1">원본: "{prod.keyword}" {prod.occurrences ? `· ${prod.occurrences}회 출현` : ""}</div>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {aiInsights.data?.competitorAlerts && (aiInsights.data.competitorAlerts as any[]).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-500" /> 경쟁자 동향 ({(aiInsights.data.competitorAlerts as any[]).length}건)</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {(aiInsights.data.competitorAlerts as any[]).map((al: any, i: number) => (
+                    <div key={i} className={`flex items-start gap-3 p-3 rounded-lg border ${al.severity === "warning" ? "bg-orange-50 border-orange-100" : "bg-blue-50 border-blue-100"}`}>
+                      <span className="text-lg">{al.type === "review_surge" ? "📈" : "💰"}</span>
+                      <div><span className="font-bold text-sm">"{al.keyword}"</span><p className="text-xs text-gray-600 mt-0.5">{al.message}</p></div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className="bg-gradient-to-r from-gray-50 to-slate-50 border-gray-200">
+              <CardContent className="p-4 flex items-start gap-3">
+                <Shield className="w-5 h-5 text-gray-500 mt-0.5 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-sm text-gray-700">쿠팡 과거 데이터 추론</h4>
+                  <p className="text-xs text-gray-500 mt-1">쿠팡 검색 API는 현재 시점의 결과만 반환하며, 네트워크 응답에 과거 이력은 포함되지 않습니다. <strong>매일 검색하여 데이터를 축적</strong>하는 것이 유일한 방법입니다. 확장프로그램이 매 검색 시 자동으로 스냅샷을 저장하고, 전일 대비 리뷰증가·가격변동·순위변동을 계산합니다.</p>
+                  <p className="text-xs text-gray-500 mt-1"><strong>팁:</strong> 6시간마다 자동 순위 추적이 동작합니다. 더 정확한 데이터를 위해 매일 1~2회 관심 키워드를 검색해주세요.</p>
+                </div>
+              </CardContent>
+            </Card>
           </>
         )}
 

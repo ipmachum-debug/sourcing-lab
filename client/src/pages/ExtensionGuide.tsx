@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.6.0";
+const EXTENSION_VERSION = "5.6.1";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.6.zip";
 const EXTENSION_FILE_SIZE = "89KB";
 
