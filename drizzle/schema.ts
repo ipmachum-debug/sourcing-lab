@@ -543,3 +543,60 @@ export const extKeywordDailyStats = mysqlTable("ext_keyword_daily_stats", {
 
 export type ExtKeywordDailyStat = typeof extKeywordDailyStats.$inferSelect;
 export type InsertExtKeywordDailyStat = typeof extKeywordDailyStats.$inferInsert;
+
+// ==================== Extension: 내 상품 자동 추적 (ext_product_trackings) ====================
+// 등록/판매/데일리소싱 제품을 연결하여 자동 키워드 등록 및 일일 데이터 수집
+export const extProductTrackings = mysqlTable("ext_product_trackings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  sourceType: mysqlEnum("source_type", ["product", "candidate", "coupang_mapping", "manual"]).default("manual").notNull(),
+  sourceId: int("source_id"),
+  productName: varchar("product_name", { length: 500 }).notNull(),
+  coupangProductId: varchar("coupang_product_id", { length: 50 }),
+  coupangUrl: text("coupang_url"),
+  imageUrl: text("image_url"),
+  keywords: text("keywords"),                          // JSON array of keyword strings
+  latestPrice: int("latest_price").default(0),
+  latestRating: decimal("latest_rating", { precision: 3, scale: 1 }).default("0"),
+  latestReviewCount: int("latest_review_count").default(0),
+  latestRank: int("latest_rank").default(0),
+  latestRankKeyword: varchar("latest_rank_keyword", { length: 255 }),
+  priceChange: int("price_change").default(0),
+  reviewChange: int("review_change").default(0),
+  rankChange: int("rank_change").default(0),
+  competitorCount: int("competitor_count").default(0),
+  similarProductsJson: text("similar_products_json"),
+  competitorSummaryJson: text("competitor_summary_json"),
+  aiSuggestion: text("ai_suggestion"),
+  aiUpdatedAt: timestamp("ai_updated_at", tsOpts),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastTrackedAt: timestamp("last_tracked_at", tsOpts),
+  trackFrequency: mysqlEnum("track_frequency", ["daily", "weekly"]).default("daily").notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtProductTracking = typeof extProductTrackings.$inferSelect;
+export type InsertExtProductTracking = typeof extProductTrackings.$inferInsert;
+
+// ==================== Extension: 추적 상품 일일 스냅샷 (ext_product_daily_snapshots) ====================
+export const extProductDailySnapshots = mysqlTable("ext_product_daily_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  trackingId: int("tracking_id").notNull(),
+  snapshotDate: varchar("snapshot_date", { length: 10 }).notNull(),
+  price: int("price").default(0),
+  rating: decimal("rating", { precision: 3, scale: 1 }).default("0"),
+  reviewCount: int("review_count").default(0),
+  rankPosition: int("rank_position").default(0),
+  rankKeyword: varchar("rank_keyword", { length: 255 }),
+  competitorCount: int("competitor_count").default(0),
+  similarAvgPrice: int("similar_avg_price").default(0),
+  similarAvgReview: int("similar_avg_review").default(0),
+  adCount: int("ad_count").default(0),
+  dataJson: text("data_json"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type ExtProductDailySnapshot = typeof extProductDailySnapshots.$inferSelect;
+export type InsertExtProductDailySnapshot = typeof extProductDailySnapshots.$inferInsert;

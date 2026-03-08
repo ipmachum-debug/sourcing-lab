@@ -243,7 +243,7 @@ async function startServer() {
   // Deploy status check
   app.get("/api/deploy/status", (_req, res) => {
     res.json({
-      version: "5.6.0",
+      version: "5.7.0",
       deployed: new Date().toISOString(),
       node: process.version,
       uptime: process.uptime(),

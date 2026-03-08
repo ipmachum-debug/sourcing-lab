@@ -59,7 +59,7 @@ function ChangeIndicator({ value }: { value: number | null }) {
   return <span className="flex items-center gap-0.5 text-red-600 text-xs font-bold"><ArrowDownRight className="w-3 h-3" />{value}</span>;
 }
 
-type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "insights" | "reviews" | "notifications" | "history" | "wing";
+type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "insights" | "myproducts" | "reviews" | "notifications" | "history" | "wing";
 
 export default function ExtensionDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -220,6 +220,36 @@ export default function ExtensionDashboard() {
     { enabled: activeTab === "insights" }
   );
 
+  // 내 상품 추적
+  const productTrackings = trpc.extension.listProductTrackings.useQuery(
+    { activeOnly: true, limit: 50 },
+    { enabled: activeTab === "myproducts" || activeTab === "overview" }
+  );
+  const trackingOverview = trpc.extension.productTrackingOverview.useQuery(
+    undefined,
+    { enabled: activeTab === "myproducts" || activeTab === "overview" }
+  );
+  const [selectedTrackingId, setSelectedTrackingId] = useState<number | null>(null);
+  const trackingDetail = trpc.extension.getProductTrackingDetail.useQuery(
+    { id: selectedTrackingId || 0, days: 30 },
+    { enabled: !!selectedTrackingId && activeTab === "myproducts" }
+  );
+  const autoRegister = trpc.extension.autoRegisterTrackings.useMutation({
+    onSuccess: (data) => {
+      productTrackings.refetch(); trackingOverview.refetch();
+      toast.success(data.message || `${data.registered}개 상품 자동 등록`);
+    },
+    onError: (err: any) => toast.error(err.message || "자동 등록 실패"),
+  });
+  const removeTracking = trpc.extension.removeProductTracking.useMutation({
+    onSuccess: () => { productTrackings.refetch(); trackingOverview.refetch(); toast.success("추적 해제됨"); },
+    onError: (err: any) => toast.error(err.message || "추적 해제 실패"),
+  });
+  const analyzeTracked = trpc.extension.analyzeTrackedProduct.useMutation({
+    onSuccess: (data) => { productTrackings.refetch(); if (selectedTrackingId) trackingDetail.refetch(); toast.success("분석 완료"); },
+    onError: (err: any) => toast.error(err.message || "분석 실패"),
+  });
+
   const computeStats = trpc.extension.computeKeywordDailyStats.useMutation({
     onSuccess: (data) => {
       keywordStatsList.refetch();
@@ -252,6 +282,7 @@ export default function ExtensionDashboard() {
     { key: "insights", label: "AI 인사이트", icon: Lightbulb },
     { key: "trends", label: "트렌드", icon: TrendingUp },
     { key: "candidates", label: "소싱 후보", icon: Star },
+    { key: "myproducts", label: "내 상품 추적", icon: Package },
     { key: "ranking", label: "순위 추적", icon: Target },
     { key: "competitors", label: "경쟁자", icon: Users },
     { key: "ai", label: "AI 추천", icon: Brain },
@@ -2113,6 +2144,237 @@ export default function ExtensionDashboard() {
                     </table>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ===== 내 상품 추적 탭 ===== */}
+        {activeTab === "myproducts" && (
+          <>
+            {/* 상단 요약 카드 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <Card className="p-4">
+                <p className="text-xs text-gray-500 mb-1">추적 상품</p>
+                <p className="text-2xl font-bold text-indigo-600">{trackingOverview.data?.totalProducts || 0}</p>
+                <div className="flex gap-2 mt-1 text-[10px] text-gray-400">
+                  <span>소싱 {trackingOverview.data?.bySource?.product || 0}</span>
+                  <span>후보 {trackingOverview.data?.bySource?.candidate || 0}</span>
+                  <span>매핑 {trackingOverview.data?.bySource?.coupang_mapping || 0}</span>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-gray-500 mb-1">가격 변동</p>
+                <p className="text-2xl font-bold text-amber-600">{trackingOverview.data?.priceAlerts || 0}건</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-gray-500 mb-1">순위 변동</p>
+                <p className="text-2xl font-bold text-green-600">{trackingOverview.data?.rankAlerts || 0}건</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-gray-500 mb-1">리뷰 증가</p>
+                <p className="text-2xl font-bold text-blue-600">{trackingOverview.data?.reviewGrowing || 0}건</p>
+              </Card>
+            </div>
+
+            {/* 자동 등록 버튼 */}
+            <Card className="mb-4">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold flex items-center gap-2"><Zap className="w-4 h-4 text-amber-500" /> 자동 상품 추적</h3>
+                    <p className="text-xs text-gray-500 mt-1">소싱 상품, 소싱 후보, 쿠팡 매핑을 자동으로 추적에 등록합니다.</p>
+                  </div>
+                  <Button size="sm" onClick={() => autoRegister.mutate()} disabled={autoRegister.isPending} className="gap-1">
+                    <Zap className="w-3 h-3" /> {autoRegister.isPending ? "등록 중..." : "자동 등록 실행"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {selectedTrackingId && trackingDetail.data ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedTrackingId(null)} className="text-xs">← 목록</Button>
+                      {trackingDetail.data.tracking.productName}
+                    </CardTitle>
+                    <Button size="sm" variant="outline" onClick={() => analyzeTracked.mutate({ trackingId: selectedTrackingId })}
+                      disabled={analyzeTracked.isPending} className="gap-1 text-xs">
+                      <Brain className="w-3 h-3" /> AI 분석
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                    <div className="text-center p-3 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-500">가격</p>
+                      <p className="text-lg font-bold">{formatPrice(trackingDetail.data.tracking.latestPrice)}</p>
+                      <ChangeIndicator value={trackingDetail.data.tracking.priceChange} />
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-500">평점</p>
+                      <p className="text-lg font-bold">{trackingDetail.data.tracking.latestRating || '-'}</p>
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-500">리뷰</p>
+                      <p className="text-lg font-bold">{(trackingDetail.data.tracking.latestReviewCount || 0).toLocaleString()}</p>
+                      <ChangeIndicator value={trackingDetail.data.tracking.reviewChange} />
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-500">순위</p>
+                      <p className="text-lg font-bold">{trackingDetail.data.tracking.latestRank || '-'}위</p>
+                      <ChangeIndicator value={trackingDetail.data.tracking.rankChange} />
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-500">경쟁자</p>
+                      <p className="text-lg font-bold">{trackingDetail.data.tracking.competitorCount || 0}</p>
+                    </div>
+                  </div>
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">추적 키워드</p>
+                    <div className="flex flex-wrap gap-1">
+                      {(trackingDetail.data.tracking.keywords || []).map((kw: string) => (
+                        <Badge key={kw} variant="outline" className="text-xs">{kw}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                  {trackingDetail.data.history.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">일별 추이</p>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={trackingDetail.data.history}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                            <XAxis dataKey="snapshotDate" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <Tooltip />
+                            <Line type="monotone" dataKey="price" name="가격" stroke="#6366f1" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="reviewCount" name="리뷰" stroke="#10b981" strokeWidth={2} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+                  {trackingDetail.data.tracking.similarProducts?.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">경쟁/유사 상품 비교</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b bg-gray-50 text-gray-500">
+                            <th className="text-left p-2">#</th><th className="text-left p-2">상품명</th>
+                            <th className="text-center p-2">가격</th><th className="text-center p-2">리뷰</th>
+                            <th className="text-center p-2">광고</th><th className="text-center p-2">로켓</th>
+                          </tr></thead>
+                          <tbody>
+                            {trackingDetail.data.tracking.similarProducts.map((p: any, idx: number) => (
+                              <tr key={idx} className="border-b hover:bg-gray-50">
+                                <td className="p-2 font-bold">#{p.rank || idx + 1}</td>
+                                <td className="p-2 truncate max-w-[200px]">{p.title}</td>
+                                <td className="p-2 text-center">{formatPrice(p.price)}</td>
+                                <td className="p-2 text-center">{(p.reviewCount||0).toLocaleString()}</td>
+                                <td className="p-2 text-center">{p.isAd ? 'AD' : '-'}</td>
+                                <td className="p-2 text-center">{p.isRocket ? '🚀' : '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  {trackingDetail.data.tracking.aiSuggestion && (
+                    <div className="p-3 bg-amber-50 rounded border border-amber-200">
+                      <p className="text-xs font-semibold text-amber-700 mb-1 flex items-center gap-1"><Brain className="w-3 h-3" /> AI 제안</p>
+                      {trackingDetail.data.tracking.aiSuggestion.split('\n').map((line: string, i: number) => (
+                        <p key={i} className="text-xs text-amber-800 mb-0.5">• {line}</p>
+                      ))}
+                    </div>
+                  )}
+                  {trackingDetail.data.keywordStats.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">키워드별 시장 현황</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {trackingDetail.data.keywordStats.map((ks: any) => (
+                          <div key={ks.keyword} className="p-3 bg-gray-50 rounded border text-xs">
+                            <p className="font-semibold text-indigo-600 mb-1">"{ks.keyword}"</p>
+                            <div className="grid grid-cols-3 gap-1 text-gray-600">
+                              <span>경쟁도: {ks.competitionScore}</span>
+                              <span>평균가: {formatPrice(ks.avgPrice)}</span>
+                              <span>리뷰증가: {ks.reviewGrowth||0}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Package className="w-4 h-4" /> 추적 상품 목록
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b bg-gray-50 text-xs text-gray-500">
+                        <th className="text-left p-3">상품명</th><th className="text-center p-3">소스</th>
+                        <th className="text-center p-3">가격</th><th className="text-center p-3">리뷰</th>
+                        <th className="text-center p-3">순위</th><th className="text-center p-3">가격변동</th>
+                        <th className="text-center p-3">리뷰변동</th><th className="text-center p-3">경쟁자</th>
+                        <th className="text-center p-3">작업</th>
+                      </tr></thead>
+                      <tbody>
+                        {productTrackings.data?.length ? productTrackings.data.map((t: any) => (
+                          <tr key={t.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedTrackingId(t.id)}>
+                            <td className="p-3">
+                              <p className="font-medium text-indigo-600 truncate max-w-[200px]">{t.productName}</p>
+                              {t.coupangProductId && <p className="text-[10px] text-gray-400">ID: {t.coupangProductId}</p>}
+                            </td>
+                            <td className="p-3 text-center">
+                              <Badge variant="outline" className="text-[10px]">
+                                {{ product: '소싱', candidate: '후보', coupang_mapping: '매핑', manual: '수동' }[t.sourceType as string] || t.sourceType}
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-center text-xs">{formatPrice(t.latestPrice)}</td>
+                            <td className="p-3 text-center text-xs">{(t.latestReviewCount||0).toLocaleString()}</td>
+                            <td className="p-3 text-center text-xs">{t.latestRank > 0 ? `${t.latestRank}위` : '-'}</td>
+                            <td className="p-3 text-center"><ChangeIndicator value={t.priceChange} /></td>
+                            <td className="p-3 text-center"><ChangeIndicator value={t.reviewChange} /></td>
+                            <td className="p-3 text-center text-xs">{t.competitorCount||0}</td>
+                            <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500"
+                                onClick={() => { if(confirm('추적 해제?')) removeTracking.mutate({ id: t.id }); }}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={9} className="text-center py-8 text-gray-400">
+                            추적 중인 상품이 없습니다. "자동 등록 실행" 버튼을 눌러주세요.
+                          </td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className="mt-4">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 작동 방식</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-500">
+                  <div><p className="font-medium text-gray-700 mb-1">자동 등록</p>
+                    <p>• 소싱 상품/후보/쿠팡 매핑에서 자동 등록</p>
+                    <p>• 상품명에서 키워드 자동 추출</p></div>
+                  <div><p className="font-medium text-gray-700 mb-1">일일 자동 수집</p>
+                    <p>• 관련 키워드 검색 시 자동 매칭/수집</p>
+                    <p>• 가격/리뷰/순위 변동 → 알림 생성</p></div>
+                </div>
               </CardContent>
             </Card>
           </>
