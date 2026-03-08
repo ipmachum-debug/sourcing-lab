@@ -40,6 +40,56 @@ async function startServer() {
   // OAuth callback
   registerOAuthRoutes(app);
 
+  // Image proxy for 1688 image search (쿠팡 CDN → 공개 접근 가능 URL)
+  app.get("/api/image-proxy", async (req, res) => {
+    try {
+      const imageUrl = req.query.url as string;
+      if (!imageUrl) {
+        return res.status(400).json({ error: "url parameter required" });
+      }
+      // 쿠팡/허용된 도메인만 프록시
+      const allowed = [
+        "coupangcdn.com",
+        "thumbnail.coupangcdn.com",
+        "image.coupangcdn.com",
+        "img.coupang.com",
+        "coupang.com",
+      ];
+      const urlObj = new URL(imageUrl);
+      if (!allowed.some((d) => urlObj.hostname.endsWith(d))) {
+        return res.status(403).json({ error: "Domain not allowed" });
+      }
+
+      const response = await fetch(imageUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "image/*,*/*",
+          Referer: "https://www.coupang.com/",
+        },
+      });
+
+      if (!response.ok) {
+        return res
+          .status(response.status)
+          .json({ error: "Failed to fetch image" });
+      }
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      res.set({
+        "Content-Type": contentType,
+        "Content-Length": buffer.length.toString(),
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.send(buffer);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",

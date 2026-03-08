@@ -518,12 +518,14 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
   }
 
   // 3) 1688 이미지 검색 (매칭율 매우 높음!)
+  // 쿠팡 CDN 이미지는 1688에서 직접 접근 불가 → lumiriz.kr 프록시 경유
   if (imageUrl) {
+    const proxyUrl = `https://lumiriz.kr/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
     urls.push({
       platform: '1688',
       type: 'image',
       label: '📸 1688 이미지검색',
-      url: `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(imageUrl)}`,
+      url: `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(proxyUrl)}`,
       priority: 2,
     });
   }
