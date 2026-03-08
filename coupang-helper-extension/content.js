@@ -1,15 +1,49 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.1
+   Coupang Sourcing Helper — Content Script v5.1.3
    "모달 패널 UX" — 셀록홈즈/아이템스카우트 참고
 
-   v5.1: overlay→모달형 전환
+   v5.1.3: overlay→모달형 전환 + 버전 가드
    - 상품 카드: 하단 데이터바 + 우상단 점수 배지 (가림 없음)
    - 클릭시: 우측 고정 모달 패널 열림 (360px)
    - 모달: 상품정보 + 점수 + 1688/알리 + AI 사전매칭 + 저장
    - Auto Scan 유지
+   - v5.0 overlay 잔재 자동 정리
    ============================================================ */
 (function () {
-  console.log('%c[Coupang Sourcing Helper] v5.1.2 모달형 로드됨', 'color:#16a34a;font-weight:bold;font-size:14px;');
+  const SH_VERSION = '5.1.3';
+  const SH_UI_MODE = 'modal';
+
+  // ---- v5.0 잔재 자동 정리 (overlay 방식 제거) ----
+  (function cleanupOldVersion() {
+    // v5.0 overlay 스타일 제거
+    const oldStyle = document.getElementById('sh-overlay-styles');
+    if (oldStyle) oldStyle.remove();
+
+    // v5.0 overlay 요소들 제거
+    document.querySelectorAll('.sh-card-overlay, [data-sh-overlay]').forEach(el => {
+      el.remove();
+    });
+    document.querySelectorAll('[data-sh-overlay]').forEach(el => {
+      el.removeAttribute('data-sh-overlay');
+    });
+
+    // v5.0 backdrop 제거
+    document.querySelectorAll('.sh-overlay-backdrop').forEach(el => el.remove());
+
+    console.log(`%c[SH] v${SH_VERSION} — 이전 버전 잔재 정리 완료`, 'color:#f59e0b;font-size:11px;');
+  })();
+
+  // ---- 중복 실행 방지 ----
+  if (window.__SH_CONTENT_LOADED__) {
+    console.log(`%c[SH] content.js 이미 로드됨 (v${window.__SH_CONTENT_VERSION__}), 스킵`, 'color:#f59e0b;font-size:12px;');
+    return;
+  }
+  window.__SH_CONTENT_LOADED__ = true;
+  window.__SH_CONTENT_VERSION__ = SH_VERSION;
+  window.__SH_UI_MODE__ = SH_UI_MODE;
+
+  console.log(`%c[Coupang Sourcing Helper] v${SH_VERSION} 모달형 로드됨`, 'color:#16a34a;font-weight:bold;font-size:14px;');
+  console.log(`%c[SH] UI 모드: ${SH_UI_MODE} | overlay 코드 없음`, 'color:#6366f1;font-size:11px;');
   const MAX_ITEMS = 36;
   const BADGE_ATTR = 'data-sh-badge';
   let debounceTimer = null;
@@ -1131,4 +1165,12 @@
     pageType: 'search',
     url: location.href,
   }).catch(() => {});
+
+  // ---- 버전 워터마크 (개발 확인용, 5초 후 자동 사라짐) ----
+  const vBadge = document.createElement('div');
+  vBadge.id = 'sh-version-badge';
+  vBadge.textContent = `SH v${SH_VERSION} (${SH_UI_MODE})`;
+  vBadge.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:999999;background:#16a34a;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;font-family:monospace;opacity:0.85;pointer-events:none;transition:opacity 0.5s;';
+  document.body.appendChild(vBadge);
+  setTimeout(() => { vBadge.style.opacity = '0'; setTimeout(() => vBadge.remove(), 600); }, 5000);
 })();

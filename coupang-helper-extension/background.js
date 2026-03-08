@@ -21,7 +21,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v5.1 — reloaded coupang tabs`);
+    console.log(`[SH] Extension ${details.reason}d — v5.1.3 — reloaded coupang tabs`);
   }
 });
 

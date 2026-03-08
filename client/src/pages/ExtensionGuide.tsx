@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.1.0";
+const EXTENSION_VERSION = "5.1.3";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
-const EXTENSION_FILE_SIZE = "55KB";
+const EXTENSION_FILE_SIZE = "79KB";
 
 function AccordionSection({
   icon: Icon,
@@ -586,10 +586,10 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.1.0",
+                    version: "v5.1.3",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["데이터 시트(스프레드시트) 탭 추가", "스마트 소싱 매칭: 1688 중국어/이미지/AIBUY + AliExpress + Taobao", "한→중/영 자동 번역 (300+ 카테고리 사전 + Google Translate)", "키워드 수동 편집 + 멀티 플랫폼 소싱 팝업", "CSV/Excel 내보내기"],
+                    changes: ["모달형 UX 전환 (셀록홈즈/아이템스카우트 참고)", "AI 사전매칭 엔진: 상품명→1688 검색어 자동 생성", "상품카드 하단 데이터바 + 우상단 점수 배지", "우측 고정 모달 패널 (360px) — 상품 분석 + 1688/알리 + AI", "v5.0 잔재 자동 정리 + 버전 가드 시스템"],
                   },
                   {
                     version: "v4.0.0",
