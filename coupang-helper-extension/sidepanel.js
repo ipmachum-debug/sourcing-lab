@@ -25,38 +25,17 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   }
 });
 
-// 탭 URL이 변경될 때 자동 새로고침 (SPA 내부 navigation 포함)
+// v5.3.1: 탭 URL 변경 시 — executeScript 제거, 데이터 갱신만
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.url && tab.active) {
-    // 쿠팡 검색 페이지로 이동한 경우
-    if (changeInfo.url.includes('coupang.com/np/search')) {
-      // 살짝 딜레이를 줘서 content script가 파싱을 완료할 시간 확보
-      setTimeout(async () => {
-        const response = await getResults(tabId);
-        if (response?.data) {
-          // URL의 query와 data의 query가 일치하는지 검증
-          const urlQuery = extractQueryFromUrl(changeInfo.url);
-          if (!response.data.query || response.data.query !== urlQuery) {
-            // 불일치: content script에 재파싱 요청
-            try {
-              await chrome.scripting.executeScript({
-                target: { tabId },
-                func: () => { document.dispatchEvent(new Event('visibilitychange')); }
-              });
-            } catch (e) { }
-            // 약간 대기 후 다시 시도
-            setTimeout(async () => {
-              const retry = await getResults(tabId);
-              renderAnalysis(retry?.data || null);
-              if ($('#tab-datasheet')?.classList.contains('active')) renderDataSheet();
-            }, 1500);
-          } else {
-            renderAnalysis(response.data);
-            if ($('#tab-datasheet')?.classList.contains('active')) renderDataSheet();
-          }
-        }
-      }, 1000);
-    }
+  if (changeInfo.url && tab.active && changeInfo.url.includes('coupang.com/np/search')) {
+    // content.js가 자체적으로 URL 변경 감지하므로 여기서는 대기 후 데이터만 가져옴
+    setTimeout(async () => {
+      const response = await getResults(tabId);
+      if (response?.data) {
+        renderAnalysis(response.data);
+        if ($('#tab-datasheet')?.classList.contains('active')) renderDataSheet();
+      }
+    }, 2000);
   }
 });
 
@@ -1399,51 +1378,10 @@ async function refreshFromCurrentTab() {
   if (!tab?.id) return;
   lastActiveTabId = tab.id;
 
-  // 쿠팡 검색 페이지인 경우만 content script에 재파싱 요청
-  if (tab.url?.includes('coupang.com/np/search')) {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => { document.dispatchEvent(new Event('visibilitychange')); }
-      });
-    } catch (e) {
-      // content script가 아직 로드되지 않은 경우 — 직접 주입 시도
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['content.js']
-        });
-      } catch (e2) { }
-    }
-  }
-
+  // v5.3.1: executeScript 제거 — content.js가 자체적으로 파싱하고 메시지 보냄
+  // 여기서는 저장된 데이터만 가져옴
   const response = await getResults(tab.id);
   const data = response?.data || null;
-
-  // URL의 query와 데이터의 query 일치 검증
-  if (data && tab.url?.includes('coupang.com/np/search')) {
-    const urlQuery = extractQueryFromUrl(tab.url);
-    if (urlQuery && data.query && urlQuery !== data.query) {
-      // 데이터가 오래된 것 — content script에 강제 재파싱 요청 후 다시 조회
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            // 시그니처 초기화 강제
-            document.dispatchEvent(new CustomEvent('force-reparse'));
-            document.dispatchEvent(new Event('visibilitychange'));
-          }
-        });
-      } catch (e) { }
-      // 1.5초 후 다시 시도
-      setTimeout(async () => {
-        const retry = await getResults(tab.id);
-        renderAnalysis(retry?.data || data);
-      }, 1500);
-      return;
-    }
-  }
-
   renderAnalysis(data);
 }
 
