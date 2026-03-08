@@ -955,10 +955,30 @@
   // ============================================================
   function parseProductsLegacy() {
     const products = [];
-    const nodes = Array.from(document.querySelectorAll(
-      'li.search-product, li[class*="search-product"], [data-sentry-component="ProductUnit"], div[class*="search-product"]'
-    ));
-    if (!nodes.length) return products;
+    // 쿠팡 검색 결과 셀렉터 (2026년 기준, 여러 변형 시도)
+    const selectors = [
+      'li.search-product',
+      'li[class*="search-product"]',
+      '[data-sentry-component="ProductUnit"]',
+      'div[class*="search-product"]',
+      'li[data-product-id]',
+      'li[data-item-id]',
+      'li[data-vendor-item-id]',
+      // React/Next.js 기반 쿠팡 셀렉터
+      'ul[class*="product"] > li',
+      'div[class*="ProductList"] > div',
+      'div[class*="productList"] > div',
+    ];
+    let nodes = [];
+    for (const sel of selectors) {
+      nodes = Array.from(document.querySelectorAll(sel));
+      if (nodes.length >= 3) break;
+    }
+    if (!nodes.length) {
+      console.log(`%c[SH] parseProductsLegacy: 모든 셀렉터 실패`, 'color:#f59e0b;font-size:11px;');
+      return products;
+    }
+    console.log(`%c[SH] parseProductsLegacy: ${nodes.length}개 노드 발견`, 'color:#6366f1;font-size:11px;');
     const query = getQuery();
     for (const node of nodes) {
       if (products.length >= MAX_ITEMS) break;
@@ -1028,25 +1048,62 @@
 
   // ---- 파싱 헬퍼 ----
   function findProductContainer(link) {
+    // 1차: data-product-id 속성이 있는 부모
     let el = link.parentElement, depth = 0;
-    while (el && depth < 8) {
+    let candidate = null;
+    
+    while (el && depth < 10) {
       const tag = el.tagName.toLowerCase();
-      const cls = el.className || '';
-      if (['ul','ol','main','body','section'].includes(tag)) {
-        return el === link.parentElement ? null : link.parentElement;
-      }
+      const cls = (el.className || '').toString();
+      
+      // 최상위 리스트 컨테이너에 도달하면 중지
+      if (['body','main','section','header','footer','nav'].includes(tag)) break;
+
+      // data 속성으로 상품 컨테이너 감지
+      if (el.dataset?.productId || el.dataset?.itemId || el.dataset?.vendorItemId) return el;
+      
+      // li 태그 (가장 일반적인 상품 카드)
       if (tag === 'li' && el.parentElement && ['UL','OL'].includes(el.parentElement.tagName)) return el;
+      
+      // article 태그
       if (tag === 'article') return el;
-      if (tag === 'div' && el.parentElement) {
-        const sibs = el.parentElement.children;
-        let ct = 0;
-        for (const s of sibs) if (s.tagName === el.tagName) ct++;
-        if (ct >= 3 && el.querySelector('a[href*="/vp/products/"]')) return el;
+      
+      // 클래스명으로 감지
+      if (cls && /product|item|card|result|unit|baby-product/i.test(cls) && depth >= 1) return el;
+
+      // div이고 형제가 3개 이상 (같은 구조 반복 = 리스트 아이템)
+      if (tag === 'div' && el.parentElement && depth >= 1) {
+        const parent = el.parentElement;
+        const sibs = parent.children;
+        let sameTags = 0;
+        for (const s of sibs) if (s.tagName === el.tagName) sameTags++;
+        if (sameTags >= 3) {
+          // 이 div가 product link를 포함하고 있으면 확정
+          if (el.querySelector('a[href*="/vp/products/"]')) return el;
+        }
       }
-      if (cls && /product|item|card|result|unit/i.test(cls) && depth >= 1) return el;
-      if (el.dataset?.productId || el.dataset?.itemId) return el;
-      el = el.parentElement; depth++;
+      
+      // ul/ol 자체에 도달하면 한 단계 아래 li를 확인
+      if (['ul','ol'].includes(tag)) {
+        // link를 포함하는 li 찾기
+        const liParent = link.closest('li');
+        if (liParent && el.contains(liParent)) return liParent;
+        break;
+      }
+
+      candidate = el; // 마지막 유효 후보
+      el = el.parentElement; 
+      depth++;
     }
+    
+    // fallback: link에서 가장 가까운 li
+    const closestLi = link.closest('li');
+    if (closestLi) return closestLi;
+    
+    // fallback 2: 후보가 있으면 사용
+    if (candidate) return candidate;
+    
+    // fallback 3: 3단계 위
     let fb = link;
     for (let i = 0; i < 3 && fb.parentElement; i++) fb = fb.parentElement;
     return fb;
@@ -1126,13 +1183,25 @@
 
     // 각 상품 카드에 데이터바 + 배지 삽입
     let insertedCount = 0;
+    let skippedCount = 0;
+    const usedContainers = new Set();
     for (const item of allParsedItems) {
       if (item._container) {
+        if (usedContainers.has(item._container)) {
+          skippedCount++;
+          continue;
+        }
+        usedContainers.add(item._container);
         insertDataBar(item._container, item, allParsedItems);
         insertedCount++;
       }
     }
-    console.log(`%c[SH] ✅ 데이터바 삽입: ${insertedCount}/${allParsedItems.length}개`, 'color:#16a34a;font-weight:bold;font-size:12px;');
+    console.log(`%c[SH] ✅ 데이터바 삽입: ${insertedCount}개 (중복컨테이너 스킵: ${skippedCount}개) / 전체 ${allParsedItems.length}개`, 'color:#16a34a;font-weight:bold;font-size:12px;');
+    if (allParsedItems.length > 0 && insertedCount === 0) {
+      console.log('%c[SH] ⚠️ 데이터바 0개 삽입 — 컨테이너 디버그:', 'color:#dc2626;font-size:12px;');
+      const sample = allParsedItems[0];
+      console.log('[SH] 첫번째 상품:', sample.title?.substring(0, 30), '컨테이너:', sample._container?.tagName, sample._container?.className?.toString()?.substring(0, 80));
+    }
 
     // background에도 데이터 전달 (사이드패널 호환)
     const cleanItems = allParsedItems.map(({ _container, ...rest }) => rest);
