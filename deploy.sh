@@ -3,11 +3,11 @@
 # Sourcing Lab — 프로덕션 배포 스크립트
 # 사용법: 
 #   서버에서 직접: bash deploy.sh
-#   원격에서:      ssh -p 2222 root@lumiriz.kr "cd /opt/sourcing-lab && bash deploy.sh"
+#   원격에서:      ssh -p 2222 root@lumiriz.kr "cd /root/sourcing-lab && bash deploy.sh"
 # ============================================================
 
 set -e
-cd /opt/sourcing-lab
+cd /root/sourcing-lab
 
 echo "==============================="
 echo " Sourcing Lab Deploy Script"
@@ -50,4 +50,4 @@ echo "==============================="
 
 # Verify
 sleep 2
-curl -s http://localhost:3000/api/deploy/status 2>&1 || echo "(status check pending...)"
+curl -s http://localhost:3003/api/deploy/status 2>&1 || echo "(status check pending...)"
