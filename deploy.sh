@@ -22,11 +22,15 @@ git pull origin main 2>&1
 echo "[2/5] Installing dependencies..."
 pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1
 
-# 3. Run DB migration (if new migration exists)
+# 3. Run DB migrations (if new migration exists)
 echo "[3/5] Checking DB migrations..."
 if [ -f drizzle/0008_keyword_daily_stats.sql ]; then
   echo "  Applying 0008_keyword_daily_stats.sql..."
   mysql -u root sourcing_lab < drizzle/0008_keyword_daily_stats.sql 2>&1 || echo "  (already applied or skipped)"
+fi
+if [ -f drizzle/0009_product_tracking.sql ]; then
+  echo "  Applying 0009_product_tracking.sql..."
+  mysql -u root sourcing_lab < drizzle/0009_product_tracking.sql 2>&1 || echo "  (already applied or skipped)"
 fi
 
 # 4. Build
