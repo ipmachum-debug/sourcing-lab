@@ -22,6 +22,7 @@ import CoupangManager from "./pages/CoupangManager";
 import SourcingHelper from "./pages/SourcingHelper";
 import ExtensionDashboard from "./pages/ExtensionDashboard";
 import ExtensionGuide from "./pages/ExtensionGuide";
+import Manual from "./pages/Manual";
 
 function Router() {
   return (
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/sourcing-helper" component={SourcingHelper} />
       <Route path="/extension" component={ExtensionDashboard} />
       <Route path="/extension-guide" component={ExtensionGuide} />
+      <Route path="/manual" component={Manual} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

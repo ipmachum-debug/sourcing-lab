@@ -35,6 +35,7 @@ const menuItems = [
   { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢" },
   { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "📊" },
   { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "📦" },
+  { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖" },
   { icon: Package, label: "전체 상품", path: "/products", emoji: "📦" },
   { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪" },
   { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅" },
