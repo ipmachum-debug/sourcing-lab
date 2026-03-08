@@ -497,10 +497,11 @@ async function translateKoToEn(text) {
   return '';
 }
 
-// 1688/타오바오용 키워드 인코딩 (GBK 사이트이므로 encodeURIComponent 사용하면 깨짐)
-// 공백만 +로 치환하고 나머지는 브라우저가 처리하도록 그대로 전달
+// 1688 키워드 인코딩: encodeURIComponent + ie=utf8 파라미터로 UTF-8 모드 사용
+// 기존: raw 문자열 → 브라우저가 GBK로 재인코딩 → 깨짐
+// 수정: encodeURIComponent로 %xx 인코딩 + ie=utf8로 서버에 UTF-8 명시
 function encode1688(keyword) {
-  return keyword.replace(/\s+/g, '+');
+  return encodeURIComponent(keyword);
 }
 
 // 소싱 검색 URL 생성기
@@ -513,7 +514,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688',
       type: 'keyword_cn',
       label: '🇨🇳 1688 (중국어)',
-      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(cnKeyword)}`,
+      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(cnKeyword)}&ie=utf8`,
       priority: 1,
     });
   }
@@ -524,7 +525,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688',
       type: 'keyword_ko',
       label: '🔍 1688 (한국어)',
-      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(koKeyword)}`,
+      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(koKeyword)}&ie=utf8`,
       priority: 3,
     });
   }
@@ -551,7 +552,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688_aibuy',
       type: 'aibuy',
       label: '🤖 1688 AIBUY',
-      url: `https://aibuy.1688.com/search?keywords=${encode1688(koKeyword)}`,
+      url: `https://aibuy.1688.com/search?keywords=${encode1688(koKeyword)}&ie=utf8`,
       priority: 2,
     });
   }
@@ -573,7 +574,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: 'taobao',
       type: 'keyword_cn',
       label: '🛒 Taobao',
-      url: `https://s.taobao.com/search?q=${encode1688(cnKeyword)}`,
+      url: `https://s.taobao.com/search?q=${encode1688(cnKeyword)}&ie=utf8`,
       priority: 5,
     });
   }
@@ -586,6 +587,28 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       label: '🌐 AliExpress (한)',
       url: `https://ko.aliexpress.com/wholesale?SearchText=${encodeURIComponent(koKeyword)}`,
       priority: 5,
+    });
+  }
+
+  // 8) CNINSIDER 한국어 검색 (1688 공식 한국 파트너, 한국어로 1688 소싱)
+  if (koKeyword) {
+    urls.push({
+      platform: 'cninsider',
+      type: 'keyword_ko',
+      label: '🇰🇷 CNINSIDER (한국어)',
+      url: `https://www.cninsider.co.kr/mall/#/searchPage?keyword=${encodeURIComponent(koKeyword)}`,
+      priority: 2,
+    });
+  }
+
+  // 9) CNINSIDER 중국어 검색
+  if (cnKeyword) {
+    urls.push({
+      platform: 'cninsider',
+      type: 'keyword_cn',
+      label: '🇨🇳 CNINSIDER (중국어)',
+      url: `https://www.cninsider.co.kr/mall/#/searchPage?keyword=${encodeURIComponent(cnKeyword)}`,
+      priority: 2,
     });
   }
 
@@ -658,7 +681,7 @@ async function showSourcingPopup(title, imageUrl, anchorEl) {
       </div>
       ${imageUrl ? `<div class="sp-image-preview"><img src="${imageUrl}" /><span>이미지 검색 가능</span></div>` : ''}
       <div class="sp-links" id="sourcingLinks"></div>
-      <div class="sp-tip">💡 <strong>매칭율 팁:</strong> 중국어 키워드 > 이미지검색 > AIBUY > 한국어 순으로 정확합니다.</div>
+      <div class="sp-tip">💡 <strong>매칭율 팁:</strong> 중국어 키워드 > 이미지검색 > CNINSIDER/AIBUY > 한국어 순으로 정확합니다.</div>
     </div>
   `;
 
@@ -680,7 +703,7 @@ async function showSourcingPopup(title, imageUrl, anchorEl) {
       if (l.needsCacheResolve && imageUrl) {
         if (cachedImageUrl) {
           // 이미 캐시된 URL이 있으면 바로 사용
-          l.url = `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(cachedImageUrl)}`;
+          l.url = `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(cachedImageUrl)}&ie=utf8`;
           l.label = '📸 1688 이미지검색';
         } else {
           // 아직 캐시 중이면 로딩 표시
@@ -1808,7 +1831,7 @@ function renderAIProducts(products, container) {
               ${p.keywords.english ? `<span class="ai-keyword-tag en" onclick="navigator.clipboard.writeText('${p.keywords.english}').then(()=>this.style.opacity='0.5')" title="클릭하여 복사">🇺🇸 ${p.keywords.english}</span>` : ''}
             </div>
             <div class="ai-search-btns">
-              ${p.keywords.chinese ? `<button class="ai-search-btn btn-1688" onclick="window.open('https://s.1688.com/selloffer/offer_search.htm?keywords='+'${p.keywords.chinese}'.replace(/\\s+/g,'+'))">1688 검색</button>` : ''}
+              ${p.keywords.chinese ? `<button class="ai-search-btn btn-1688" onclick="window.open('https://s.1688.com/selloffer/offer_search.htm?keywords='+encodeURIComponent('${p.keywords.chinese}')+'&ie=utf8')">1688 검색</button>` : ''}
               ${p.keywords.english ? `<button class="ai-search-btn btn-ali" onclick="window.open('https://www.aliexpress.com/wholesale?SearchText='+encodeURIComponent('${p.keywords.english}'))">AliExpress</button>` : ''}
               ${p.keywords.korean ? `<button class="ai-search-btn" onclick="window.open('https://www.coupang.com/np/search?q='+encodeURIComponent('${p.keywords.korean}'))">쿠팡 검색</button>` : ''}
             </div>
@@ -2196,7 +2219,7 @@ function updateDsSelectionBar() {
           searchTerm = await translateKoToCn(keywords.ko);
         }
         if (!searchTerm) searchTerm = keywords.ko;
-        chrome.tabs.create({ url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${searchTerm.replace(/\s+/g, '+')}` });
+        chrome.tabs.create({ url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(searchTerm)}&ie=utf8` });
       }
     });
 

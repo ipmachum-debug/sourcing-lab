@@ -1643,6 +1643,13 @@ header h1 {
 }
 .sp-link-taobao:hover { background: #fff3e0; }
 
+.sp-link-cninsider {
+  background: linear-gradient(135deg, #1a73e8, #4285f4);
+  color: white;
+  border-color: #1a73e8;
+}
+.sp-link-cninsider:hover { background: linear-gradient(135deg, #1558b0, #1a73e8); }
+
 .sp-tip {
   padding: 8px 10px;
   background: #fffbeb;

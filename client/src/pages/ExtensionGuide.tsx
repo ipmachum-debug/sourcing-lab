@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.5";
+const EXTENSION_VERSION = "5.5.6";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.5.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,9 +586,21 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.5",
+                    version: "v5.5.6",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: [
+                      "1688 UTF-8 모드: 모든 1688 URL에 &ie=utf8 추가 → encodeURIComponent + ie=utf8로 완벽한 UTF-8 인코딩",
+                      "검색어 기반 소싱 키워드: 쿠팡 검색어 + 제목 수식어 조합 (예: '부모님 용돈봉투', '게이밍 마우스패드')",
+                      "CNINSIDER 연동: 1688 공식 한국 파트너 사이트 검색 링크 추가 (한국어/중국어)",
+                      "소싱 팝업에 CNINSIDER 한국어/중국어 검색 링크 표시",
+                      "AI 분석·대량검색·소싱팝업 모든 1688 URL ie=utf8 적용",
+                      "Taobao URL도 ie=utf8 적용",
+                    ],
+                  },
+                  {
+                    version: "v5.5.5",
+                    date: "2026-03-08",
                     changes: ["1688 URL 인코딩 버그 수정: encodeURIComponent 제거 (GBK 호환)", "1688은 GBK 인코딩 사용 — UTF-8 percent-encoding이 깨지는 문제 해결", "중국어/한국어 키워드를 raw 문자열으로 전달 (공백만 +로 치환)", "콘텐츠 스크립트 + 사이드패널 + 대량검색 + AI분석 모두 수정", "이미지 검색 URL은 encodeURIComponent 유지 (이미지 URL은 UTF-8 정상)"],
                   },
                   {
