@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v4.5
+   Coupang Sourcing Helper — Background Service Worker v4.6
    세션 스토리지 관리 + 검색 히스토리 + 순위 추적 + 상세 파싱 + 서버 동기화
    + 순위 변동 알림 + 자동 순위 체크 + WING 인기상품 데이터 수집
    + 소싱 코치 (점수/마진/리스크/뱃지)
@@ -401,7 +401,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== AI 소싱 코치 v4.5 (WING 인기상품 AI 분석) =====
+    // ===== AI 소싱 코치 v4.6 (WING 인기상품 AI 분석) =====
     case 'AI_ANALYZE_WING': {
       apiClient.aiAnalyzeWing(message.data).then((resp) => {
         const data = resp?.result?.data;

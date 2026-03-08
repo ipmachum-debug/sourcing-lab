@@ -1,7 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Side Panel Logic v4.5
+   Coupang Sourcing Helper — Side Panel Logic v4.6
    AI 소싱 코치 시스템: AI 분석 · 점수 · 뱃지 · 키워드 · 마진 · 리스크
-   v4.5: WING 인기상품 AI 분석 + 초보 셀러 가이드형 소싱 시스템
+   v4.6: WING 인기상품 AI 분석 + 초보 셀러 가이드형 소싱 시스템
    ============================================================ */
 
 // ---- State ----
@@ -317,6 +317,12 @@ const KO_TO_CN = {
   '치약': '牙膏', '칫솔': '牙刷', '면도기': '剃须刀',
   '빗': '梳子', '거울': '镜子', '바구니': '篮子', '정리함': '收纳盒',
   '수납': '收纳', '선반': '架子', '후크': '挂钩', '행거': '衣架',
+  // 청소용품
+  '수세미': '百洁布', '스펀지': '海绵', '솔': '刷子', '청소': '清洁',
+  '걸레': '拖把', '먼지': '灰尘', '먼지떨이': '鸡毛掸子', '빗자루': '扫帚',
+  '쓰레받기': '簸箕', '세제': '洗涤剂', '세탁': '洗衣', '표백': '漂白',
+  '락스': '漂白剂', '스크럽': '百洁刷', '행주': '抹布', '극세사': '超细纤维',
+  '다용도': '多用途', '실리콘': '硅胶', '세척': '清洗',
   // 주방
   '냄비': '锅', '프라이팬': '平底锅', '도마': '砧板', '칼': '刀',
   '접시': '盘子', '그릇': '碗', '젓가락': '筷子', '숟가락': '勺子',
@@ -377,6 +383,11 @@ const KO_TO_CN = {
 const KO_TO_EN = {
   '텀블러': 'tumbler', '물병': 'water bottle', '보온병': 'thermos',
   '수건': 'towel', '비누': 'soap', '칫솔': 'toothbrush',
+  // 청소용품
+  '수세미': 'scrub sponge', '스펀지': 'sponge', '솔': 'brush', '청소': 'cleaning',
+  '걸레': 'mop', '세제': 'detergent', '세탁': 'laundry', '행주': 'dishcloth',
+  '극세사': 'microfiber', '다용도': 'multi-purpose', '실리콘': 'silicone', '세척': 'washing',
+  '스크럽': 'scrub',
   '충전기': 'charger', '케이블': 'cable', '이어폰': 'earphone',
   '블루투스': 'bluetooth', '스피커': 'speaker', '마우스': 'mouse',
   '키보드': 'keyboard', '보조배터리': 'power bank', '거치대': 'phone stand',
@@ -518,15 +529,18 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
   }
 
   // 3) 1688 이미지 검색 (매칭율 매우 높음!)
-  // 쿠팡 CDN 이미지는 1688에서 직접 접근 불가 → lumiriz.kr 프록시 경유
+  // 쿠팡 CDN 이미지는 1688에서 직접 접근 불가 → 서버에 캐시 후 공개 URL 사용
   if (imageUrl) {
-    const proxyUrl = `https://lumiriz.kr/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+    // 캐시 API를 통해 서버에 이미지를 저장하고 공개 URL을 받아옴
+    const cacheApiUrl = `https://lumiriz.kr/api/image-cache?url=${encodeURIComponent(imageUrl)}`;
     urls.push({
       platform: '1688',
       type: 'image',
       label: '📸 1688 이미지검색',
-      url: `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(proxyUrl)}`,
+      url: cacheApiUrl, // 나중에 비동기로 실제 URL 교체됨
+      imageUrl: imageUrl, // 원본 URL 보관
       priority: 2,
+      needsCacheResolve: true, // 캐시 URL 비동기 resolve 필요
     });
   }
 
@@ -650,15 +664,33 @@ async function showSourcingPopup(title, imageUrl, anchorEl) {
   document.body.appendChild(popup);
 
   // 링크 렌더
-  function refreshSourcingLinks() {
+  let cachedImageUrl = null; // 서버에 캐시된 이미지 URL
+
+  async function refreshSourcingLinks() {
     const ko = document.getElementById('sourcingKoInput')?.value || '';
     const cn = document.getElementById('sourcingCnInput')?.value || '';
     const en = document.getElementById('sourcingEnInput')?.value || '';
     const links = buildSourcingUrls(ko, cn, en, imageUrl);
     const container = document.getElementById('sourcingLinks');
     if (!container) return;
+
+    // 이미지 캐시 resolve - 1688 이미지검색 링크를 실제 캐시 URL로 교체
+    for (const l of links) {
+      if (l.needsCacheResolve && imageUrl) {
+        if (cachedImageUrl) {
+          // 이미 캐시된 URL이 있으면 바로 사용
+          l.url = `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageUrl=${encodeURIComponent(cachedImageUrl)}`;
+          l.label = '📸 1688 이미지검색';
+        } else {
+          // 아직 캐시 중이면 로딩 표시
+          l.url = '#';
+          l.label = '📸 1688 이미지검색 (준비 중...)';
+        }
+      }
+    }
+
     container.innerHTML = links.map(l => `
-      <a href="${l.url}" target="_blank" rel="noreferrer" class="sp-link sp-link-${l.platform}">
+      <a href="${l.url}" target="_blank" rel="noreferrer" class="sp-link sp-link-${l.platform}" ${l.url === '#' ? 'style="opacity:0.5;pointer-events:none"' : ''}>
         <span class="sp-link-label">${l.label}</span>
         <span class="sp-link-arrow">→</span>
       </a>
@@ -666,6 +698,25 @@ async function showSourcingPopup(title, imageUrl, anchorEl) {
   }
 
   refreshSourcingLinks();
+
+  // 비동기로 이미지 캐시 URL 획득
+  if (imageUrl) {
+    (async () => {
+      try {
+        const cacheResp = await fetch(`https://lumiriz.kr/api/image-cache?url=${encodeURIComponent(imageUrl)}`);
+        const cacheData = await cacheResp.json();
+        if (cacheData.success && cacheData.url) {
+          cachedImageUrl = cacheData.url;
+          refreshSourcingLinks(); // 캐시 URL로 링크 업데이트
+        }
+      } catch (e) {
+        console.warn('Image cache failed:', e);
+        // 실패시 프록시 URL 폴백
+        cachedImageUrl = `https://lumiriz.kr/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+        refreshSourcingLinks();
+      }
+    })();
+  }
 
   // 이벤트 바인딩
   document.getElementById('spClose').onclick = () => popup.remove();
@@ -1540,7 +1591,7 @@ $('#clearWingBtn').addEventListener('click', async () => {
 });
 
 // ============================================================
-//  AI 소싱 코치 분석 시스템 (v4.5)
+//  AI 소싱 코치 분석 시스템 (v4.6)
 // ============================================================
 
 let _aiAnalyzing = false;

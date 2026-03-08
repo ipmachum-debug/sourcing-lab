@@ -2,6 +2,9 @@ import "./env"; // dotenv is loaded here before ENV is used
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -40,14 +43,34 @@ async function startServer() {
   // OAuth callback
   registerOAuthRoutes(app);
 
-  // Image proxy for 1688 image search (쿠팡 CDN → 공개 접근 가능 URL)
+  // ============================================================
+  // Image proxy & cache for 1688 image search
+  // 쿠팡 CDN 이미지를 다운로드 → 서버에 캐시 → 공개 URL 제공
+  // 1688은 Alibaba 이미지만 직접 인식하므로, 우리 서버에서 접근 가능한 URL을 만들어야 함
+  // ============================================================
+
+  // 캐시 디렉토리 생성
+  const imageCacheDir = path.join(process.cwd(), "dist", "public", "image-cache");
+  if (!fs.existsSync(imageCacheDir)) {
+    fs.mkdirSync(imageCacheDir, { recursive: true });
+  }
+
+  // 정적 파일 서빙 (이미지 캐시)
+  app.use("/image-cache", express.static(imageCacheDir, {
+    maxAge: "7d",
+    setHeaders: (res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Cache-Control", "public, max-age=604800");
+    },
+  }));
+
+  // 1) 기본 이미지 프록시 (스트리밍) - 직접 이미지 전달
   app.get("/api/image-proxy", async (req, res) => {
     try {
       const imageUrl = req.query.url as string;
       if (!imageUrl) {
         return res.status(400).json({ error: "url parameter required" });
       }
-      // 쿠팡/허용된 도메인만 프록시
       const allowed = [
         "coupangcdn.com",
         "thumbnail.coupangcdn.com",
@@ -85,6 +108,85 @@ async function startServer() {
         "Access-Control-Allow-Origin": "*",
       });
       res.send(buffer);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 2) 이미지 캐시 API - 쿠팡 이미지를 서버에 저장 후 공개 URL 반환
+  //    1688이 이 URL을 직접 접근할 수 있음
+  app.get("/api/image-cache", async (req, res) => {
+    try {
+      const imageUrl = req.query.url as string;
+      if (!imageUrl) {
+        return res.status(400).json({ error: "url parameter required" });
+      }
+      const allowed = [
+        "coupangcdn.com",
+        "thumbnail.coupangcdn.com",
+        "image.coupangcdn.com",
+        "img.coupang.com",
+        "coupang.com",
+      ];
+      const urlObj = new URL(imageUrl);
+      if (!allowed.some((d) => urlObj.hostname.endsWith(d))) {
+        return res.status(403).json({ error: "Domain not allowed" });
+      }
+
+      // URL 해시로 캐시 키 생성
+      const hash = crypto.createHash("md5").update(imageUrl).digest("hex");
+      const ext = imageUrl.match(/\.(jpe?g|png|gif|webp)/i)?.[1] || "jpg";
+      const filename = `${hash}.${ext}`;
+      const filepath = path.join(imageCacheDir, filename);
+
+      // 이미 캐시된 경우 바로 URL 반환
+      if (fs.existsSync(filepath)) {
+        const publicUrl = `https://lumiriz.kr/image-cache/${filename}`;
+        return res.json({ success: true, url: publicUrl, cached: true });
+      }
+
+      // 쿠팡에서 이미지 다운로드
+      const response = await fetch(imageUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "image/*,*/*",
+          Referer: "https://www.coupang.com/",
+        },
+      });
+
+      if (!response.ok) {
+        return res
+          .status(response.status)
+          .json({ error: "Failed to fetch image from Coupang" });
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(filepath, buffer);
+
+      const publicUrl = `https://lumiriz.kr/image-cache/${filename}`;
+      return res.json({ success: true, url: publicUrl, cached: false });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 3) 캐시 정리 (7일 이상 된 파일 삭제) - 주기적 호출용
+  app.get("/api/image-cache/cleanup", async (_req, res) => {
+    try {
+      const maxAge = 7 * 24 * 60 * 60 * 1000; // 7일
+      const now = Date.now();
+      let cleaned = 0;
+      const files = fs.readdirSync(imageCacheDir);
+      for (const file of files) {
+        const fp = path.join(imageCacheDir, file);
+        const stat = fs.statSync(fp);
+        if (now - stat.mtimeMs > maxAge) {
+          fs.unlinkSync(fp);
+          cleaned++;
+        }
+      }
+      res.json({ success: true, cleaned, remaining: files.length - cleaned });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
