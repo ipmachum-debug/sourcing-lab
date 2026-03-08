@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.1";
+const EXTENSION_VERSION = "5.5.2";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,15 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.1",
+                    version: "v5.5.2",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["가격 파싱 수정: price-value 클래스 우선 추출 — g당/ml당 단위가격 제외", "평점 파싱 수정: em.rating 직접 조회 → 정확한 별점 수집", "리뷰수 파싱 수정: span.rating-total-count 직접 조회", "광고 감지 수정: search-product__ad-badge 클래스 + ad-badge 엘리먼트 + 텍스트 감지", "로켓배송 감지 수정: badge-rocket 클래스 + 이미지 alt + 텍스트 매칭 (새벽 도착 보장 포함)", "파싱 결과 디버그 로그 추가 (가격/평점/리뷰/광고/로켓 각 개수 출력)"],
+                    changes: ["파싱 엔진 전면 재작성: 클래스 기반 → 텍스트 패턴 기반 (React SPA 호환)", "가격: 적립금(최대N원적립)·단위가격(g당/ml당)·배송비 제거 후 판매가만 추출", "평점: aria-label + ★ 카운트 + em.rating 다중 방법", "리뷰: 괄호 안 숫자 (N,NNN) 패턴으로 정확 추출", "광고: AD텍스트 + ad-badge클래스 + 광고서비스문구 3중 감지", "순위: 상품 이미지 위 1,2,3 배지 번호 감지", "로켓: badge-rocket + 이미지alt + 새벽도착보장 + 내일도착보장", "TOP3: 광고 제외, 실제 순위(rankNum) 기반 선별", "디버그: 처음 3개 상품 상세 로그 출력"],
+                  },
+                  {
+                    version: "v5.5.1",
+                    date: "2026-03-08",
+                    changes: ["가격 파싱 수정 시도 (price-value 클래스)", "평점/리뷰/광고/로켓 클래스 기반 수정 시도"],
                   },
                   {
                     version: "v5.5.0",
