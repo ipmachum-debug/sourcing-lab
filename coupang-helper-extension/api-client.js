@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Server API Client v4.4
+   Coupang Sourcing Helper — Server API Client v4.5
    lumiriz.kr 서버와 통신하는 API 클라이언트
    + AI 소싱 코치 분석 엔드포인트
    ============================================================ */
@@ -143,7 +143,7 @@ class ApiClient {
     return this._call('sourcingCoach.getExchangeRate', undefined, 'query');
   }
 
-  // ===== AI 소싱 코치 v4.4 (WING 인기상품 AI 분석) =====
+  // ===== AI 소싱 코치 v4.5 (WING 인기상품 AI 분석) =====
   async aiAnalyzeWing(data) {
     return this._call('sourcingCoach.aiAnalyzeWing', data, 'mutation');
   }
