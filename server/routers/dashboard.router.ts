@@ -4,6 +4,9 @@ import { products, weeklyReviews, dailySales, coupangAccounts, cpDailySales, cpD
 import { eq, desc, sql, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
+/** Drizzle-ORM returns decimal/SUM results as string — always coerce to number */
+function N(v: any): number { return Number(v) || 0; }
+
 function getCurrentWeekKey(): string {
   const d = new Date();
   const onejan = new Date(d.getFullYear(), 0, 1);
@@ -126,7 +129,22 @@ export const dashboardRouter = router({
       const userId = ctx.user.id;
       const today = new Date().toISOString().split("T")[0];
 
-      // 오늘
+      // 이번 주 (월~일)
+      const d = new Date();
+      const day = d.getDay();
+      const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      const weekStart = mon.toISOString().split("T")[0];
+      const weekEnd = sun.toISOString().split("T")[0];
+
+      // 이번 달
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+      // Coerce decimal string results
       const [dailyResult] = await db
         .select({
           totalQuantity: sql<number>`COALESCE(SUM(${dailySales.quantity}), 0)`,
@@ -135,14 +153,6 @@ export const dashboardRouter = router({
         })
         .from(dailySales)
         .where(and(eq(dailySales.userId, userId), eq(dailySales.saleDate, today)));
-
-      // 이번 주 (월~일)
-      const d = new Date();
-      const day = d.getDay();
-      const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-      const weekStart = mon.toISOString().split("T")[0];
-      const weekEnd = sun.toISOString().split("T")[0];
 
       const [weeklyResult] = await db
         .select({
@@ -156,13 +166,6 @@ export const dashboardRouter = router({
           sql`${dailySales.saleDate} >= ${weekStart}`,
           sql`${dailySales.saleDate} <= ${weekEnd}`
         ));
-
-      // 이번 달
-      const year = d.getFullYear();
-      const month = d.getMonth() + 1;
-      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-      const lastDay = new Date(year, month, 0).getDate();
-      const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
       const [monthlyResult] = await db
         .select({
@@ -179,21 +182,21 @@ export const dashboardRouter = router({
 
       return {
         daily: {
-          totalQuantity: dailyResult?.totalQuantity || 0,
-          totalRevenue: dailyResult?.totalRevenue || 0,
-          totalProfit: dailyResult?.totalProfit || 0,
+          totalQuantity: N(dailyResult?.totalQuantity),
+          totalRevenue: N(dailyResult?.totalRevenue),
+          totalProfit: N(dailyResult?.totalProfit),
           label: today,
         },
         weekly: {
-          totalQuantity: weeklyResult?.totalQuantity || 0,
-          totalRevenue: weeklyResult?.totalRevenue || 0,
-          totalProfit: weeklyResult?.totalProfit || 0,
+          totalQuantity: N(weeklyResult?.totalQuantity),
+          totalRevenue: N(weeklyResult?.totalRevenue),
+          totalProfit: N(weeklyResult?.totalProfit),
           label: `${weekStart} ~ ${weekEnd}`,
         },
         monthly: {
-          totalQuantity: monthlyResult?.totalQuantity || 0,
-          totalRevenue: monthlyResult?.totalRevenue || 0,
-          totalProfit: monthlyResult?.totalProfit || 0,
+          totalQuantity: N(monthlyResult?.totalQuantity),
+          totalRevenue: N(monthlyResult?.totalRevenue),
+          totalProfit: N(monthlyResult?.totalProfit),
           label: `${year}년 ${month}월`,
         },
       };
@@ -274,16 +277,16 @@ export const dashboardRouter = router({
         activeCount,
         hasActiveApi: activeCount > 0,
         today: {
-          qty: todaySales?.qty || 0,
-          grossSales: todaySales?.grossSales || 0,
-          orders: todaySales?.orders || 0,
+          qty: N(todaySales?.qty),
+          grossSales: N(todaySales?.grossSales),
+          orders: N(todaySales?.orders),
         },
         monthly: {
-          qty: monthlySales?.qty || 0,
-          grossSales: monthlySales?.grossSales || 0,
-          orders: monthlySales?.orders || 0,
-          payout: monthlySettle?.payout || 0,
-          commission: monthlySettle?.commission || 0,
+          qty: N(monthlySales?.qty),
+          grossSales: N(monthlySales?.grossSales),
+          orders: N(monthlySales?.orders),
+          payout: N(monthlySettle?.payout),
+          commission: N(monthlySettle?.commission),
           label: `${year}년 ${month}월`,
         },
         lastSync: lastSync || null,

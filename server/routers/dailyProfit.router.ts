@@ -6,6 +6,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 // ──────────── helpers ────────────
+/** Drizzle-ORM returns decimal/SUM results as string — always coerce to number */
+function N(v: any): number { return Number(v) || 0; }
+
 function getMarginMap(margins: any[], productIds: number[]) {
   const marginMap = new Map<number, { sellPrice: string; margin: string }>();
   for (const pid of productIds) {
@@ -123,12 +126,20 @@ export const dailyProfitRouter = router({
         .groupBy(dailySales.saleDate)
         .orderBy(dailySales.saleDate);
 
+      // Coerce decimal string results to numbers
+      const coerced = results.map(r => ({
+        saleDate: r.saleDate,
+        totalQuantity: N(r.totalQuantity),
+        totalRevenue: N(r.totalRevenue),
+        totalProfit: N(r.totalProfit),
+      }));
+
       const grandTotal = {
-        totalQuantity: results.reduce((s, r) => s + (r.totalQuantity || 0), 0),
-        totalRevenue: results.reduce((s, r) => s + (r.totalRevenue || 0), 0),
-        totalProfit: results.reduce((s, r) => s + (r.totalProfit || 0), 0),
+        totalQuantity: coerced.reduce((s, r) => s + r.totalQuantity, 0),
+        totalRevenue: coerced.reduce((s, r) => s + r.totalRevenue, 0),
+        totalProfit: coerced.reduce((s, r) => s + r.totalProfit, 0),
       };
-      return { daily: results, grandTotal };
+      return { daily: coerced, grandTotal };
     }),
 
   // ==================== 4) 주간 리포트 (상품별) ====================
@@ -178,16 +189,24 @@ export const dailyProfitRouter = router({
         .groupBy(dailySales.saleDate)
         .orderBy(dailySales.saleDate);
 
+      // Coerce daily breakdown
+      const daily = dailyRows.map(d => ({
+        saleDate: d.saleDate,
+        totalQuantity: N(d.totalQuantity),
+        totalRevenue: N(d.totalRevenue),
+        totalProfit: N(d.totalProfit),
+      }));
+
       const items = productRows.map((r) => ({
         productId: r.productId,
         productName: productNames.get(r.productId)?.name || "Unknown",
         category: productNames.get(r.productId)?.category || null,
-        totalQuantity: r.totalQuantity || 0,
-        totalRevenue: r.totalRevenue || 0,
-        totalProfit: r.totalProfit || 0,
-        avgMargin: Math.round(r.avgMargin || 0),
-        avgSellPrice: Math.round(r.avgSellPrice || 0),
-        salesDays: r.salesDays || 0,
+        totalQuantity: N(r.totalQuantity),
+        totalRevenue: N(r.totalRevenue),
+        totalProfit: N(r.totalProfit),
+        avgMargin: Math.round(N(r.avgMargin)),
+        avgSellPrice: Math.round(N(r.avgSellPrice)),
+        salesDays: N(r.salesDays),
       }));
 
       const grandTotal = {
@@ -196,7 +215,7 @@ export const dailyProfitRouter = router({
         totalProfit: items.reduce((s, i) => s + i.totalProfit, 0),
       };
 
-      return { startDate: input.startDate, endDate: input.endDate, items, daily: dailyRows, grandTotal };
+      return { startDate: input.startDate, endDate: input.endDate, items, daily, grandTotal };
     }),
 
   // ==================== 5) 월간 리포트 ====================
@@ -251,16 +270,26 @@ export const dailyProfitRouter = router({
         .groupBy(sql`CONCAT(YEAR(${dailySales.saleDate}), '-W', LPAD(WEEK(${dailySales.saleDate}, 1), 2, '0'))`)
         .orderBy(sql`MIN(${dailySales.saleDate})`);
 
+      // Coerce weekly breakdown
+      const weekly = weeklyRows.map(w => ({
+        weekNum: w.weekNum,
+        weekStart: w.weekStart,
+        weekEnd: w.weekEnd,
+        totalQuantity: N(w.totalQuantity),
+        totalRevenue: N(w.totalRevenue),
+        totalProfit: N(w.totalProfit),
+      }));
+
       const items = productRows.map((r) => ({
         productId: r.productId,
         productName: productNames.get(r.productId)?.name || "Unknown",
         category: productNames.get(r.productId)?.category || null,
-        totalQuantity: r.totalQuantity || 0,
-        totalRevenue: r.totalRevenue || 0,
-        totalProfit: r.totalProfit || 0,
-        avgMargin: Math.round(r.avgMargin || 0),
-        avgSellPrice: Math.round(r.avgSellPrice || 0),
-        salesDays: r.salesDays || 0,
+        totalQuantity: N(r.totalQuantity),
+        totalRevenue: N(r.totalRevenue),
+        totalProfit: N(r.totalProfit),
+        avgMargin: Math.round(N(r.avgMargin)),
+        avgSellPrice: Math.round(N(r.avgSellPrice)),
+        salesDays: N(r.salesDays),
       }));
 
       const grandTotal = {
@@ -269,7 +298,7 @@ export const dailyProfitRouter = router({
         totalProfit: items.reduce((s, i) => s + i.totalProfit, 0),
       };
 
-      return { year: input.year, month: input.month, startDate, endDate, items, weekly: weeklyRows, grandTotal };
+      return { year: input.year, month: input.month, startDate, endDate, items, weekly, grandTotal };
     }),
 
   // ==================== 6) 연간 리포트 ====================
@@ -320,15 +349,23 @@ export const dailyProfitRouter = router({
         .groupBy(sql`MONTH(${dailySales.saleDate})`)
         .orderBy(sql`MONTH(${dailySales.saleDate})`);
 
+      // Coerce monthly breakdown
+      const monthly = monthlyRows.map(m => ({
+        monthNum: N(m.monthNum),
+        totalQuantity: N(m.totalQuantity),
+        totalRevenue: N(m.totalRevenue),
+        totalProfit: N(m.totalProfit),
+      }));
+
       const items = productRows.map((r) => ({
         productId: r.productId,
         productName: productNames.get(r.productId)?.name || "Unknown",
         category: productNames.get(r.productId)?.category || null,
-        totalQuantity: r.totalQuantity || 0,
-        totalRevenue: r.totalRevenue || 0,
-        totalProfit: r.totalProfit || 0,
-        avgMargin: Math.round(r.avgMargin || 0),
-        salesDays: r.salesDays || 0,
+        totalQuantity: N(r.totalQuantity),
+        totalRevenue: N(r.totalRevenue),
+        totalProfit: N(r.totalProfit),
+        avgMargin: Math.round(N(r.avgMargin)),
+        salesDays: N(r.salesDays),
       }));
 
       const grandTotal = {
@@ -337,7 +374,7 @@ export const dailyProfitRouter = router({
         totalProfit: items.reduce((s, i) => s + i.totalProfit, 0),
       };
 
-      return { year: input.year, items, monthly: monthlyRows, grandTotal };
+      return { year: input.year, items, monthly, grandTotal };
     }),
 
   // ==================== 7) 다운로드용 상세 데이터 (기간별) ====================
