@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coupang Search Helper</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header>
+      <h1>쿠팡 검색 도우미</h1>
+      <p id="summary">검색 결과를 기다리는 중…</p>
+    </header>
+
+    <section class="actions">
+      <button id="refreshBtn">현재 탭 다시 읽기</button>
+    </section>
+
+    <section>
+      <ul id="results"></ul>
+    </section>
+
+    <template id="itemTemplate">
+      <li class="item">
+        <div class="meta">
+          <div class="position"></div>
+          <div class="title"></div>
+          <div class="sub"></div>
+          <a class="link" target="_blank" rel="noreferrer">상품 열기</a>
+        </div>
+      </li>
+    </template>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

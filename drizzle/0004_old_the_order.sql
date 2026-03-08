@@ -1,0 +1,1 @@
+ALTER TABLE `collection_jobs` MODIFY COLUMN `status` enum('pending','running','completed','failed','cancelled','stopped') NOT NULL DEFAULT 'pending';

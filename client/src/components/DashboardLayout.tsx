@@ -1,0 +1,243 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/useMobile";
+import {
+  LayoutDashboard, LogOut, PanelLeft, FileText, Package,
+  FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3
+} from "lucide-react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
+import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
+
+const menuItems = [
+  { icon: LayoutDashboard, label: "대시보드", path: "/dashboard", emoji: "🏠" },
+  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝" },
+  { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰" },
+  { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️" },
+  { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢" },
+  { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "📊" },
+  { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "📦" },
+  { icon: Package, label: "전체 상품", path: "/products", emoji: "📦" },
+  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪" },
+  { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅" },
+  { icon: User, label: "내 프로필", path: "/profile", emoji: "👤" },
+  { icon: Settings, label: "계정 설정", path: "/settings/accounts", emoji: "⚙️" },
+  { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥" },
+];
+
+const SIDEBAR_WIDTH_KEY = "sidebar-width";
+const DEFAULT_WIDTH = 260;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 400;
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
+  });
+  const { loading, user } = useAuth();
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+  }, [sidebarWidth]);
+
+  // Redirect to home if not authenticated (in useEffect to avoid DOM issues)
+  useEffect(() => {
+    if (!loading && !user) {
+      window.location.href = "/";
+    }
+  }, [loading, user]);
+
+  if (loading || !user) {
+    return <DashboardLayoutSkeleton />;
+  }
+
+  return (
+    <SidebarProvider
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
+      <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
+        {children}
+      </DashboardLayoutContent>
+    </SidebarProvider>
+  );
+}
+
+type DashboardLayoutContentProps = {
+  children: React.ReactNode;
+  setSidebarWidth: (width: number) => void;
+};
+
+function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutContentProps) {
+  const { user, logout } = useAuth();
+  const [location, setLocation] = useLocation();
+  const { state, toggleSidebar } = useSidebar();
+  const isCollapsed = state === "collapsed";
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const activeMenuItem = menuItems.find(item => item.path === location);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    if (isCollapsed) setIsResizing(false);
+  }, [isCollapsed]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
+      const newWidth = e.clientX - sidebarLeft;
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) setSidebarWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing, setSidebarWidth]);
+
+  return (
+    <>
+      <div className="relative" ref={sidebarRef}>
+        <Sidebar collapsible="icon" className="border-r-0" disableTransition={isResizing}>
+          {/* Sidebar header with logo */}
+          <SidebarHeader className="h-16 justify-center border-b border-pink-100/50">
+            <div className="flex items-center gap-3 px-2 transition-all w-full">
+              <button
+                onClick={toggleSidebar}
+                className="h-8 w-8 flex items-center justify-center hover:bg-pink-50 rounded-xl transition-colors shrink-0"
+              >
+                <PanelLeft className="h-4 w-4 text-pink-400" />
+              </button>
+              {!isCollapsed && (
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-pink-400 animate-sparkle" />
+                  <span className="font-bold tracking-tight text-lg gradient-text">
+                    Sourcing Lab
+                  </span>
+                </div>
+              )}
+            </div>
+          </SidebarHeader>
+
+          {/* Menu items */}
+          <SidebarContent className="gap-0 pt-2">
+            <SidebarMenu className="px-2 py-1">
+              {menuItems
+                .filter(item => !item.superAdminOnly || user?.isSuperAdmin)
+                .map((item) => {
+                  const isActive = location === item.path;
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        onClick={() => setLocation(item.path)}
+                        tooltip={item.label}
+                        className={`h-10 transition-all font-normal rounded-xl my-0.5 ${
+                          isActive 
+                            ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-medium border border-pink-100/60" 
+                            : "hover:bg-pink-50/50"
+                        }`}
+                      >
+                        <item.icon className={`h-4 w-4 transition-all ${
+                          isActive ? "text-pink-500" : "text-muted-foreground"
+                        }`} />
+                        <span className="flex items-center gap-2">
+                          {!isCollapsed && <span className="text-sm">{item.emoji}</span>}
+                          {item.label}
+                        </span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+            </SidebarMenu>
+          </SidebarContent>
+
+          {/* User footer */}
+          <SidebarFooter className="p-3 border-t border-pink-100/50">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-pink-50/60 transition-all w-full text-left group-data-[collapsible=icon]:justify-center">
+                  <Avatar className="h-11 w-11 border-2 border-pink-200 shrink-0 shadow-sm">
+                    {(user as any)?.profileImage ? (
+                      <AvatarImage src={(user as any).profileImage} alt={user?.name || ""} className="object-cover" />
+                    ) : null}
+                    <AvatarFallback className="text-sm font-bold bg-gradient-to-br from-pink-400 to-purple-500 text-white">
+                      {user?.name?.charAt(0).toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
+                    <p className="text-sm font-medium truncate">{user?.name || "-"}</p>
+                    <p className="text-xs text-pink-400/80 truncate mt-0.5">{user?.email || "-"}</p>
+                  </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 border-pink-100">
+                <DropdownMenuItem 
+                  onClick={async () => { await logout(); window.location.href = "/"; }} 
+                  className="cursor-pointer text-pink-600 focus:text-pink-700 focus:bg-pink-50"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>로그아웃</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarFooter>
+        </Sidebar>
+
+        {/* Resize handle */}
+        <div
+          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-pink-300/30 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          onMouseDown={() => { if (!isCollapsed) setIsResizing(true); }}
+          style={{ zIndex: 50 }}
+        />
+      </div>
+
+      <SidebarInset className="flex flex-col min-h-screen pastel-page-bg">
+        {/* Mobile header */}
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-pink-100/50 bg-white/80 backdrop-blur-md px-4 lg:hidden">
+          <button onClick={toggleSidebar} className="h-9 w-9 flex items-center justify-center hover:bg-pink-50 rounded-xl">
+            <PanelLeft className="h-5 w-5 text-pink-400" />
+          </button>
+          {activeMenuItem && (
+            <div className="flex items-center gap-2">
+              <span className="text-base">{activeMenuItem.emoji}</span>
+              <h1 className="text-sm font-semibold gradient-text">{activeMenuItem.label}</h1>
+            </div>
+          )}
+        </header>
+        <main className="flex-1 p-4 md:p-6">{children}</main>
+      </SidebarInset>
+    </>
+  );
+}

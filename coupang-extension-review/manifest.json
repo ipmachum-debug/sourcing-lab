@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Coupang Search Helper MVP",
+  "version": "0.1.0",
+  "description": "Reads Coupang search result pages opened by the user and shows parsed products in the Chrome side panel.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.coupang.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.coupang.com/np/search*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Coupang Search Helper"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

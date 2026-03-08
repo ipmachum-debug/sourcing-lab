@@ -1,0 +1,68 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 12px;
+  background: #fafafa;
+  color: #111;
+}
+
+header h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+header p {
+  margin: 0 0 12px;
+  color: #555;
+  font-size: 13px;
+}
+
+.actions {
+  margin-bottom: 12px;
+}
+
+button {
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+#results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.item {
+  background: white;
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.position {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.sub {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.link {
+  font-size: 12px;
+}
