@@ -1,16 +1,16 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.1.3
+   Coupang Sourcing Helper — Content Script v5.1.6
    "모달 패널 UX" — 셀록홈즈/아이템스카우트 참고
 
-   v5.1.4: overlay→모달형 전환 + 디버그 로그 + 강제 표시
-   - 상품 카드: 하단 데이터바 + 우상단 점수 배지 (가림 없음)
-   - 클릭시: 우측 고정 모달 패널 열림 (360px)
-   - 모달: 상품정보 + 점수 + 1688/알리 + AI 사전매칭 + 저장
-   - Auto Scan 유지
-   - v5.0 overlay 잔재 자동 정리
+   v5.1.6: 데이터바 표시 버그 수정 + 강제 CSS + 디버그 패널
+   - 데이터바: !important CSS로 쿠팡 스타일 오버라이드
+   - 데이터바: insertAdjacentElement로 삽입 위치 변경
+   - 데이터바: 삽입 후 가시성 검증 + 자동 재시도
+   - 시그니처: 데이터바 미삽입시 재스캔 허용
+   - 디버그: 페이지 내 실시간 디버그 패널 표시
    ============================================================ */
 (function () {
-  const SH_VERSION = '5.1.4';
+  const SH_VERSION = '5.1.6';
   const SH_UI_MODE = 'modal';
 
   // ---- v5.0 잔재 자동 정리 (overlay 방식 제거) ----
@@ -52,6 +52,35 @@
   let allParsedItems = [];
   let activeModal = null;  // 현재 열린 모달
   let activeProductId = null;
+  let totalInserted = 0; // 전체 삽입 카운트 추적
+
+  // ---- 디버그 패널 (페이지 내 표시) ----
+  const debugLog = [];
+  function dbg(msg) {
+    const ts = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    debugLog.push(`[${ts}] ${msg}`);
+    if (debugLog.length > 30) debugLog.shift();
+    updateDebugPanel();
+    console.log(`%c[SH] ${msg}`, 'color:#6366f1;font-size:11px;');
+  }
+  function updateDebugPanel() {
+    let panel = document.getElementById('sh-debug-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'sh-debug-panel';
+      panel.style.cssText = 'position:fixed;bottom:40px;left:8px;z-index:999999;background:rgba(0,0,0,0.85);color:#22c55e;padding:8px 12px;border-radius:8px;font-family:monospace;font-size:10px;max-width:420px;max-height:200px;overflow-y:auto;pointer-events:auto;cursor:pointer;line-height:1.4;';
+      panel.title = 'SH Debug Panel - 클릭하여 토글';
+      let collapsed = false;
+      panel.addEventListener('click', () => {
+        collapsed = !collapsed;
+        panel.style.maxHeight = collapsed ? '20px' : '200px';
+        panel.style.overflow = collapsed ? 'hidden' : 'auto';
+      });
+      document.body.appendChild(panel);
+    }
+    panel.innerHTML = `<div style="color:#f59e0b;font-weight:bold;margin-bottom:2px;">SH v${SH_VERSION} Debug (${totalInserted}개 삽입됨)</div>` + debugLog.map(l => `<div>${l}</div>`).join('');
+    panel.scrollTop = panel.scrollHeight;
+  }
 
   // ---- 유틸리티 ----
   function text(el) {
@@ -81,19 +110,28 @@
     style.textContent = `
       /* ===== 상품 카드 데이터바 ===== */
       .sh-databar {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 5px 8px;
-        background: #f8f9fb;
-        border-top: 1px solid #e5e7eb;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        font-size: 11px;
-        color: #374151;
-        cursor: pointer;
-        transition: background 0.15s;
-        position: relative;
-        z-index: 50;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        padding: 5px 8px !important;
+        background: #f8f9fb !important;
+        border-top: 2px solid #6366f1 !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-size: 11px !important;
+        color: #374151 !important;
+        cursor: pointer !important;
+        transition: background 0.15s !important;
+        position: relative !important;
+        z-index: 50 !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        height: auto !important;
+        min-height: 24px !important;
+        overflow: visible !important;
+        max-height: none !important;
+        margin: 0 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
       }
       .sh-databar:hover {
         background: #eef2ff;
@@ -138,23 +176,25 @@
 
       /* ===== 우상단 미니 배지 ===== */
       .sh-mini-badge {
-        position: absolute;
-        top: 6px;
-        right: 6px;
-        z-index: 60;
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        padding: 2px 6px;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 800;
-        color: #fff;
-        pointer-events: none;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        position: absolute !important;
+        top: 6px !important;
+        right: 6px !important;
+        z-index: 60 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 2px !important;
+        padding: 2px 6px !important;
+        border-radius: 6px !important;
+        font-size: 11px !important;
+        font-weight: 800 !important;
+        color: #fff !important;
+        pointer-events: none !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.35) !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        visibility: visible !important;
+        opacity: 1 !important;
       }
-      .sh-relative { position: relative !important; }
+      .sh-relative { position: relative !important; overflow: visible !important; }
 
       /* ===== 우측 고정 모달 패널 ===== */
       .sh-modal-backdrop {
@@ -533,12 +573,23 @@
   //  상품 카드에 데이터바 + 배지 삽입 (상품 가림 없음)
   // ============================================================
   function insertDataBar(container, item, allItems) {
-    if (container.getAttribute(BADGE_ATTR)) return;
+    if (container.getAttribute(BADGE_ATTR)) return false;
     container.setAttribute(BADGE_ATTR, item.productId || 'true');
 
-    // 강제 overflow visible + relative
-    container.style.overflow = 'visible';
-    container.style.position = 'relative';
+    // 강제 스타일 오버라이드 — !important로 쿠팡 CSS 무시
+    container.style.setProperty('overflow', 'visible', 'important');
+    container.style.setProperty('position', 'relative', 'important');
+    container.classList.add('sh-relative');
+
+    // 부모 체인도 overflow 해제 (3단계)
+    let p = container.parentElement;
+    for (let i = 0; i < 3 && p && p !== document.body; i++) {
+      const pOverflow = getComputedStyle(p).overflow;
+      if (pOverflow === 'hidden' || pOverflow === 'clip') {
+        p.style.setProperty('overflow', 'visible', 'important');
+      }
+      p = p.parentElement;
+    }
 
     const score = quickScore(item, allItems);
     const { grade, cls, color } = scoreGrade(score);
@@ -546,13 +597,22 @@
     // 1) 우상단 미니 배지
     const badge = document.createElement('div');
     badge.className = 'sh-mini-badge';
-    badge.style.background = color;
+    badge.style.setProperty('background', color, 'important');
     badge.textContent = `${grade} ${score}`;
-    container.appendChild(badge);
 
-    // 2) 하단 데이터바
+    // 이미지 컨테이너 또는 첫 번째 자식에 삽입 시도
+    const imgWrap = container.querySelector('a, div');
+    if (imgWrap && imgWrap.parentElement === container) {
+      imgWrap.style.setProperty('position', 'relative', 'important');
+      imgWrap.appendChild(badge);
+    } else {
+      container.appendChild(badge);
+    }
+
+    // 2) 하단 데이터바 — 컨테이너 바로 뒤에 형제로 삽입 (overflow 영향 회피)
     const bar = document.createElement('div');
     bar.className = 'sh-databar';
+    bar.setAttribute('data-sh-product', item.productId || '');
     bar.innerHTML = `
       <span class="sh-databar-grade ${cls}">${grade}</span>
       <span class="sh-databar-score">${score}점</span>
@@ -560,12 +620,34 @@
       <span class="sh-databar-info">${item.reviewCount > 0 ? '리뷰 ' + item.reviewCount.toLocaleString() : '리뷰 없음'}</span>
       <span class="sh-databar-sep">|</span>
       <span class="sh-databar-info">${formatPrice(item.price)}</span>
-      ${item.isAd ? '<span class="sh-databar-info" style="color:#ef4444;">AD</span>' : ''}
-      <span class="sh-databar-detail">분석 ></span>
+      ${item.isAd ? '<span class="sh-databar-info" style="color:#ef4444 !important;">AD</span>' : ''}
+      <span class="sh-databar-detail">분석 ▸</span>
     `;
-    container.appendChild(bar);
 
-    // 3) 클릭 → 모달 열기
+    // 삽입 전략: 1) container 마지막 자식으로 → 2) container 뒤 형제로
+    try {
+      container.appendChild(bar);
+    } catch (e) {
+      try {
+        container.insertAdjacentElement('afterend', bar);
+      } catch (e2) {
+        dbg(`❌ bar 삽입 실패: ${item.title?.substring(0, 20)}`);
+        return false;
+      }
+    }
+
+    // 3) 삽입 후 가시성 검증
+    requestAnimationFrame(() => {
+      const rect = bar.getBoundingClientRect();
+      if (rect.height === 0 || rect.width === 0) {
+        // container 내부에서 안 보이면 → 형제로 재배치
+        dbg(`⚠️ bar 크기 0 감지, 형제로 재배치: ${item.title?.substring(0, 20)}`);
+        bar.remove();
+        container.insertAdjacentElement('afterend', bar);
+      }
+    });
+
+    // 4) 클릭 → 모달 열기
     bar.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -573,13 +655,15 @@
     });
 
     // 미니 배지도 클릭 가능하게
-    badge.style.pointerEvents = 'auto';
-    badge.style.cursor = 'pointer';
+    badge.style.setProperty('pointer-events', 'auto', 'important');
+    badge.style.setProperty('cursor', 'pointer', 'important');
     badge.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
       openModal(item, score, grade, cls, color, allItems);
     });
+
+    return true;
   }
 
   // ============================================================
@@ -1158,13 +1242,13 @@
     if (!location.href.includes('/np/search')) return;
 
     let products = parseProductsLegacy();
-    console.log(`%c[SH] parseProductsLegacy: ${products.length}개`, 'color:#6366f1;font-size:11px;');
+    dbg(`parseProductsLegacy: ${products.length}개`);
     if (products.length < 3) {
       products = parseProductsByLinks();
-      console.log(`%c[SH] parseProductsByLinks: ${products.length}개`, 'color:#6366f1;font-size:11px;');
+      dbg(`parseProductsByLinks: ${products.length}개`);
     }
     if (!products.length) {
-      console.log('%c[SH] ⚠️ 상품 파싱 실패 — 0개', 'color:#dc2626;font-size:12px;');
+      dbg('⚠️ 상품 파싱 실패 — 0개');
       return;
     }
 
@@ -1173,9 +1257,20 @@
       query, count: products.length,
       ids: products.map(i => i.productId || i.url).slice(0, 5)
     });
-    if (signature === lastSignature) return;
-    lastSignature = signature;
 
+    // 이미 같은 데이터인데 데이터바가 충분히 삽입되었으면 스킵
+    const existingBars = document.querySelectorAll('.sh-databar').length;
+    if (signature === lastSignature && existingBars >= Math.min(products.length, 3)) {
+      return; // 이미 충분히 삽입됨
+    }
+
+    // 같은 데이터지만 바가 없으면 재시도 (핵심 수정!)
+    if (signature === lastSignature && existingBars > 0) {
+      dbg(`시그니처 동일 + 바 ${existingBars}개 존재, 스킵`);
+      return;
+    }
+
+    lastSignature = signature;
     allParsedItems = products.map(p => ({ ...p, query }));
 
     // 스타일 삽입
@@ -1184,23 +1279,39 @@
     // 각 상품 카드에 데이터바 + 배지 삽입
     let insertedCount = 0;
     let skippedCount = 0;
+    let dupContainerCount = 0;
     const usedContainers = new Set();
     for (const item of allParsedItems) {
       if (item._container) {
-        if (usedContainers.has(item._container)) {
+        // 이미 배지가 있으면 스킵
+        if (item._container.getAttribute(BADGE_ATTR)) {
           skippedCount++;
           continue;
         }
+        if (usedContainers.has(item._container)) {
+          dupContainerCount++;
+          continue;
+        }
         usedContainers.add(item._container);
-        insertDataBar(item._container, item, allParsedItems);
-        insertedCount++;
+        const ok = insertDataBar(item._container, item, allParsedItems);
+        if (ok) insertedCount++;
       }
     }
-    console.log(`%c[SH] ✅ 데이터바 삽입: ${insertedCount}개 (중복컨테이너 스킵: ${skippedCount}개) / 전체 ${allParsedItems.length}개`, 'color:#16a34a;font-weight:bold;font-size:12px;');
-    if (allParsedItems.length > 0 && insertedCount === 0) {
-      console.log('%c[SH] ⚠️ 데이터바 0개 삽입 — 컨테이너 디버그:', 'color:#dc2626;font-size:12px;');
-      const sample = allParsedItems[0];
-      console.log('[SH] 첫번째 상품:', sample.title?.substring(0, 30), '컨테이너:', sample._container?.tagName, sample._container?.className?.toString()?.substring(0, 80));
+    totalInserted = insertedCount;
+    dbg(`✅ 데이터바 삽입: ${insertedCount}개 (기존: ${skippedCount}, 중복컨테이너: ${dupContainerCount}) / 전체: ${allParsedItems.length}개`);
+
+    if (allParsedItems.length > 0 && insertedCount === 0 && skippedCount === 0) {
+      dbg('❌ 데이터바 0개 삽입됨 — 컨테이너 정보:');
+      for (let i = 0; i < Math.min(3, allParsedItems.length); i++) {
+        const s = allParsedItems[i];
+        const c = s._container;
+        if (c) {
+          const computed = getComputedStyle(c);
+          dbg(`  #${i+1} <${c.tagName}> class="${(c.className||'').toString().substring(0,50)}" overflow=${computed.overflow} display=${computed.display} h=${c.offsetHeight}`);
+        } else {
+          dbg(`  #${i+1} 컨테이너 없음: ${s.title?.substring(0,30)}`);
+        }
+      }
     }
 
     // background에도 데이터 전달 (사이드패널 호환)
@@ -1244,11 +1355,13 @@
     url: location.href,
   }).catch(() => {});
 
-  // ---- 버전 워터마크 (개발 확인용, 5초 후 자동 사라짐) ----
+  // ---- 버전 워터마크 (우측 하단, 10초 후 자동 사라짐) ----
   const vBadge = document.createElement('div');
   vBadge.id = 'sh-version-badge';
   vBadge.textContent = `SH v${SH_VERSION} (${SH_UI_MODE})`;
   vBadge.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:999999;background:#16a34a;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;font-family:monospace;opacity:0.85;pointer-events:none;transition:opacity 0.5s;';
   document.body.appendChild(vBadge);
-  setTimeout(() => { vBadge.style.opacity = '0'; setTimeout(() => vBadge.remove(), 600); }, 5000);
+  setTimeout(() => { vBadge.style.opacity = '0'; setTimeout(() => vBadge.remove(), 600); }, 10000);
+
+  dbg(`v${SH_VERSION} 초기화 완료, autoScan 시작`);
 })();
