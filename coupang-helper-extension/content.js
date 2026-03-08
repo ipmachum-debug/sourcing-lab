@@ -8,12 +8,12 @@
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
 
-   v5.5.6 1688 UTF-8 모드 + 검색어 기반 소싱:
-   - 모든 1688 URL에 &ie=utf8 추가 (1688 서버가 UTF-8 모드로 동작)
-   - encodeURIComponent + ie=utf8 = 완벽한 UTF-8 인코딩
-   - 중국어/한국어 다 깨지지 않음
-   - extractSourcingKw: 쓰팡 검색어 + 제목 수식어 조합
-     예) "용돈봉투" + "부모님 용돈봉투" → "부모님 용돈봉투" → 중국어 번역
+   v5.5.7 1688 한국어 직접 전달 (번역 제거):
+   - 1688이 한국어를 자동 분석/번역해줌 → 번역 로직 완전 제거
+   - 쿠팡 제품 제목을 그대로 1688에 전달
+   - encodeURIComponent 제거, 공백만 +로 치환
+   - &charset=utf8 파라미터 추가
+   - Google Translate 번역 → GBK 깨짐 문제 완전 해결
 
    v5.5.5 1688 인코딩 버그 수정:
    v5.5.4 1688 키워드 버그 수정:
@@ -35,7 +35,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.6';
+  const VER = '5.5.7';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -1112,62 +1112,15 @@
       if (!item) return;
       b1.textContent = '..';
 
-      // ★ 새 로직: 검색어 기반 소싱 키워드 ★
+      // ★ 새 로직: 한국어 제목을 1688에 직접 전달 (1688이 자동 번역) ★
       const query = getQ(); // 쿠팡 검색어
-      const sourcingKw = extractSourcingKw(query, item.title); // "부모님 용돈봉투"
-      console.log(`[SH] 1688 클릭: 검색어="${query}" 제목="${item.title}" → 소싱KW="${sourcingKw}"`);
+      // 검색어가 있으면 제목에서 검색어+수식어 추출, 없으면 제목 그대로
+      const keyword = query ? item.title : item.title;
+      console.log(`[SH] 1688 클릭: 검색어="${query}" → 1688에 전달: "${keyword}"`);
 
-      // Google Translate로 중국어 변환 → 1688 검색
-      (async () => {
-        let keyword = '';
-
-        // 1단계: 로컬 CN 사전
-        const kw = extractKw(sourcingKw); // 소싱키워드를 사전에서 찾기
-        if (kw.cn) {
-          keyword = kw.cn;
-          console.log(`[SH] 1688 로컬 사전: "${sourcingKw}" → "${keyword}"`);
-        }
-
-        // 2단계: 서버 AI (3초 타임아웃)
-        if (!keyword) {
-          try {
-            const r = await Promise.race([
-              chrome.runtime.sendMessage({
-                type: 'PRE_MATCH', productName: item.title, price: item.price, imageUrl: item.imageUrl
-              }).catch(() => null),
-              new Promise(resolve => setTimeout(() => resolve(null), 3000))
-            ]);
-            if (r?.success && r.keywords1688?.length) {
-              keyword = r.keywords1688[0].keyword;
-              console.log(`[SH] 1688 서버 AI: "${keyword}"`);
-            }
-          } catch (e) {}
-        }
-
-        // 3단계: Google Translate (소싱키워드 → 중국어)
-        if (!keyword) {
-          try {
-            const resp = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=zh-CN&dt=t&q=${encodeURIComponent(sourcingKw)}`);
-            const data = await resp.json();
-            if (data?.[0]?.[0]?.[0]) {
-              keyword = data[0][0][0];
-              console.log(`[SH] 1688 Google Translate: "${sourcingKw}" → "${keyword}"`);
-            }
-          } catch (e) {
-            console.warn('[SH] Google Translate 실패:', e);
-          }
-        }
-
-        // 4단계: 한국어 그대로 (1688 자체 번역)
-        if (!keyword) {
-          keyword = sourcingKw;
-          console.log(`[SH] 1688 한국어 폴백: "${keyword}"`);
-        }
-
-        // 1688 URL: encodeURIComponent + ie=utf8 (UTF-8 모드)
-        window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(keyword)}&ie=utf8`, '_blank');
-        b1.textContent = '1688';
-      })();
+      // 1688 URL: 한국어 그대로 전달 + charset=utf8 (1688이 자동 분석/번역)
+      window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${keyword.replace(/\s+/g, '+')}&charset=utf8`, '_blank');
+      b1.textContent = '1688';
       return;
     }
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "5.5.6",
-  "description": "쿠팡 AI 소싱 코치 — AI 분석 · 소싱 점수 · 마진 추정 · 리스크 분석 · 초보 추천 · 1688 UTF-8(ie=utf8) · CNINSIDER · 경쟁도 · 순위추적 · WING",
+  "version": "5.5.7",
+  "description": "쿠팡 AI 소싱 코치 — AI 분석 · 소싱 점수 · 마진 추정 · 리스크 분석 · 초보 추천 · 1688 한국어직접전달 · CNINSIDER · 경쟁도 · 순위추적 · WING",
   "permissions": [
     "storage",
     "tabs",

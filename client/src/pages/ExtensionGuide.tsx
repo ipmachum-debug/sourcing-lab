@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.6";
+const EXTENSION_VERSION = "5.5.7";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.5.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,16 +586,24 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.6",
+                    version: "v5.5.7",
                     date: "2026-03-08",
                     badge: "Latest",
                     changes: [
-                      "1688 UTF-8 모드: 모든 1688 URL에 &ie=utf8 추가 → encodeURIComponent + ie=utf8로 완벽한 UTF-8 인코딩",
-                      "검색어 기반 소싱 키워드: 쿠팡 검색어 + 제목 수식어 조합 (예: '부모님 용돈봉투', '게이밍 마우스패드')",
-                      "CNINSIDER 연동: 1688 공식 한국 파트너 사이트 검색 링크 추가 (한국어/중국어)",
-                      "소싱 팝업에 CNINSIDER 한국어/중국어 검색 링크 표시",
-                      "AI 분석·대량검색·소싱팝업 모든 1688 URL ie=utf8 적용",
-                      "Taobao URL도 ie=utf8 적용",
+                      "1688 한국어 직접 전달: 번역 로직 완전 제거 — 1688이 한국어를 자동 분석/번역해줌",
+                      "쿠팡 제품 제목을 그대로 1688에 전달 (예: '마음담아 전통 세뻓돈 어린이 용돈봉투')",
+                      "encodeURIComponent 제거 → 공백만 +로 치환, &charset=utf8 사용",
+                      "Google Translate 번역 → GBK 깨짐 문제 완전 해결 (원인: UTF-8 percent-encoding을 GBK로 해석)",
+                      "CNINSIDER URL 형식 수정: /#/product?keywords=&type=text&searchDiff=1",
+                      "소싱 팝업에 쿠팡 검색어를 한국어 키워드로 전달",
+                    ],
+                  },
+                  {
+                    version: "v5.5.6",
+                    date: "2026-03-08",
+                    changes: [
+                      "1688 UTF-8 모드: 모든 1688 URL에 &ie=utf8 추가",
+                      "CNINSIDER 연동: 1688 공식 한국 파트너 사이트 검색 링크 추가",
                     ],
                   },
                   {
