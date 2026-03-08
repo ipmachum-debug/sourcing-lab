@@ -133,6 +133,11 @@ export default function Manual() {
                   <Download className="h-4 w-4" /> 다운로드 v{EXTENSION_VERSION}
                 </Button>
               </a>
+              <a href="/sourcing-helper-manual.pdf" download>
+                <Button className="bg-white/20 text-white hover:bg-white/30 font-bold shadow-lg gap-2 border border-white/30">
+                  <BookOpen className="h-4 w-4" /> PDF 매뉴얼 다운로드
+                </Button>
+              </a>
               <Badge className="bg-white/20 text-white border-white/30">
                 <Chrome className="h-3 w-3 mr-1" /> Chrome 전용
               </Badge>
@@ -704,6 +709,11 @@ export default function Manual() {
               <a href={EXTENSION_ZIP_URL} download>
                 <Button size="lg" className="bg-indigo-600 hover:bg-indigo-700 gap-2 shadow-lg">
                   <Download className="h-5 w-5" /> 다운로드
+                </Button>
+              </a>
+              <a href="/sourcing-helper-manual.pdf" download>
+                <Button size="lg" variant="outline" className="gap-2">
+                  <BookOpen className="h-5 w-5" /> PDF 매뉴얼
                 </Button>
               </a>
               <a href="/extension">
