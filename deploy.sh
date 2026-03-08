@@ -14,8 +14,9 @@ echo " Sourcing Lab Deploy Script"
 echo " $(date '+%Y-%m-%d %H:%M:%S')"
 echo "==============================="
 
-# 1. Git pull
-echo "[1/5] Git pull..."
+# 1. Git pull (reset local changes like rebuilt zip files)
+echo "[1/5] Git reset + pull..."
+git checkout -- . 2>&1 || true
 git pull origin main 2>&1
 
 # 2. Install deps
