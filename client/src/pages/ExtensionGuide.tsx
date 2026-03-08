@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.2";
+const EXTENSION_VERSION = "5.5.3";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,15 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.2",
+                    version: "v5.5.3",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["파싱 엔진 전면 재작성: 클래스 기반 → 텍스트 패턴 기반 (React SPA 호환)", "가격: 적립금(최대N원적립)·단위가격(g당/ml당)·배송비 제거 후 판매가만 추출", "평점: aria-label + ★ 카운트 + em.rating 다중 방법", "리뷰: 괄호 안 숫자 (N,NNN) 패턴으로 정확 추출", "광고: AD텍스트 + ad-badge클래스 + 광고서비스문구 3중 감지", "순위: 상품 이미지 위 1,2,3 배지 번호 감지", "로켓: badge-rocket + 이미지alt + 새벽도착보장 + 내일도착보장", "TOP3: 광고 제외, 실제 순위(rankNum) 기반 선별", "디버그: 처음 3개 상품 상세 로그 출력"],
+                    changes: ["가격 파싱 완전 재설계: 엘리먼트 레벨 TreeWalker 기반 분석", "적립금(최대N원적립)·단위가격(g당/ml당)·배송비를 DOM 요소 수준에서 제외", "할인가 vs 정가(del태그) 자동 구분, 판매가만 정확 추출", "평점: star width비율 + aria-label + em.rating + filled star 카운트 5중 방법", "리뷰: rating-total-count + (N,NNN) 괄호 패턴, 단위가격 괄호 정밀 제외", "광고: AD텍스트(10자이하) + ad-badge클래스 + 광고서비스문구 4중 감지", "로켓: 클래스 + 이미지 + 텍스트 + 새벽도착 + 오늘출발 5중 감지", "순위: 비광고 상품만 이미지위 1~50 배지 감지 (getBoundingClientRect)", "통계: 전체 36개 상품 기준 평균가/평점/리뷰/경쟁도 계산", "디버그: 처음 5개 상품 상세 로그 출력"],
+                  },
+                  {
+                    version: "v5.5.2",
+                    date: "2026-03-08",
+                    changes: ["파싱 엔진 전면 재작성: 클래스 기반 → 텍스트 패턴 기반 (React SPA 호환)", "가격: 적립금·단위가격·배송비 제거 후 판매가만 추출", "평점: aria-label + em.rating 다중 방법"],
                   },
                   {
                     version: "v5.5.1",

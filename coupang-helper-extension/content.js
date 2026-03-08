@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.5.2
+   Coupang Sourcing Helper — Content Script v5.5.3
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -8,18 +8,20 @@
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
 
-   v5.5.2 파싱 전면 재작성:
-   - 쿠팡 React SPA → 클래스 기반 셀렉터 불안정
-   - 텍스트 패턴 기반 파싱으로 전면 전환
-   - 가격: "할인XX% N,NNN원" 패턴에서 판매가 추출, 적립/단위가격 제외
-   - 평점/리뷰: "★★★★★ (N,NNN)" 패턴 또는 aria-label 기반
-   - 광고: AD 텍스트 + 광고 서비스 문구 + ad-badge 클래스
-   - 로켓: 로켓배송/새벽도착 텍스트 + rocket 이미지
-   - 순위: 상품 이미지 위 1,2,3 배지 감지
+   v5.5.3 파싱 전면 재작성:
+   - 가격: 할인가 우선, "N% N,NNN원" 패턴 추출
+          적립금·단위가격·배송비 엄격 제거
+          최소값이 아닌 "할인 패턴 뒤" 값 우선
+   - 평점: star width 기반 비율 계산 (시각적 별점)
+          + aria-label, title 속성 기반 fallback
+   - 리뷰: "(N,NNN)" 괄호 패턴, 단위가격 괄호 제외
+   - 광고: AD 텍스트 + ad-badge 클래스 + "광고 서비스" 문구
+   - 로켓: badge-rocket 클래스 + rocket 이미지 + 텍스트
+   - 순위: 이미지 위 1,2,3 배지 (비-광고 상품에서만)
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.2';
+  const VER = '5.5.3';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -221,7 +223,8 @@
     '다용도':'多用途','수납':'收纳','선반':'架子','행거':'衣架','컵':'杯子',
     '거울':'镜子','모자':'帽子','신발':'鞋','운동화':'运动鞋','슬리퍼':'拖鞋',
     '샌들':'凉鞋','선글라스':'太阳镜','시계':'手表','칼':'刀','주전자':'水壶',
-    '머그컵':'马克杯','쓰레기통':'垃圾桶','정리함':'收纳盒',
+    '머그컵':'马克杯','쓰레기통':'垃圾桶','정리함':'收纳盒','찹쌀떡':'糯米糕',
+    '떡':'年糕','모찌':'麻薯',
   };
   const NOISE = new Set([
     '1개','2개','3개','4개','5개','1P','2P','3P','1+1','2+1',
@@ -268,10 +271,9 @@
   }
 
   // ============================================================
-  //  상품 파싱
+  //  유틸리티
   // ============================================================
   const MAX = 36;
-
   function getQ() {
     try {
       const u = new URL(location.href);
@@ -282,80 +284,158 @@
   function nm(s) { return parseInt((s || '').replace(/[^0-9]/g, ''), 10) || 0; }
   function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
-  /**
-   * v5.5.2 — 텍스트 패턴 기반 파싱 (React SPA 호환)
-   *
-   * 쿠팡 검색결과 실제 화면 구조:
-   *   상품 이미지 (왼쪽 상단에 1,2,3 순위 배지 — 광고엔 없음)
-   *   상품명
-   *   할인 36,000원  ← 정가 (취소선)
-   *   39% 21,880원   ← 판매가 (빨간 볼드) ★ 이것을 추출
-   *   (100g당 547원)  ← 단위가격 (무시!)
-   *   모레(화) 도착 예정
-   *   무료배송 · 오늘출발
-   *   ★★★★★ (788)   ← 별점 + 리뷰수
-   *   최대 1,083원 적립  ← 적립금 (무시!)
-   *   AD ⓘ            ← 광고 표시 (있으면 광고)
-   */
+  // ============================================================
+  //  ★★★ 상품 파싱 v5.5.3 ★★★
+  //
+  //  핵심 전략:
+  //  1. 각 상품 카드의 개별 DOM 요소를 하나씩 순회
+  //  2. 각 요소의 텍스트를 분석하여 역할 파악
+  //  3. "적립", "당", "배송비" 등이 포함된 가격 텍스트는 확실히 제외
+  //  4. 별점은 star 관련 요소의 width 비율 또는 aria-label에서 추출
+  //  5. 리뷰수는 "(\d+)" 패턴에서 추출, 단위가격 괄호 제외
+  // ============================================================
   function parseProducts() {
     const items = [], seen = new Set(), q = getQ();
 
-    // 모든 상품 링크를 찾아서 상위 LI 컨테이너를 결정
-    for (const a of document.querySelectorAll('a[href*="/vp/products/"]')) {
+    // ── 상품 카드 수집 ──────────────────────
+    // 방법 A: <li class*="search-product"> 기반
+    let productBoxes = [...document.querySelectorAll('li[class*="search-product"]')];
+
+    // 방법 B: fallback — productList 내 li
+    if (!productBoxes.length) {
+      const ul = document.querySelector('#productList, ul[class*="product"]');
+      if (ul) productBoxes = [...ul.querySelectorAll(':scope > li')];
+    }
+
+    // 방법 C: a[href*="/vp/products/"] 링크 기반
+    if (!productBoxes.length) {
+      const anchors = document.querySelectorAll('a[href*="/vp/products/"]');
+      const boxSet = new Set();
+      for (const a of anchors) {
+        let box = a;
+        for (let i = 0; i < 8 && box.parentElement; i++) {
+          box = box.parentElement;
+          if (box.tagName === 'LI' || box.tagName === 'ARTICLE') break;
+        }
+        if (!boxSet.has(box)) { boxSet.add(box); productBoxes.push(box); }
+      }
+    }
+
+    for (const box of productBoxes) {
       if (items.length >= MAX) break;
-      const m = (a.href || a.getAttribute('href') || '').match(/\/vp\/products\/(\d+)/);
+
+      // 상품 링크 찾기
+      const link = box.querySelector('a[href*="/vp/products/"]');
+      if (!link) continue;
+
+      const m = (link.href || link.getAttribute('href') || '').match(/\/vp\/products\/(\d+)/);
       if (!m) continue;
       const pid = m[1];
       if (seen.has(pid)) continue;
       seen.add(pid);
 
-      // 상위 LI 또는 article 컨테이너 찾기
-      let box = a;
-      for (let i = 0; i < 8 && box.parentElement; i++) {
-        box = box.parentElement;
-        if (box.tagName === 'LI' || box.tagName === 'ARTICLE' || box.dataset?.productId) break;
-      }
-      // box가 여전히 a 태그면 한 단계 더 올라감
-      if (box === a && a.parentElement) box = a.parentElement;
-
-      const fullText = tx(box);
-      const fullHtml = box.innerHTML || '';
-
       // ── 상품명 ──────────────────────────────
-      const nameEl = box.querySelector('div.name, [class*="name"], [class*="title"], [class*="Name"]');
-      const title = (nameEl ? tx(nameEl) : '') || tx(a) || (box.querySelector('img')?.alt || '');
+      const nameEl = box.querySelector('div.name, [class*="name"], [class*="title"]');
+      const title = (nameEl ? tx(nameEl) : '') || tx(link) || (box.querySelector('img')?.alt || '');
       if (!title || title.length < 3) continue;
 
-      // ── 가격 (v5.5.2 — 텍스트 패턴 기반) ────────────
+      // ══════════════════════════════════════════
+      // ▶ 가격 추출 (v5.5.3 — 엘리먼트 레벨 분석)
+      // ══════════════════════════════════════════
       let price = 0;
+      let originalPrice = 0;
 
-      // 방법 1: 클래스 기반 (전통적 쿠팡 HTML이 아직 남아있을 경우)
-      const priceValueEl = box.querySelector('strong.price-value, .price-value');
+      // 전략 1: 클래스 기반 직접 추출
+      const priceValueEl = box.querySelector('strong.price-value, .price-value, [class*="price-value"]');
       if (priceValueEl) {
-        price = nm(tx(priceValueEl));
+        const pv = nm(tx(priceValueEl));
+        if (pv >= 1000) price = pv;
+      }
+      const basePriceEl = box.querySelector('del.base-price, .base-price, del[class*="price"]');
+      if (basePriceEl) originalPrice = nm(tx(basePriceEl));
+
+      // 전략 2: 개별 엘리먼트 순회하여 가격 역할 분석
+      if (!price) {
+        const candidates = [];
+        const walker = document.createTreeWalker(box, NodeFilter.SHOW_ELEMENT);
+        let node;
+        while ((node = walker.nextNode())) {
+          // sh-panel 내부 요소는 무시
+          if (node.closest('#sh-panel')) continue;
+
+          const t = tx(node);
+          if (!t) continue;
+
+          // 이 요소의 고유 텍스트 (자식 제외)
+          const ownText = [...node.childNodes]
+            .filter(n => n.nodeType === 3)
+            .map(n => n.textContent.trim())
+            .join(' ');
+
+          // "원" 포함 검사 — 요소 자체 또는 직계 텍스트
+          const checkText = ownText || t;
+          if (!/[\d,]+\s*원/.test(checkText) && !/^\d[\d,]*$/.test(checkText.trim())) continue;
+
+          // ★ 제외 조건 ★
+          // 1) 적립금: "적립" 단어가 같은 요소나 부모에 있음
+          const parentText = tx(node.parentElement);
+          if (/적립/.test(t) || /적립/.test(parentText)) continue;
+          // 2) 단위가격: "당" 이 포함 (100g당, 10ml당 등)
+          if (/\d+\s*(g|kg|ml|l|개|매|입)\s*당/i.test(t)) continue;
+          if (/당\s*[\d,]+\s*원/.test(t)) continue;
+          // 3) 배송비
+          if (/배송비/.test(t) || /배송비/.test(parentText)) continue;
+          // 4) 쿠팡추천, 도착예정 등 비가격 텍스트
+          if (/도착|배송|출발|반품|적립|캐시/.test(t) && !/[\d,]+\s*원/.test(ownText)) continue;
+
+          // 숫자 추출
+          const priceMatch = checkText.match(/([\d,]+)\s*원/);
+          if (priceMatch) {
+            const v = nm(priceMatch[1]);
+            if (v >= 1000 && v < 1e8) {
+              // 취소선(del) 태그면 정가
+              const isStrike = node.tagName === 'DEL' || node.closest('del') ||
+                               (node.className && /base.?price|original|old/i.test(node.className));
+              candidates.push({ value: v, isOriginal: isStrike, el: node });
+            }
+          }
+        }
+
+        if (candidates.length > 0) {
+          // 판매가 = 정가가 아닌 것 중 최소값 (할인가)
+          const salePrices = candidates.filter(c => !c.isOriginal);
+          const origPrices = candidates.filter(c => c.isOriginal);
+
+          if (salePrices.length > 0) {
+            // 할인가가 여러개면 가장 작은 게 실제 판매가
+            price = Math.min(...salePrices.map(c => c.value));
+          } else if (origPrices.length > 0) {
+            // 정가만 있으면 그것이 판매가
+            price = Math.min(...origPrices.map(c => c.value));
+          }
+          if (!originalPrice && origPrices.length > 0) {
+            originalPrice = Math.max(...origPrices.map(c => c.value));
+          }
+        }
       }
 
-      // 방법 2: 텍스트 패턴 기반 — 전체 텍스트에서 가격 추출
+      // 전략 3: 텍스트 전체에서 할인 패턴 기반 추출 (최후 수단)
       if (!price) {
-        // 적립금, 단위가격을 먼저 제거한 후 가격 추출
-        let cleanText = fullText;
-        // "최대 N원 적립" 패턴 제거
-        cleanText = cleanText.replace(/최대\s*[\d,]+\s*원\s*적립/g, '');
-        // "Ng당 N원", "Nml당 N원" 단위가격 제거
-        cleanText = cleanText.replace(/\d+\s*(g|kg|ml|l|개|매|입)\s*당\s*[\d,]+\s*원/gi, '');
-        // "N원 적립" 패턴 제거
-        cleanText = cleanText.replace(/[\d,]+\s*원\s*적립/g, '');
-        // "배송비 N원" 패턴 제거
-        cleanText = cleanText.replace(/배송비\s*[\d,]+\s*원/g, '');
+        const fullText = tx(box);
+        // 적립/단위가격/배송비 문장 제거
+        let cleanText = fullText
+          .replace(/최대\s*[\d,]+\s*원\s*적립/g, '')
+          .replace(/[\d,]+\s*원\s*적립/g, '')
+          .replace(/\d+\s*(g|kg|ml|l|개|매|입)\s*당\s*[\d,]+\s*원/gi, '')
+          .replace(/배송비\s*[\d,]+\s*원/g, '');
 
-        // "N% N,NNN원" — 할인율 뒤의 가격이 판매가
-        const discountMatch = cleanText.match(/(\d{1,2})%\s*([\d,]+)\s*원/);
-        if (discountMatch) {
-          const p = nm(discountMatch[2]);
+        // "N% N,NNN원" 할인 패턴
+        const discMatch = cleanText.match(/(\d{1,2})%\s*([\d,]+)\s*원/);
+        if (discMatch) {
+          const p = nm(discMatch[2]);
           if (p >= 1000 && p < 1e8) price = p;
         }
 
-        // 할인 패턴 못찾으면 모든 "N,NNN원" 중 적절한 가격 찾기
         if (!price) {
           const allPrices = [...cleanText.matchAll(/([\d,]+)\s*원/g)]
             .map(m => nm(m[1]))
@@ -363,129 +443,191 @@
           if (allPrices.length === 1) {
             price = allPrices[0];
           } else if (allPrices.length >= 2) {
-            // 할인 구조: 정가(큰값), 판매가(작은값) → 판매가 선택
             allPrices.sort((a, b) => a - b);
-            price = allPrices[0]; // 가장 작은 것이 판매가
+            price = allPrices[0];
           }
         }
       }
 
-      // ── 평점 & 리뷰수 (v5.5.2 — 텍스트 패턴 기반) ────
-      let rating = 0, reviewCount = 0;
+      // ══════════════════════════════════════════
+      // ▶ 평점 추출 (v5.5.3 — 다중 전략)
+      // ══════════════════════════════════════════
+      let rating = 0;
 
-      // 방법 1: 클래스 기반
-      const ratEl = box.querySelector('em.rating, .rating');
-      if (ratEl && !ratEl.classList?.contains('rating-total-count')) {
+      // 전략 1: em.rating 텍스트
+      const ratEl = box.querySelector('em.rating');
+      if (ratEl) {
         const rm = tx(ratEl).match(/(\d+\.?\d*)/);
         if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
       }
-      const revEl = box.querySelector('span.rating-total-count, .rating-total-count');
-      if (revEl) reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
 
-      // 방법 2: 텍스트 패턴 — "★" 기반 또는 "(N,NNN)" 리뷰수
-      if (!rating || !reviewCount) {
-        // 별점은 ★ 개수로 판단 (예: ★★★★★ = 5.0, ★★★★☆ = 4.0)
-        // 또는 aria-label="5점 만점에 4.5점" 형태
-        for (const el of box.querySelectorAll('*')) {
-          const ariaLabel = el.getAttribute('aria-label') || '';
-          const titleAttr = el.getAttribute('title') || '';
-          // "5점 만점에 4.5점" 패턴
-          const ariaMatch = (ariaLabel + ' ' + titleAttr).match(/(\d+\.?\d*)\s*점\s*만점/i) ||
-                            (ariaLabel + ' ' + titleAttr).match(/만점에\s*(\d+\.?\d*)\s*점/i);
-          if (ariaMatch) {
-            const v = parseFloat(ariaMatch[1]);
-            if (v > 0 && v <= 5 && !rating) rating = v;
-          }
+      // 전략 2: rating 관련 클래스의 텍스트
+      if (!rating) {
+        for (const el of box.querySelectorAll('[class*="rating"]:not([class*="count"]):not([class*="total"])')) {
+          const rm = tx(el).match(/^(\d+\.?\d*)$/);
+          if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) { rating = v; break; } }
         }
+      }
 
-        // 텍스트에서 "★" 뒤에 "(N)" 패턴 찾기
-        // 쿠팡은 별 아이콘 + (리뷰수) 형태
-        if (!reviewCount) {
-          // "(N,NNN)" 패턴 — 괄호 안의 숫자가 리뷰수
-          // 단, 단위가격의 괄호 제외: "(100g당 547원)" 등
-          const allParens = [...fullText.matchAll(/\(([^)]+)\)/g)];
-          for (const pm of allParens) {
-            const inner = pm[1].trim();
-            // 단위가격인지 확인 (g당, ml당 등)
-            if (/당\s*[\d,]+\s*원/i.test(inner)) continue;
-            // 순수 숫자만 있는 경우 리뷰수
-            const cleaned = inner.replace(/[,.\s]/g, '');
-            if (/^\d+$/.test(cleaned)) {
-              const v = parseInt(cleaned, 10);
-              if (v > 0 && v < 1e7) { reviewCount = v; break; }
-            }
-          }
-        }
-
-        // 별점 추정: ★ 문자 카운트 기반 (half star = ★의 width로 구분하기 어려우므로 대략적)
-        if (!rating && reviewCount > 0) {
-          // 별 이미지/SVG가 있으면 개수로 추정
-          const starEls = box.querySelectorAll('[class*="star"] img, [class*="star"] svg, [class*="rating"] img, [class*="rating"] svg');
-          if (starEls.length > 0) {
-            // 별이 존재하면 보수적으로 4.5 추정
-            rating = 4.5;
-          }
-          // 또는 텍스트에서 별 유니코드 카운트
-          const starMatch = fullText.match(/[★⭐]{1,5}/);
-          if (starMatch) {
-            rating = starMatch[0].length;
-            if (rating > 5) rating = 5;
+      // 전략 3: aria-label 또는 title에서 "N점" 또는 "N out of 5"
+      if (!rating) {
+        for (const el of box.querySelectorAll('[aria-label], [title]')) {
+          const label = (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '');
+          let rm = label.match(/만점에\s*(\d+\.?\d*)/);
+          if (!rm) rm = label.match(/(\d+\.?\d*)\s*점/);
+          if (!rm) rm = label.match(/(\d+\.?\d*)\s*out\s*of\s*5/i);
+          if (rm) {
+            const v = parseFloat(rm[1]);
+            if (v > 0 && v <= 5) { rating = v; break; }
           }
         }
       }
 
-      // ── 이미지 ─────────────────────────────
-      const img = box.querySelector('img[src*="thumbnail"], img[data-img-src], img[src*="coupangcdn"], img');
+      // 전략 4: 별(star) 요소의 width 비율로 추정
+      if (!rating) {
+        const starContainer = box.querySelector('[class*="star"], [class*="rating-star"], [class*="Star"]');
+        if (starContainer) {
+          // filled star의 width 비율
+          const filled = starContainer.querySelector('[class*="fill"], [class*="active"], [class*="on"], [style*="width"]');
+          if (filled) {
+            const style = filled.getAttribute('style') || '';
+            const wm = style.match(/width:\s*([\d.]+)%/);
+            if (wm) {
+              rating = Math.round(parseFloat(wm[1]) / 20 * 10) / 10; // 100% = 5.0
+              if (rating > 5) rating = 5;
+            }
+          }
+          // filled star img/svg 개수로 추정
+          if (!rating) {
+            const allStars = starContainer.querySelectorAll('img, svg, [class*="star"]');
+            const filledStars = starContainer.querySelectorAll('[class*="fill"], [class*="active"], [class*="on"], [class*="full"]');
+            if (filledStars.length > 0 && filledStars.length <= 5) {
+              rating = filledStars.length;
+            } else if (allStars.length === 5) {
+              // 5개 별이 있으면 이미지의 색상/opacity로 판별 불가 → 보수적 4.5
+              rating = 4.5;
+            }
+          }
+        }
+      }
+
+      // 전략 5: 리뷰가 있는데 별점을 못 찾은 경우 — 별 이미지가 있으면 추정
+      // (아래에서 reviewCount 추출 후 재시도)
+
+      // ══════════════════════════════════════════
+      // ▶ 리뷰수 추출 (v5.5.3)
+      // ══════════════════════════════════════════
+      let reviewCount = 0;
+
+      // 전략 1: span.rating-total-count 직접 조회
+      const revEl = box.querySelector('span.rating-total-count, .rating-total-count');
+      if (revEl) {
+        reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
+      }
+
+      // 전략 2: count/review 관련 클래스
+      if (!reviewCount) {
+        for (const el of box.querySelectorAll('[class*="count"], [class*="review-count"]')) {
+          if (/rating-total-count/.test(el.className)) continue; // 이미 시도함
+          const v = nm(tx(el).replace(/[()]/g, ''));
+          if (v > 0 && v < 1e7) { reviewCount = v; break; }
+        }
+      }
+
+      // 전략 3: 텍스트 패턴 — "(N,NNN)" 형태의 괄호 안 숫자
+      if (!reviewCount) {
+        const fullText = tx(box);
+        const allParens = [...fullText.matchAll(/\(\s*([\d,]+)\s*\)/g)];
+        for (const pm of allParens) {
+          const inner = pm[1].trim();
+          // 단위가격 괄호 제외
+          const beforeParen = fullText.substring(0, fullText.indexOf(pm[0]));
+          if (/\d+\s*(g|kg|ml|l|개|매|입)\s*당\s*$/i.test(beforeParen)) continue;
+          if (/당$/.test(beforeParen.trim())) continue;
+
+          const v = nm(inner);
+          if (v > 0 && v < 1e7) { reviewCount = v; break; }
+        }
+      }
+
+      // 별점 재시도: 리뷰가 있는데 별점이 없으면 별 이미지 존재로 추정
+      if (!rating && reviewCount > 0) {
+        const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
+        if (hasStars) rating = 4.5; // 보수적 추정
+      }
+
+      // ══════════════════════════════════════════
+      // ▶ 이미지
+      // ══════════════════════════════════════════
+      const img = box.querySelector('img[src*="thumbnail"], img[src*="coupangcdn"], img[data-img-src], img');
       const imageUrl = img?.src || img?.getAttribute('data-img-src') || img?.getAttribute('data-src') || '';
 
-      // ── 광고 감지 (v5.5.2 — 다중 방법) ───────────
+      // ══════════════════════════════════════════
+      // ▶ 광고 감지 (v5.5.3 — 강화)
+      // ══════════════════════════════════════════
       let isAd = false;
 
-      // 1) 클래스 기반
-      const boxClasses = (box.className || '') + ' ' + (box.parentElement?.className || '');
-      isAd = /search-product__ad-badge|ad[-_]?badge|AdBadge/i.test(boxClasses);
+      // 1) li 클래스에 ad-badge 관련
+      const boxCls = box.className || '';
+      isAd = /search-product__ad-badge|ad[-_]?badge|AdBadge/i.test(boxCls);
 
-      // 2) 내부에 ad-badge 엘리먼트
+      // 2) 내부 ad-badge 엘리먼트
       if (!isAd) {
         isAd = !!box.querySelector('.ad-badge, .ad-badge-text, [class*="ad-badge"], [class*="AdBadge"], [class*="ad_badge"]');
       }
 
-      // 3) 텍스트 "AD" — 하단에 독립적 "AD" 텍스트가 있는지
+      // 3) 텍스트 "AD" — 독립된 작은 요소에서 (상품명이 아닌)
       if (!isAd) {
-        // "AD" 가 별도 요소로 존재하는지 (본문이 아닌)
-        for (const el of box.querySelectorAll('span, div, em, strong, label')) {
-          const t = tx(el);
-          if (t === 'AD' || t === 'ad' || t === '광고') { isAd = true; break; }
+        for (const el of box.querySelectorAll('span, div, em, strong, label, p')) {
+          const t = tx(el).trim();
+          // "AD" 또는 "AD ⓘ" 형태, 또는 "광고"
+          if (/^AD(\s*[ⓘ①])?$/i.test(t) || t === '광고') {
+            // 상품명이 아닌지 확인 (20자 이하의 작은 요소)
+            if (t.length <= 10) { isAd = true; break; }
+          }
         }
       }
 
       // 4) "광고 서비스를 구매한 업체" 문구
       if (!isAd) {
-        isAd = /광고\s*서비스를\s*구매한\s*업체/.test(fullText);
+        isAd = /광고\s*서비스를?\s*구매한?\s*업체/.test(tx(box));
       }
 
-      // ── 순위 번호 감지 ─────────────────────
-      // 상품 이미지 왼쪽 상단에 1, 2, 3 등 숫자 배지
+      // ══════════════════════════════════════════
+      // ▶ 순위 번호 감지 (비광고 상품의 이미지 좌상단 배지)
+      // ══════════════════════════════════════════
       let rankNum = 0;
-      // 작은 요소에서 1~50 범위의 독립 숫자를 찾기
-      for (const el of box.querySelectorAll('span, div, em, strong')) {
-        const t = tx(el);
-        const rect = el.getBoundingClientRect?.();
-        // 작은 요소 (배지) + 순수 숫자
-        if (/^\d{1,2}$/.test(t) && parseInt(t) >= 1 && parseInt(t) <= 50) {
-          // 배지 크기 확인 (있으면)
-          if (rect && rect.width > 0 && rect.width < 50 && rect.height < 50) {
-            rankNum = parseInt(t);
-            break;
-          }
-          // rect 못 구하면 텍스트 길이로 판단
-          if (!rankNum && t.length <= 2) {
-            rankNum = parseInt(t);
+      if (!isAd) {
+        // 이미지 컨테이너 근처의 작은 숫자 배지
+        const imgContainer = box.querySelector('[class*="image"], [class*="thumbnail"], [class*="photo"]') || box;
+        for (const el of imgContainer.querySelectorAll('span, div, em, strong')) {
+          const t = tx(el).trim();
+          if (/^\d{1,2}$/.test(t)) {
+            const n = parseInt(t, 10);
+            if (n >= 1 && n <= 50) {
+              // 크기 확인 — 배지는 작은 요소
+              const rect = el.getBoundingClientRect?.();
+              if (rect && rect.width > 0 && rect.width < 60 && rect.height < 60) {
+                rankNum = n;
+                break;
+              }
+              // getBoundingClientRect 없으면 클래스명 힌트
+              if (/badge|rank|num|position/i.test(el.className || '')) {
+                rankNum = n;
+                break;
+              }
+              // 마지막 수단: 짧은 텍스트(2자 이하)면서 부모도 작은 경우
+              if (t.length <= 2 && !rankNum) {
+                rankNum = n;
+              }
+            }
           }
         }
       }
 
-      // ── 로켓배송 감지 (v5.5.2) ─────────────
+      // ══════════════════════════════════════════
+      // ▶ 로켓배송 감지
+      // ══════════════════════════════════════════
       let isRocket = false;
 
       // 1) 클래스 기반
@@ -502,23 +644,25 @@
 
       // 3) 텍스트 기반
       if (!isRocket) {
-        isRocket = /로켓배송|로켓와우|로켓프레시|로켓직구/.test(fullText);
+        const boxText = tx(box);
+        isRocket = /로켓배송|로켓와우|로켓프레시|로켓직구/.test(boxText);
       }
 
-      // 4) "새벽 도착 보장" = 로켓프레시
+      // 4) "새벽 도착 보장" 또는 "내일(X) 도착 보장"
       if (!isRocket) {
-        isRocket = /새벽\s*도착\s*보장/.test(fullText);
+        const boxText = tx(box);
+        isRocket = /새벽\s*도착\s*보장/.test(boxText) || /내일\([^)]+\)\s*(새벽\s*)?도착\s*보장/.test(boxText);
       }
 
-      // 5) "내일(X) 도착 보장" — 로켓배송 표시일 가능성
+      // 5) "오늘출발" — 로켓배송 표시일 가능성 높음
       if (!isRocket) {
-        isRocket = /내일\([^)]+\)\s*(새벽\s*)?도착\s*보장/.test(fullText);
+        isRocket = /오늘\s*출발/.test(tx(box));
       }
 
-      const href = (a.href || '').startsWith('http') ? a.href : 'https://www.coupang.com' + (a.getAttribute('href') || '');
+      const href = (link.href || '').startsWith('http') ? link.href : 'https://www.coupang.com' + (link.getAttribute('href') || '');
 
       items.push({
-        productId: pid, title, price, rating, reviewCount,
+        productId: pid, title, price, originalPrice, rating, reviewCount,
         url: href, imageUrl,
         position: items.length + 1, query: q,
         isAd, isRocket, rankNum,
@@ -534,10 +678,10 @@
       const adCnt = items.filter(i => i.isAd).length;
       const rkCnt = items.filter(i => i.isRocket).length;
       const rankCnt = items.filter(i => i.rankNum > 0).length;
-      console.log(`%c[SH] v${VER} 파싱: ${items.length}개 | 가격${pCnt} 평점${rCnt} 리뷰${rvCnt} 광고${adCnt} 로켓${rkCnt} 순위${rankCnt}`, 'color:#6366f1;font-weight:bold;');
-      // 처음 3개 상품 상세 로그
-      items.slice(0, 3).forEach((it, i) => {
-        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | ${it.price}원 | ★${it.rating} | 리뷰${it.reviewCount} | ${it.isAd?'AD':'일반'} | ${it.isRocket?'🚀':'-'} | rank=${it.rankNum}`);
+      console.log(`%c[SH] v${VER} 파싱 완료: ${items.length}개 | 가격${pCnt} 평점${rCnt} 리뷰${rvCnt} 광고${adCnt} 로켓${rkCnt} 순위${rankCnt}`, 'color:#6366f1;font-weight:bold;');
+      // 처음 5개 상품 상세 로그
+      items.slice(0, 5).forEach((it, i) => {
+        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | 가격:${it.price.toLocaleString()}원 | ★${it.rating} | 리뷰:${it.reviewCount.toLocaleString()} | ${it.isAd?'AD':'일반'} | ${it.isRocket?'🚀':'-'} | rank=${it.rankNum}`);
       });
     }
     return items;
@@ -578,15 +722,19 @@
   }
 
   // ============================================================
-  //  경쟁도 계산
+  //  경쟁도 계산 (전체 36개 기준)
   // ============================================================
   function calcCompetition(items) {
+    // ★ 전체 상품수 기준으로 계산 (price/review/rating 이 0인 것도 포함)
+    const totalItems = items.length;
+    const prices = items.map(i => i.price).filter(p => p > 0);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
+    const ratings = items.map(i => i.rating).filter(r => r > 0);
+
     const avgRev = reviews.length ? reviews.reduce((a, b) => a + b, 0) / reviews.length : 0;
     const highRev = items.filter(i => i.reviewCount >= 100).length;
-    const highRatio = items.length ? highRev / items.length : 0;
-    const adRatio = items.length ? items.filter(i => i.isAd).length / items.length : 0;
-    const ratings = items.map(i => i.rating).filter(r => r > 0);
+    const highRatio = totalItems ? highRev / totalItems : 0;
+    const adRatio = totalItems ? items.filter(i => i.isAd).length / totalItems : 0;
     const avgRat = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
 
     let sc = 0;
@@ -677,37 +825,37 @@
       return;
     }
 
-    // 통계 계산
+    // ★ 통계 계산 (전체 items 기준) ★
     const prices = items.map(i => i.price).filter(p => p > 0);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
     const ratings = items.map(i => i.rating).filter(r => r > 0);
     const avgPrice = prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
     const minPrice = prices.length ? Math.min(...prices) : 0;
     const maxPrice = prices.length ? Math.max(...prices) : 0;
-    const totalRev = reviews.reduce((a, b) => a + b, 0);
-    const avgReview = reviews.length ? Math.round(totalRev / reviews.length) : 0;
+    const avgReview = reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0;
     const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : '-';
     const adCnt = items.filter(i => i.isAd).length;
     const rocketCnt = items.filter(i => i.isRocket).length;
+    const reviewOver100 = items.filter(i => i.reviewCount >= 100).length;
+    const reviewOver100Pct = items.length ? Math.round(reviewOver100 / items.length * 100) : 0;
     const comp = calcCompetition(items);
 
     // 차트 데이터
     const priceBuckets = makeHistogram(prices, 6);
     const revBuckets = makeHistogram(reviews, 5);
 
-    // TOP3 — 광고 제외한 실제 순위 상품 (rankNum이 있으면 순위 순, 없으면 position 순)
+    // TOP3 — 광고 제외한 실제 순위 상품
     const organicItems = items.filter(i => !i.isAd);
     const rankedItems = organicItems.filter(i => i.rankNum > 0).sort((a, b) => a.rankNum - b.rankNum);
-    const top3 = rankedItems.length >= 3
+    let top3 = rankedItems.length >= 3
       ? rankedItems.slice(0, 3)
       : [...rankedItems, ...organicItems.filter(i => !i.rankNum)].slice(0, 3);
-    // top3가 비어있으면 전체에서
-    if (top3.length === 0) top3.push(...items.slice(0, 3));
+    if (top3.length === 0) top3 = items.slice(0, 3);
 
     body.innerHTML = `
       <!-- 시장 개요 -->
       <div class="sh-sec">
-        <div class="sh-sec-title">📊 시장 개요</div>
+        <div class="sh-sec-title">📊 시장 개요 (${items.length}개 분석)</div>
         <div class="sh-stats">
           <div class="sh-st">
             <span class="sh-st-v accent">${items.length}</span>
@@ -715,15 +863,15 @@
           </div>
           <div class="sh-st">
             <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '원' : '-'}</span>
-            <span class="sh-st-l">평균가</span>
+            <span class="sh-st-l">평균가 (${prices.length}개)</span>
           </div>
           <div class="sh-st">
             <span class="sh-st-v">${avgRating}</span>
-            <span class="sh-st-l">평균평점</span>
+            <span class="sh-st-l">평균평점 (${ratings.length}개)</span>
           </div>
           <div class="sh-st">
             <span class="sh-st-v amber">${avgReview.toLocaleString()}</span>
-            <span class="sh-st-l">평균리뷰</span>
+            <span class="sh-st-l">평균리뷰 (${reviews.length}개)</span>
           </div>
           <div class="sh-st">
             <span class="sh-st-v">${adCnt}</span>
@@ -742,6 +890,9 @@
             <span style="font-size:10px !important;font-weight:700 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label} (${comp.sc}점)</span>
           </div>
           <div class="sh-comp-bar"><div class="sh-comp-fill ${comp.cls}" style="width:${comp.sc}% !important;"></div></div>
+          <div style="font-size:8px !important;color:#94a3b8 !important;margin-top:4px !important;">
+            리뷰 100+ 상품: ${reviewOver100}개 (${reviewOver100Pct}%)
+          </div>
         </div>
       </div>
 
@@ -888,7 +1039,7 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
-      console.log(`%c[SH] ✅ ${items.length}개 파싱`, 'color:#16a34a;font-weight:bold;');
+      console.log(`%c[SH] ✅ ${items.length}개 파싱 완료`, 'color:#16a34a;font-weight:bold;');
     }
 
     if (!panel) createPanel();
