@@ -2,7 +2,7 @@
    Coupang Sourcing Helper — Content Script v5.1.3
    "모달 패널 UX" — 셀록홈즈/아이템스카우트 참고
 
-   v5.1.3: overlay→모달형 전환 + 버전 가드
+   v5.1.4: overlay→모달형 전환 + 디버그 로그 + 강제 표시
    - 상품 카드: 하단 데이터바 + 우상단 점수 배지 (가림 없음)
    - 클릭시: 우측 고정 모달 패널 열림 (360px)
    - 모달: 상품정보 + 점수 + 1688/알리 + AI 사전매칭 + 저장
@@ -10,7 +10,7 @@
    - v5.0 overlay 잔재 자동 정리
    ============================================================ */
 (function () {
-  const SH_VERSION = '5.1.3';
+  const SH_VERSION = '5.1.4';
   const SH_UI_MODE = 'modal';
 
   // ---- v5.0 잔재 자동 정리 (overlay 방식 제거) ----
@@ -536,10 +536,9 @@
     if (container.getAttribute(BADGE_ATTR)) return;
     container.setAttribute(BADGE_ATTR, item.productId || 'true');
 
-    const pos = getComputedStyle(container).position;
-    if (pos === 'static' || pos === '') {
-      container.classList.add('sh-relative');
-    }
+    // 강제 overflow visible + relative
+    container.style.overflow = 'visible';
+    container.style.position = 'relative';
 
     const score = quickScore(item, allItems);
     const { grade, cls, color } = scoreGrade(score);
@@ -1102,8 +1101,15 @@
     if (!location.href.includes('/np/search')) return;
 
     let products = parseProductsLegacy();
-    if (products.length < 3) products = parseProductsByLinks();
-    if (!products.length) return;
+    console.log(`%c[SH] parseProductsLegacy: ${products.length}개`, 'color:#6366f1;font-size:11px;');
+    if (products.length < 3) {
+      products = parseProductsByLinks();
+      console.log(`%c[SH] parseProductsByLinks: ${products.length}개`, 'color:#6366f1;font-size:11px;');
+    }
+    if (!products.length) {
+      console.log('%c[SH] ⚠️ 상품 파싱 실패 — 0개', 'color:#dc2626;font-size:12px;');
+      return;
+    }
 
     const query = getQuery();
     const signature = JSON.stringify({
@@ -1119,11 +1125,14 @@
     injectStyles();
 
     // 각 상품 카드에 데이터바 + 배지 삽입
+    let insertedCount = 0;
     for (const item of allParsedItems) {
       if (item._container) {
         insertDataBar(item._container, item, allParsedItems);
+        insertedCount++;
       }
     }
+    console.log(`%c[SH] ✅ 데이터바 삽입: ${insertedCount}/${allParsedItems.length}개`, 'color:#16a34a;font-weight:bold;font-size:12px;');
 
     // background에도 데이터 전달 (사이드패널 호환)
     const cleanItems = allParsedItems.map(({ _container, ...rest }) => rest);
