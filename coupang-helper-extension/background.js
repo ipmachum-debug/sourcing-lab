@@ -8,11 +8,21 @@
 
 importScripts('api-client.js');
 
-// ---- 설치/초기화 ----
-chrome.runtime.onInstalled.addListener(() => {
+// ---- 설치/업데이트 시 열린 쿠팡 탭 자동 새로고침 ----
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   // 순위 추적 알람 (매 6시간마다)
   chrome.alarms.create('rankTracking', { periodInMinutes: 360 });
+
+  // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
+  if (details.reason === 'install' || details.reason === 'update') {
+    chrome.tabs.query({ url: ['https://www.coupang.com/*', 'https://wing.coupang.com/*', 'https://m-wing.coupang.com/*'] }, (tabs) => {
+      for (const tab of tabs) {
+        chrome.tabs.reload(tab.id);
+      }
+    });
+    console.log(`[SH] Extension ${details.reason}d — v5.1 — reloaded coupang tabs`);
+  }
 });
 
 // ---- 탭 URL 변경 감지 (SPA Navigation 대응) ----
