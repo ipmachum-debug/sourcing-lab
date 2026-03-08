@@ -1017,7 +1017,45 @@ async function callAISingleProduct(
     const text = typeof content === 'string' ? content : (content as any)[0]?.text || '';
     return JSON.parse(text);
   } catch (e: any) {
-    console.error('[AI Sourcing] 단일 상품 분석 실패:', e.message);
+    console.error('[AI Sourcing] LLM 단일 분석 실패:', e.message);
+
+    // OpenAI 직접 호출 폴백
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (apiKey) {
+      try {
+        console.log('[AI Sourcing] OpenAI 폴백 시도 (단일 상품)...');
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.7,
+            max_tokens: 2048,
+            response_format: { type: 'json_object' },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json() as any;
+          const c = data.choices?.[0]?.message?.content;
+          if (c) {
+            console.log('[AI Sourcing] OpenAI 폴백 성공 (단일 상품)');
+            return JSON.parse(c);
+          }
+        } else {
+          const errBody = await res.text();
+          console.error('[AI Sourcing] OpenAI 폴백 HTTP 에러:', res.status, errBody.substring(0, 200));
+        }
+      } catch (e2: any) {
+        console.error('[AI Sourcing] OpenAI 폴백도 실패:', e2.message);
+      }
+    } else {
+      console.error('[AI Sourcing] OPENAI_API_KEY 환경변수 없음');
+    }
+
     return null; // 폴백은 호출자가 처리
   }
 }
