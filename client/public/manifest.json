@@ -1,0 +1,24 @@
+{
+  "name": "Product Collector Dashboard",
+  "short_name": "Product Collector",
+  "description": "귀여운 상품 수집 대시보드 - AliExpress와 1688 상품 분석 도구",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fce7f3",
+  "theme_color": "#ec4899",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://files.manuscdn.com/user_upload_by_module/session_file/310519663124148573/nSpFQVKKLLdsjABQ.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://files.manuscdn.com/user_upload_by_module/session_file/310519663124148573/cVWrhWLXQcRRAmXv.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `keyword_list` ADD `group_name` varchar(100);
