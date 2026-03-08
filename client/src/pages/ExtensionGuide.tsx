@@ -586,9 +586,22 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.7",
+                    version: "v5.6.0",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: [
+                      "검색 수요 추정(Search Demand Estimation) 시스템 구축",
+                      "키워드별 일별 통계 자동 계산: 리뷰 증가량 · 판매 추정 · 경쟁도 · 수요점수 · 종합점수",
+                      "스냅샷 저장 시 자동으로 일별 통계 생성 (실시간 누적)",
+                      "대시보드에 '검색 수요' 탭 추가: 키워드 목록 + 일별 추이 그래프 + 상세 데이터",
+                      "키워드 삭제 기능: 개별 삭제 · 체크박스 일괄 삭제 (스냅샷+통계 동시 제거)",
+                      "검색 수요 TOP 5 미리보기를 대시보드 개요에 추가",
+                      "HiddenScore 산출: reviewGrowth×0.5 + (avgReview/productCount)×0.3 + (1-adRatio)×0.2",
+                    ],
+                  },
+                  {
+                    version: "v5.5.7",
+                    date: "2026-03-08",
                     changes: [
                       "1688 한국어 직접 전달: 번역 로직 완전 제거 — 1688이 한국어를 자동 분석/번역해줌",
                       "쿠팡 제품 제목을 그대로 1688에 전달 (예: '마음담아 전통 세뻓돈 어린이 용돈봉투')",

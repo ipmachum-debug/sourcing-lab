@@ -509,3 +509,37 @@ export const extWingSearches = mysqlTable("ext_wing_searches", {
 
 export type ExtWingSearch = typeof extWingSearches.$inferSelect;
 export type InsertExtWingSearch = typeof extWingSearches.$inferInsert;
+
+// ==================== Extension: 키워드 일별 통계 (ext_keyword_daily_stats) ====================
+// 키워드별 일별 스냅샷 기반 집계 데이터 — 검색 수요 추정의 핵심
+export const extKeywordDailyStats = mysqlTable("ext_keyword_daily_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  query: varchar("query", { length: 255 }).notNull(),
+  statDate: varchar("stat_date", { length: 10 }).notNull(),          // YYYY-MM-DD
+  snapshotCount: int("snapshot_count").default(0),                    // 해당일 스냅샷 수
+  productCount: int("product_count").default(0),                      // 상품 수
+  avgPrice: int("avg_price").default(0),                              // 평균가
+  avgRating: decimal("avg_rating", { precision: 3, scale: 1 }).default("0"),
+  avgReview: int("avg_review").default(0),                            // 평균 리뷰 수
+  totalReviewSum: int("total_review_sum").default(0),                 // 전체 리뷰 합계 (리뷰 성장 계산용)
+  adCount: int("ad_count").default(0),                                // 광고 상품 수
+  adRatio: int("ad_ratio").default(0),                                // 광고 비율 (%)
+  rocketCount: int("rocket_count").default(0),                        // 로켓배송 상품 수
+  highReviewCount: int("high_review_count").default(0),               // 리뷰100+ 상품 수
+  competitionScore: int("competition_score").default(0),              // 경쟁 점수 0~100
+  competitionLevel: mysqlEnum("competition_level", ["easy", "medium", "hard"]).default("medium"),
+  // 전일 대비 변동 (computed)
+  reviewGrowth: int("review_growth").default(0),                      // 리뷰 증가량 (전일 대비 totalReviewSum 차이)
+  salesEstimate: int("sales_estimate").default(0),                    // 추정 판매량 = reviewGrowth × 20
+  priceChange: int("price_change").default(0),                        // 평균가 변동 (전일 대비)
+  productCountChange: int("product_count_change").default(0),         // 상품수 변동
+  // 검색 수요 추정 스코어
+  demandScore: int("demand_score").default(0),                        // 검색 수요 점수 0~100
+  keywordScore: int("keyword_score").default(0),                      // 종합 키워드 점수 (HiddenScore)
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtKeywordDailyStat = typeof extKeywordDailyStats.$inferSelect;
+export type InsertExtKeywordDailyStat = typeof extKeywordDailyStats.$inferInsert;

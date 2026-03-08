@@ -35,7 +35,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.7';
+  const VER = '5.6.0';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;

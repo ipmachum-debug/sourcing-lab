@@ -21,7 +21,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.7';
+  const VER = '5.6.0';
   console.log(`%c[SH Detail] v${VER} 상품 상세 파싱 스크립트 로드`, 'color:#6366f1;font-weight:bold;font-size:12px;');
   let debounceTimer = null;
   let lastSignature = '';

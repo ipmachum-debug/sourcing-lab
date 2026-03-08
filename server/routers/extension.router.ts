@@ -3,7 +3,8 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   extSearchSnapshots, extCandidates, extRankTrackings, extTrackedKeywords,
-  extProductDetails, extNotifications, extReviewAnalyses, extWingSearches
+  extProductDetails, extNotifications, extReviewAnalyses, extWingSearches,
+  extKeywordDailyStats
 } from "../../drizzle/schema";
 import { eq, and, desc, sql, like, asc, gte, ne, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -54,6 +55,8 @@ export const extensionRouter = router({
             itemsJson: input.items ? JSON.stringify(input.items) : null,
           })
           .where(eq(extSearchSnapshots.id, existing.id));
+        // 자동으로 일별 통계 계산 (비동기, 실패 무시)
+        autoComputeKeywordDailyStat(ctx.user!.id, input.query, db).catch(() => {});
         return { success: true, id: existing.id, updated: true };
       }
 
@@ -71,6 +74,9 @@ export const extensionRouter = router({
         competitionLevel: input.competitionLevel,
         itemsJson: input.items ? JSON.stringify(input.items) : null,
       });
+
+      // 자동으로 일별 통계 계산 (비동기, 실패 무시)
+      autoComputeKeywordDailyStat(ctx.user!.id, input.query, db).catch(() => {});
 
       return { success: true, id: (result as any)?.[0]?.insertId };
     }),
@@ -1470,6 +1476,279 @@ export const extensionRouter = router({
         .where(eq(extWingSearches.userId, ctx.user!.id));
       return { success: true };
     }),
+
+  // ===== 검색 수요 추정 (Search Demand Estimation) =====
+
+  // 키워드별 일별 통계 계산 및 저장 (스냅샷 데이터 기반)
+  computeKeywordDailyStats: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(255).optional(), // 특정 키워드만 또는 전체
+    }).optional().default({}))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      // 오늘 날짜 (KST)
+      const today = new Date();
+      today.setHours(today.getHours() + 9);
+      const todayStr = today.toISOString().slice(0, 10);
+
+      // 해당 사용자의 스냅샷에서 키워드 목록 추출
+      const queryConditions = [eq(extSearchSnapshots.userId, ctx.user!.id)];
+      if (input?.query) {
+        queryConditions.push(eq(extSearchSnapshots.query, input.query));
+      }
+
+      const snapshots = await db.select()
+        .from(extSearchSnapshots)
+        .where(and(...queryConditions))
+        .orderBy(desc(extSearchSnapshots.createdAt));
+
+      if (!snapshots.length) return { success: true, computed: 0 };
+
+      // 키워드별로 그룹화
+      const byQuery = new Map<string, typeof snapshots>();
+      for (const s of snapshots) {
+        const arr = byQuery.get(s.query) || [];
+        arr.push(s);
+        byQuery.set(s.query, arr);
+      }
+
+      let computed = 0;
+      const entries = Array.from(byQuery.entries());
+      for (const [query, querySnapshots] of entries) {
+        const latest = querySnapshots[0]; // 가장 최신 스냅샷
+        let items: any[] = [];
+        try {
+          items = latest.itemsJson ? JSON.parse(latest.itemsJson) : [];
+        } catch { items = []; }
+
+        // items에서 상세 통계 계산
+        const totalReviewSum = items.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+        const adCount = items.filter((i: any) => i.isAd).length;
+        const rocketCount = items.filter((i: any) => i.isRocket).length;
+        const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
+        const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
+
+        // 전일 데이터 조회
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+        const [prevStat] = await db.select()
+          .from(extKeywordDailyStats)
+          .where(and(
+            eq(extKeywordDailyStats.userId, ctx.user!.id),
+            eq(extKeywordDailyStats.query, query),
+            eq(extKeywordDailyStats.statDate, yesterdayStr),
+          ))
+          .limit(1);
+
+        // 리뷰 성장량 = 오늘 전체 리뷰합 - 어제 전체 리뷰합
+        const reviewGrowth = prevStat ? Math.max(0, totalReviewSum - (prevStat.totalReviewSum || 0)) : 0;
+        const salesEstimate = reviewGrowth * 20; // 리뷰 1개 ≈ 판매 20개
+        const priceChange = prevStat ? (latest.avgPrice || 0) - (prevStat.avgPrice || 0) : 0;
+        const productCountChange = prevStat ? (latest.totalItems || 0) - (prevStat.productCount || 0) : 0;
+
+        // 검색 수요 점수 계산
+        // demandScore = salesEstimate 기반 (0~100 정규화)
+        let demandScore = 0;
+        if (salesEstimate > 500) demandScore = 90;
+        else if (salesEstimate > 200) demandScore = 75;
+        else if (salesEstimate > 100) demandScore = 60;
+        else if (salesEstimate > 50) demandScore = 45;
+        else if (salesEstimate > 20) demandScore = 30;
+        else if (salesEstimate > 5) demandScore = 15;
+        else if (reviewGrowth > 0) demandScore = 10;
+
+        // HiddenScore = reviewGrowth*0.5 + (avgReview/productCount)*0.3 + (1-adRatio/100)*0.2
+        const avgReviewPerProduct = (latest.totalItems || 1) > 0 ? (latest.avgReview || 0) / Math.max(1, latest.totalItems || 1) : 0;
+        const keywordScore = Math.round(
+          Math.min(100,
+            reviewGrowth * 0.5 +
+            avgReviewPerProduct * 30 +
+            (1 - adRatio / 100) * 20
+          )
+        );
+
+        // upsert: 같은 날짜+키워드가 있으면 업데이트
+        const [existing] = await db.select({ id: extKeywordDailyStats.id })
+          .from(extKeywordDailyStats)
+          .where(and(
+            eq(extKeywordDailyStats.userId, ctx.user!.id),
+            eq(extKeywordDailyStats.query, query),
+            eq(extKeywordDailyStats.statDate, todayStr),
+          ))
+          .limit(1);
+
+        const statData = {
+          snapshotCount: querySnapshots.length,
+          productCount: latest.totalItems || 0,
+          avgPrice: latest.avgPrice || 0,
+          avgRating: latest.avgRating || "0",
+          avgReview: latest.avgReview || 0,
+          totalReviewSum,
+          adCount,
+          adRatio,
+          rocketCount,
+          highReviewCount,
+          competitionScore: latest.competitionScore || 0,
+          competitionLevel: (latest.competitionLevel || "medium") as "easy" | "medium" | "hard",
+          reviewGrowth,
+          salesEstimate,
+          priceChange,
+          productCountChange,
+          demandScore,
+          keywordScore,
+        };
+
+        if (existing) {
+          await db.update(extKeywordDailyStats)
+            .set(statData)
+            .where(eq(extKeywordDailyStats.id, existing.id));
+        } else {
+          await db.insert(extKeywordDailyStats).values({
+            userId: ctx.user!.id,
+            query,
+            statDate: todayStr,
+            ...statData,
+          });
+        }
+        computed++;
+      }
+
+      return { success: true, computed, date: todayStr };
+    }),
+
+  // 키워드별 일별 통계 목록 조회 (특정 키워드의 시계열 데이터)
+  getKeywordDailyStats: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(255),
+      days: z.number().int().min(1).max(90).default(30),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      return db.select()
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          eq(extKeywordDailyStats.query, input.query),
+          sql`${extKeywordDailyStats.statDate} >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL ${input.days} DAY), '%Y-%m-%d')`,
+        ))
+        .orderBy(asc(extKeywordDailyStats.statDate))
+        .limit(90);
+    }),
+
+  // 키워드별 최신 일별 통계 요약 (대시보드 전체 키워드 목록)
+  listKeywordStats: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(200).default(100),
+      sortBy: z.enum(["keyword_score", "demand_score", "review_growth", "sales_estimate", "competition_score", "avg_price", "query"]).default("keyword_score"),
+      sortDir: z.enum(["asc", "desc"]).default("desc"),
+      search: z.string().optional(),
+    }).default({ limit: 100, sortBy: "keyword_score", sortDir: "desc" }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 각 키워드의 가장 최신 stat_date 레코드만 가져오기
+      const conditions = [eq(extKeywordDailyStats.userId, ctx.user!.id)];
+      if (input?.search) {
+        conditions.push(like(extKeywordDailyStats.query, `%${input.search}%`));
+      }
+
+      // 서브쿼리로 각 키워드의 최신 날짜만 가져오기
+      const rows = await db.select()
+        .from(extKeywordDailyStats)
+        .where(and(
+          ...conditions,
+          sql`(${extKeywordDailyStats.query}, ${extKeywordDailyStats.statDate}) IN (
+            SELECT \`query\`, MAX(stat_date) FROM ext_keyword_daily_stats
+            WHERE user_id = ${ctx.user!.id}
+            GROUP BY \`query\`
+          )`,
+        ))
+        .limit(input?.limit || 100);
+
+      // 정렬
+      const sortBy = input?.sortBy || "keyword_score";
+      const sortDir = input?.sortDir || "desc";
+      rows.sort((a: any, b: any) => {
+        const av = sortBy === "query" ? (a.query || "") : Number(a[sortBy] || 0);
+        const bv = sortBy === "query" ? (b.query || "") : Number(b[sortBy] || 0);
+        if (sortBy === "query") {
+          return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+        }
+        return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+      });
+
+      return rows;
+    }),
+
+  // 키워드별 통계 전체 요약 (대시보드 헤더)
+  keywordStatsOverview: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [overview] = await db.select({
+        totalKeywords: sql<number>`COUNT(DISTINCT \`query\`)`,
+        avgDemandScore: sql<number>`ROUND(AVG(demand_score))`,
+        avgKeywordScore: sql<number>`ROUND(AVG(keyword_score))`,
+        avgCompetition: sql<number>`ROUND(AVG(competition_score))`,
+        totalSalesEstimate: sql<number>`SUM(sales_estimate)`,
+        avgPrice: sql<number>`ROUND(AVG(avg_price))`,
+        totalReviewGrowth: sql<number>`SUM(review_growth)`,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          sql`(${extKeywordDailyStats.query}, ${extKeywordDailyStats.statDate}) IN (
+            SELECT \`query\`, MAX(stat_date) FROM ext_keyword_daily_stats
+            WHERE user_id = ${ctx.user!.id}
+            GROUP BY \`query\`
+          )`,
+        ));
+
+      return overview || {};
+    }),
+
+  // 키워드 삭제 (키워드 데이터 전체 제거: 스냅샷 + 일별통계)
+  deleteKeyword: protectedProcedure
+    .input(z.object({ query: z.string().min(1).max(255) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 스냅샷 삭제
+      await db.delete(extSearchSnapshots)
+        .where(and(eq(extSearchSnapshots.userId, ctx.user!.id), eq(extSearchSnapshots.query, input.query)));
+
+      // 일별 통계 삭제
+      await db.delete(extKeywordDailyStats)
+        .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, input.query)));
+
+      return { success: true, query: input.query };
+    }),
+
+  // 키워드 일괄 삭제
+  deleteKeywords: protectedProcedure
+    .input(z.object({ queries: z.array(z.string().min(1).max(255)).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      for (const query of input.queries) {
+        await db.delete(extSearchSnapshots)
+          .where(and(eq(extSearchSnapshots.userId, ctx.user!.id), eq(extSearchSnapshots.query, query)));
+        await db.delete(extKeywordDailyStats)
+          .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, query)));
+      }
+
+      return { success: true, count: input.queries.length };
+    }),
 });
 
 // ============================================================
@@ -1751,4 +2030,104 @@ function generateRuleBasedAnalysis(
       noReviewRatio: totalItems ? Math.round(noReviewItems.length / totalItems * 100) : 0,
     },
   };
+}
+
+// ============================================================
+//  자동 키워드 일별 통계 계산 헬퍼
+// ============================================================
+
+async function autoComputeKeywordDailyStat(userId: number, query: string, db: any) {
+  try {
+    const today = new Date();
+    today.setHours(today.getHours() + 9);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    // 해당 키워드의 최신 스냅샷
+    const [latest] = await db.select()
+      .from(extSearchSnapshots)
+      .where(and(eq(extSearchSnapshots.userId, userId), eq(extSearchSnapshots.query, query)))
+      .orderBy(desc(extSearchSnapshots.createdAt))
+      .limit(1);
+
+    if (!latest) return;
+
+    let items: any[] = [];
+    try { items = latest.itemsJson ? JSON.parse(latest.itemsJson) : []; } catch { items = []; }
+
+    const totalReviewSum = items.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+    const adCount = items.filter((i: any) => i.isAd).length;
+    const rocketCount = items.filter((i: any) => i.isRocket).length;
+    const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
+    const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
+
+    // 전일 데이터
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    const [prevStat] = await db.select()
+      .from(extKeywordDailyStats)
+      .where(and(
+        eq(extKeywordDailyStats.userId, userId),
+        eq(extKeywordDailyStats.query, query),
+        eq(extKeywordDailyStats.statDate, yesterdayStr),
+      ))
+      .limit(1);
+
+    const reviewGrowth = prevStat ? Math.max(0, totalReviewSum - (prevStat.totalReviewSum || 0)) : 0;
+    const salesEstimate = reviewGrowth * 20;
+    const priceChange = prevStat ? (latest.avgPrice || 0) - (prevStat.avgPrice || 0) : 0;
+    const productCountChange = prevStat ? (latest.totalItems || 0) - (prevStat.productCount || 0) : 0;
+
+    let demandScore = 0;
+    if (salesEstimate > 500) demandScore = 90;
+    else if (salesEstimate > 200) demandScore = 75;
+    else if (salesEstimate > 100) demandScore = 60;
+    else if (salesEstimate > 50) demandScore = 45;
+    else if (salesEstimate > 20) demandScore = 30;
+    else if (salesEstimate > 5) demandScore = 15;
+    else if (reviewGrowth > 0) demandScore = 10;
+
+    const avgReviewPerProduct = (latest.totalItems || 1) > 0 ? (latest.avgReview || 0) / Math.max(1, latest.totalItems || 1) : 0;
+    const keywordScore = Math.round(Math.min(100, reviewGrowth * 0.5 + avgReviewPerProduct * 30 + (1 - adRatio / 100) * 20));
+
+    // upsert
+    const [existing] = await db.select({ id: extKeywordDailyStats.id })
+      .from(extKeywordDailyStats)
+      .where(and(
+        eq(extKeywordDailyStats.userId, userId),
+        eq(extKeywordDailyStats.query, query),
+        eq(extKeywordDailyStats.statDate, todayStr),
+      ))
+      .limit(1);
+
+    const statData = {
+      snapshotCount: 1,
+      productCount: latest.totalItems || 0,
+      avgPrice: latest.avgPrice || 0,
+      avgRating: latest.avgRating || "0",
+      avgReview: latest.avgReview || 0,
+      totalReviewSum,
+      adCount,
+      adRatio,
+      rocketCount,
+      highReviewCount,
+      competitionScore: latest.competitionScore || 0,
+      competitionLevel: (latest.competitionLevel || "medium") as "easy" | "medium" | "hard",
+      reviewGrowth,
+      salesEstimate,
+      priceChange,
+      productCountChange,
+      demandScore,
+      keywordScore,
+    };
+
+    if (existing) {
+      await db.update(extKeywordDailyStats).set(statData).where(eq(extKeywordDailyStats.id, existing.id));
+    } else {
+      await db.insert(extKeywordDailyStats).values({ userId, query, statDate: todayStr, ...statData });
+    }
+  } catch (err) {
+    console.error("[autoComputeKeywordDailyStat]", err);
+  }
 }
