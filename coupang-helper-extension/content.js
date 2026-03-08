@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.5.4
+   Coupang Sourcing Helper — Content Script v5.5.5
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -7,6 +7,11 @@
    2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
+
+   v5.5.5 1688 인코딩 버그 수정:
+   - 1688 URL에 encodeURIComponent 대신 raw 문자열 사용 (GBK 호환)
+   - 공백만 +로 치환, 나머지는 브라우저가 처리
+   - 중국어/한국어 키워드가 1688에서 깨지지 않음
 
    v5.5.4 1688 키워드 버그 수정:
    - extractKw()가 CN 매핑 없을 때 한국어를 cn으로 반환하던 버그 수정
@@ -27,7 +32,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.4';
+  const VER = '5.5.5';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -1101,7 +1106,7 @@
           console.log(`[SH] 1688 한국어 폴백: "${keyword}"`);
         }
 
-        window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(keyword), '_blank');
+        window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + keyword.replace(/\s+/g, '+'), '_blank');
         b1.textContent = '1688';
       });
       return;

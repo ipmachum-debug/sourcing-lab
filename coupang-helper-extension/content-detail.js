@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Product Detail Content Script v5.5.4
+   Coupang Sourcing Helper — Product Detail Content Script v5.5.5
    쿠팡 상품 상세 페이지에서 가격, 평점, 리뷰수, 구매수,
    판매자, 옵션 등 상세 데이터 파싱
 
@@ -12,7 +12,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.4';
+  const VER = '5.5.5';
   console.log(`%c[SH Detail] v${VER} 상품 상세 파싱 스크립트 로드`, 'color:#6366f1;font-weight:bold;font-size:12px;');
   let debounceTimer = null;
   let lastSignature = '';

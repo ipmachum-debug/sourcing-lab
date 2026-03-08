@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.4";
+const EXTENSION_VERSION = "5.5.5";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.5.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,9 +586,14 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.4",
+                    version: "v5.5.5",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: ["1688 URL 인코딩 버그 수정: encodeURIComponent 제거 (GBK 호환)", "1688은 GBK 인코딩 사용 — UTF-8 percent-encoding이 깨지는 문제 해결", "중국어/한국어 키워드를 raw 문자열으로 전달 (공백만 +로 치환)", "콘텐츠 스크립트 + 사이드패널 + 대량검색 + AI분석 모두 수정", "이미지 검색 URL은 encodeURIComponent 유지 (이미지 URL은 UTF-8 정상)"],
+                  },
+                  {
+                    version: "v5.5.4",
+                    date: "2026-03-08",
                     changes: ["1688 키워드 버그 수정: 중국어 매핑 없을 때 한국어가 1688 URL에 그대로 전달되던 문제 해결", "1688 검색 4단계 폴백: 서버AI → 로컬사전 → Google Translate → 한국어", "콘솔에 1688 키워드 변환 과정 상세 로그 추가", "AliExpress 버튼: 중국어 대신 한국어 키워드 사용 (AliExpress는 한국어 지원)", "디버그 강화: 확장 버전·사전 매핑 수 콘솔 출력"],
                   },
                   {

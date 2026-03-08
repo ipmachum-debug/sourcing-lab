@@ -481,6 +481,12 @@ async function translateKoToEn(text) {
   return '';
 }
 
+// 1688/타오바오용 키워드 인코딩 (GBK 사이트이므로 encodeURIComponent 사용하면 깨짐)
+// 공백만 +로 치환하고 나머지는 브라우저가 처리하도록 그대로 전달
+function encode1688(keyword) {
+  return keyword.replace(/\s+/g, '+');
+}
+
 // 소싱 검색 URL 생성기
 function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
   const urls = [];
@@ -491,7 +497,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688',
       type: 'keyword_cn',
       label: '🇨🇳 1688 (중국어)',
-      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(cnKeyword)}`,
+      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(cnKeyword)}`,
       priority: 1,
     });
   }
@@ -502,7 +508,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688',
       type: 'keyword_ko',
       label: '🔍 1688 (한국어)',
-      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(koKeyword)}`,
+      url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encode1688(koKeyword)}`,
       priority: 3,
     });
   }
@@ -529,7 +535,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: '1688_aibuy',
       type: 'aibuy',
       label: '🤖 1688 AIBUY',
-      url: `https://aibuy.1688.com/search?keywords=${encodeURIComponent(koKeyword)}`,
+      url: `https://aibuy.1688.com/search?keywords=${encode1688(koKeyword)}`,
       priority: 2,
     });
   }
@@ -551,7 +557,7 @@ function buildSourcingUrls(koKeyword, cnKeyword, enKeyword, imageUrl) {
       platform: 'taobao',
       type: 'keyword_cn',
       label: '🛒 Taobao',
-      url: `https://s.taobao.com/search?q=${encodeURIComponent(cnKeyword)}`,
+      url: `https://s.taobao.com/search?q=${encode1688(cnKeyword)}`,
       priority: 5,
     });
   }
@@ -1759,7 +1765,7 @@ function renderAIProducts(products, container) {
               ${p.keywords.english ? `<span class="ai-keyword-tag en" onclick="navigator.clipboard.writeText('${p.keywords.english}').then(()=>this.style.opacity='0.5')" title="클릭하여 복사">🇺🇸 ${p.keywords.english}</span>` : ''}
             </div>
             <div class="ai-search-btns">
-              ${p.keywords.chinese ? `<button class="ai-search-btn btn-1688" onclick="window.open('https://s.1688.com/selloffer/offer_search.htm?keywords='+encodeURIComponent('${p.keywords.chinese}'))">1688 검색</button>` : ''}
+              ${p.keywords.chinese ? `<button class="ai-search-btn btn-1688" onclick="window.open('https://s.1688.com/selloffer/offer_search.htm?keywords='+'${p.keywords.chinese}'.replace(/\\s+/g,'+'))">1688 검색</button>` : ''}
               ${p.keywords.english ? `<button class="ai-search-btn btn-ali" onclick="window.open('https://www.aliexpress.com/wholesale?SearchText='+encodeURIComponent('${p.keywords.english}'))">AliExpress</button>` : ''}
               ${p.keywords.korean ? `<button class="ai-search-btn" onclick="window.open('https://www.coupang.com/np/search?q='+encodeURIComponent('${p.keywords.korean}'))">쿠팡 검색</button>` : ''}
             </div>
@@ -2147,7 +2153,7 @@ function updateDsSelectionBar() {
           searchTerm = await translateKoToCn(keywords.ko);
         }
         if (!searchTerm) searchTerm = keywords.ko;
-        chrome.tabs.create({ url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(searchTerm)}` });
+        chrome.tabs.create({ url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${searchTerm.replace(/\s+/g, '+')}` });
       }
     });
 
