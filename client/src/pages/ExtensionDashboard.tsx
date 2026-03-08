@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
+import SourcingFormModal from "@/components/SourcingFormModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import {
   Brain, Bell, Users, ChevronDown, ChevronUp, Minus,
   FileDown, Activity, Lightbulb, Zap, AlertTriangle, CheckCircle,
   FileText, BellRing, BellOff, Clock, Shield, Sparkles,
-  ThumbsUp, ThumbsDown, Info, X, ChevronRight
+  ThumbsUp, ThumbsDown, Info, X, ChevronRight, Plus, Edit3, ShoppingBag, Layers
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -59,7 +60,7 @@ function ChangeIndicator({ value }: { value: number | null }) {
   return <span className="flex items-center gap-0.5 text-red-600 text-xs font-bold"><ArrowDownRight className="w-3 h-3" />{value}</span>;
 }
 
-type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "insights" | "myproducts" | "reviews" | "notifications" | "history" | "wing";
+type TabKey = "overview" | "demand" | "trends" | "candidates" | "ranking" | "competitors" | "ai" | "insights" | "myproducts" | "reviews" | "notifications" | "history" | "wing" | "sourcing";
 
 export default function ExtensionDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -80,6 +81,13 @@ export default function ExtensionDashboard() {
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSort, setDemandSort] = useState<"keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price">("keyword_score");
   const [selectedDeleteKws, setSelectedDeleteKws] = useState<Set<string>>(new Set());
+  // Sourcing modal state
+  const [sourcingModalOpen, setSourcingModalOpen] = useState(false);
+  const [sourcingPrefillData, setSourcingPrefillData] = useState<Record<string, any> | undefined>(undefined);
+  const [sourcingEditProduct, setSourcingEditProduct] = useState<any>(undefined);
+  const [sourcingSearch, setSourcingSearch] = useState("");
+  const [sourcingStatusFilter, setSourcingStatusFilter] = useState<string>("all");
+  const [sourcingPage, setSourcingPage] = useState(0);
 
   // ===== Queries =====
   const searchStats = trpc.extension.searchStats.useQuery();
@@ -193,6 +201,28 @@ export default function ExtensionDashboard() {
     onError: (err) => toast.error(err.message || "알림 정리 실패"),
   });
 
+  // Sourcing queries
+  const sourcingList = trpc.sourcing.list.useQuery(
+    { search: sourcingSearch || undefined, status: sourcingStatusFilter === "all" ? undefined : sourcingStatusFilter, limit: 20, offset: sourcingPage * 20 },
+    { enabled: activeTab === "sourcing" }
+  );
+  const sourcingStats = trpc.sourcing.stats.useQuery(
+    undefined,
+    { enabled: activeTab === "sourcing" || activeTab === "overview" }
+  );
+  const sourcingDelete = trpc.sourcing.delete.useMutation({
+    onSuccess: () => { sourcingList.refetch(); sourcingStats.refetch(); toast.success("삭제 완료"); },
+    onError: (err: any) => toast.error(err.message || "삭제 실패"),
+  });
+  const sourcingChangeStatus = trpc.sourcing.changeStatus.useMutation({
+    onSuccess: () => { sourcingList.refetch(); sourcingStats.refetch(); toast.success("상태 변경됨"); },
+    onError: (err: any) => toast.error(err.message || "상태 변경 실패"),
+  });
+  const openSourcingModal = (prefill?: Record<string, any>, edit?: any) => {
+    setSourcingPrefillData(prefill);
+    setSourcingEditProduct(edit);
+    setSourcingModalOpen(true);
+  };
   const stats = searchStats.data;
   const cStats = candidateStats.data;
   const activity = activitySummary.data;
@@ -290,6 +320,7 @@ export default function ExtensionDashboard() {
     { key: "notifications", label: "알림", icon: Bell, badge: unreadCount.data?.count || 0 },
     { key: "wing", label: "WING", icon: Eye },
     { key: "history", label: "검색 이력", icon: Search },
+    { key: "sourcing", label: "uc18cuc2f1 uad00ub9ac", icon: Layers },
   ];
 
   // CSV Export helper
@@ -953,10 +984,22 @@ export default function ExtensionDashboard() {
                                     }`}>{kw.keywordScore || 0}</span>
                                   </td>
                                   <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
-                                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400"
-                                      onClick={() => { if (confirm(`"${kw.query}" 키워드를 삭제할까요?`)) deleteKeyword.mutate({ query: kw.query }); }}>
-                                      <Trash2 className="w-3 h-3" />
-                                    </Button>
+                                    <div className="flex gap-0.5 justify-center">
+                                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-pink-500" title="소싱 등록"
+                                        onClick={() => openSourcingModal({
+                                          source: "keyword", keyword: kw.query,
+                                          productCount: kw.productCount, avgPrice: kw.avgPrice,
+                                          competitionScore: kw.competitionScore, demandScore: kw.demandScore,
+                                          keywordScore: kw.keywordScore, salesEstimate: kw.salesEstimate,
+                                          reviewGrowth: kw.reviewGrowth, competitionLevel: kw.competitionLevel,
+                                        })}>
+                                        <Plus className="w-3 h-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400"
+                                        onClick={() => { if (confirm(`"${kw.query}" 키워드를 삭제할까요?`)) deleteKeyword.mutate({ query: kw.query }); }}>
+                                        <Trash2 className="w-3 h-3" />
+                                      </Button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1350,8 +1393,17 @@ export default function ExtensionDashboard() {
                             쿠팡 <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
-                        <Button variant="outline" size="sm" className="h-7 text-xs ml-auto"
-                          onClick={() => { if (confirm("소싱 상품 등록?")) promoteToProduct.mutate({ candidateId: c.id }); }}>승격</Button>
+                        <Button variant="outline" size="sm" className="h-7 text-xs ml-auto text-pink-600 border-pink-200 hover:bg-pink-50 gap-0.5"
+                          onClick={() => openSourcingModal({
+                            source: "candidate",
+                            candidateTitle: c.title,
+                            candidatePrice: c.price,
+                            candidateCategory: c.category,
+                            candidateUrl: c.coupangUrl,
+                            candidateSearchQuery: c.searchQuery,
+                          })}>
+                          <Plus className="w-3 h-3" /> 소싱 등록
+                        </Button>
                         <Button variant="ghost" size="sm" className="h-7 text-xs text-red-500"
                           onClick={() => { if (confirm("삭제?")) removeCandidate.mutate({ id: c.id }); }}><Trash2 className="w-3 h-3" /></Button>
                       </div>
@@ -1651,6 +1703,17 @@ export default function ExtensionDashboard() {
                                 {item.sourcingGrade} ({item.sourcingScore}점)
                               </Badge>
                             )}
+                            <Button variant="outline" size="sm" className="h-6 text-[10px] text-pink-600 border-pink-200 hover:bg-pink-50 shrink-0 gap-0.5"
+                              onClick={() => openSourcingModal({
+                                source: "ai_recommendation",
+                                aiTitle: item.query || item.title,
+                                keyword: item.query || item.title,
+                                aiReason: item.reason,
+                                aiType: rec.type,
+                                aiScore: item.score,
+                              })}>
+                              <Plus className="w-2.5 h-2.5" /> 소싱
+                            </Button>
                           </div>
                         ))}
                       </div>
@@ -1728,6 +1791,23 @@ export default function ExtensionDashboard() {
                               {analysis.trendInsight}
                             </Badge>
                           )}
+                          <Button variant="outline" size="sm" className="h-7 text-xs text-pink-600 border-pink-200 hover:bg-pink-50 gap-1"
+                            onClick={() => openSourcingModal({
+                              source: "review_analysis",
+                              reviewQuery: analysis.query,
+                              summaryText: analysis.summaryText,
+                              opportunities: analysis.opportunities,
+                              painPoints: analysis.painPoints,
+                              customerNeeds: analysis.customerNeeds,
+                              recommendations: analysis.recommendations,
+                              commonPraises: analysis.commonPraises,
+                              commonComplaints: analysis.commonComplaints,
+                              qualityConcerns: analysis.qualityConcerns,
+                              marketOverview: analysis.marketOverview,
+                              priceSensitivity: analysis.priceSensitivity,
+                            })}>
+                            <Plus className="w-3 h-3" /> 소싱 등록
+                          </Button>
                         </div>
                       </div>
                     </CardHeader>
@@ -2437,6 +2517,233 @@ export default function ExtensionDashboard() {
             </CardContent>
           </Card>
         )}
+
+        {/* ===== 소싱 관리 탭 ===== */}
+        {activeTab === "sourcing" && (
+          <>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-pink-500" /> 소싱 관리
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">등록된 소싱 상품을 관리합니다</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" className="text-xs bg-gradient-to-r from-pink-500 to-purple-500 text-white gap-1"
+                  onClick={() => openSourcingModal()}>
+                  <Plus className="w-3 h-3" /> 새 소싱 등록
+                </Button>
+              </div>
+            </div>
+
+            {/* Stats Cards */}
+            {sourcingStats.data && (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+                {[
+                  { label: "전체", value: sourcingStats.data.total, color: "text-gray-700" },
+                  { label: "초안", value: sourcingStats.data.draft, color: "text-gray-500" },
+                  { label: "검토중", value: sourcingStats.data.reviewing, color: "text-amber-600" },
+                  { label: "테스트후보", value: sourcingStats.data.testCandidate, color: "text-pink-600" },
+                  { label: "테스트중", value: sourcingStats.data.testing, color: "text-indigo-600" },
+                  { label: "선정", value: sourcingStats.data.selected, color: "text-green-600" },
+                  { label: "보류", value: sourcingStats.data.hold, color: "text-orange-600" },
+                  { label: "평균점수", value: sourcingStats.data.avgScore, color: "text-purple-600" },
+                ].map((s, i) => (
+                  <Card key={i}><CardContent className="pt-2 pb-2 text-center">
+                    <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
+                    <div className="text-[9px] text-gray-500">{s.label}</div>
+                  </CardContent></Card>
+                ))}
+              </div>
+            )}
+
+            {/* Filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Input placeholder="상품명 검색..." value={sourcingSearch}
+                onChange={e => { setSourcingSearch(e.target.value); setSourcingPage(0); }}
+                className="h-8 text-xs w-52" />
+              <div className="flex gap-1">
+                {[
+                  { key: "all", label: "전체" },
+                  { key: "draft", label: "초안" },
+                  { key: "reviewing", label: "검토중" },
+                  { key: "test_candidate", label: "테스트후보" },
+                  { key: "testing", label: "테스트중" },
+                  { key: "selected", label: "선정" },
+                  { key: "hold", label: "보류" },
+                  { key: "dropped", label: "탈락" },
+                ].map(s => (
+                  <button key={s.key}
+                    className={`px-2 py-1 text-[10px] rounded-full transition ${sourcingStatusFilter === s.key ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    onClick={() => { setSourcingStatusFilter(s.key); setSourcingPage(0); }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Products Table */}
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-gray-50 text-[10px] text-gray-500">
+                        <th className="p-2 text-left">상품명</th>
+                        <th className="p-2 text-center">카테고리</th>
+                        <th className="p-2 text-center">키워드</th>
+                        <th className="p-2 text-center">경쟁</th>
+                        <th className="p-2 text-center">차별화</th>
+                        <th className="p-2 text-center">점수</th>
+                        <th className="p-2 text-center">등급</th>
+                        <th className="p-2 text-center">상태</th>
+                        <th className="p-2 text-center">날짜</th>
+                        <th className="p-2 text-center">관리</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!sourcingList.data?.items?.length ? (
+                        <tr><td colSpan={10} className="text-center py-12 text-gray-400">
+                          <Layers className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                          <p className="text-sm font-medium">소싱 상품이 없습니다</p>
+                          <p className="text-[10px] mt-1">"새 소싱 등록" 버튼으로 등록하거나,<br/>검색수요/AI추천/리뷰분석에서 소싱 등록할 수 있습니다.</p>
+                        </td></tr>
+                      ) : (
+                        sourcingList.data.items.map((p: any) => {
+                          const compLabel: Record<string, string> = { low: "낮음", medium: "보통", high: "높음", very_high: "매우높음" };
+                          const diffLabel: Record<string, string> = { low: "낮음", medium: "보통", high: "높음" };
+                          const gradeColor: Record<string, string> = {
+                            S: "bg-pink-100 text-pink-700", A: "bg-purple-100 text-purple-700",
+                            B: "bg-indigo-100 text-indigo-700", C: "bg-amber-100 text-amber-700", D: "bg-gray-100 text-gray-500"
+                          };
+                          const sStatusLabels: Record<string, string> = {
+                            draft: "초안", reviewing: "검토중", test_candidate: "테스트후보",
+                            testing: "테스트중", hold: "보류", dropped: "탈락", selected: "선정",
+                          };
+                          const sStatusColors: Record<string, string> = {
+                            draft: "bg-gray-100 text-gray-600", reviewing: "bg-amber-100 text-amber-700",
+                            test_candidate: "bg-pink-100 text-pink-700", testing: "bg-indigo-100 text-indigo-700",
+                            hold: "bg-orange-100 text-orange-700", dropped: "bg-red-100 text-red-600",
+                            selected: "bg-green-100 text-green-700",
+                          };
+                          return (
+                            <tr key={p.id} className="border-b hover:bg-gray-50 transition">
+                              <td className="p-2">
+                                <div className="font-medium text-sm line-clamp-1 max-w-[200px]" title={p.productName}>{p.productName}</div>
+                                {p.coupangUrl && (
+                                  <a href={p.coupangUrl} target="_blank" rel="noreferrer" className="text-[9px] text-indigo-500 hover:underline flex items-center gap-0.5 mt-0.5">
+                                    <ExternalLink className="w-2.5 h-2.5" /> 쿠팡
+                                  </a>
+                                )}
+                              </td>
+                              <td className="p-2 text-center"><Badge variant="outline" className="text-[9px]">{p.category || "-"}</Badge></td>
+                              <td className="p-2 text-center">
+                                <div className="text-[9px] text-gray-600 max-w-[120px] truncate" title={[p.keyword1, p.keyword2, p.keyword3].filter(Boolean).join(", ")}>
+                                  {[p.keyword1, p.keyword2, p.keyword3].filter(Boolean).join(", ") || "-"}
+                                </div>
+                              </td>
+                              <td className="p-2 text-center"><Badge variant="outline" className="text-[9px]">{compLabel[p.competitionLevel] || "-"}</Badge></td>
+                              <td className="p-2 text-center"><Badge variant="outline" className="text-[9px]">{diffLabel[p.differentiationLevel] || "-"}</Badge></td>
+                              <td className="p-2 text-center font-bold text-sm">{p.score || 0}</td>
+                              <td className="p-2 text-center"><Badge className={`text-[9px] ${gradeColor[p.scoreGrade] || "bg-gray-100"}`}>{p.scoreGrade || "?"}</Badge></td>
+                              <td className="p-2 text-center">
+                                <Select value={p.status} onValueChange={(val) => sourcingChangeStatus.mutate({ id: p.id, status: val as any })}>
+                                  <SelectTrigger className="h-6 text-[10px] w-20 border-0 bg-transparent"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {Object.entries(sStatusLabels).map(([k, v]) => (
+                                      <SelectItem key={k} value={k} className="text-xs">{v}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                              <td className="p-2 text-center text-[10px] text-gray-400">{p.recordDate}</td>
+                              <td className="p-2 text-center">
+                                <div className="flex gap-1 justify-center">
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-indigo-600"
+                                    onClick={() => openSourcingModal(undefined, p)}>
+                                    <Edit3 className="w-3 h-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400"
+                                    onClick={() => { if (confirm("삭제하시겠습니까?")) sourcingDelete.mutate({ id: p.id }); }}>
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Pagination */}
+                {sourcingList.data && sourcingList.data.total > 20 && (
+                  <div className="flex items-center justify-between p-3 border-t">
+                    <span className="text-[10px] text-gray-400">총 {sourcingList.data.total}개</span>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" className="h-6 text-[10px]"
+                        disabled={sourcingPage === 0}
+                        onClick={() => setSourcingPage(p => p - 1)}>이전</Button>
+                      <span className="text-[10px] text-gray-500 px-2 py-1">
+                        {sourcingPage + 1} / {Math.ceil(sourcingList.data.total / 20)}
+                      </span>
+                      <Button variant="outline" size="sm" className="h-6 text-[10px]"
+                        disabled={(sourcingPage + 1) * 20 >= sourcingList.data.total}
+                        onClick={() => setSourcingPage(p => p + 1)}>다음</Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Grade / Category Distribution */}
+            {sourcingStats.data && (sourcingStats.data.grades?.length > 0 || sourcingStats.data.categories?.length > 0) && (
+              <div className="grid md:grid-cols-2 gap-4">
+                {sourcingStats.data.grades?.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">등급 분포</CardTitle></CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie data={sourcingStats.data.grades.map((g: any) => ({ name: g.grade + "등급", value: g.count }))} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={65} innerRadius={30}>
+                            {sourcingStats.data.grades.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                          <Legend wrapperStyle={{ fontSize: 10 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                )}
+                {sourcingStats.data.categories?.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">카테고리 분포</CardTitle></CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <BarChart data={sourcingStats.data.categories.slice(0, 8)} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis type="number" tick={{ fontSize: 10 }} />
+                          <YAxis type="category" dataKey="category" tick={{ fontSize: 10 }} width={80} />
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="count" fill="#ec4899" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Sourcing Form Modal */}
+        <SourcingFormModal
+          open={sourcingModalOpen}
+          onClose={() => { setSourcingModalOpen(false); setSourcingPrefillData(undefined); setSourcingEditProduct(undefined); }}
+          prefillData={sourcingPrefillData}
+          editProduct={sourcingEditProduct}
+          onSuccess={() => { sourcingList.refetch(); sourcingStats.refetch(); }}
+        />
       </div>
     </DashboardLayout>
   );
