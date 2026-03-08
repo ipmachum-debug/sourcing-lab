@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.2.0";
+const EXTENSION_VERSION = "5.3.0";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,10 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.2.0",
+                    version: "v5.3.0",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["플로팅 바 UX로 전면 전환 — 쿠팡 DOM에 절대 삽입 안함", "화면 하단 고정 바: 상품 호버 시 자동 정보 표시", "클릭 한번으로 1688/알리 검색, AI 분석, 후보 저장", "상품 카드 하이라이트 (outline) 표시", "사이드패널 데이터 전송 유지"],
+                    changes: ["카드별 플로팅 UI — 상품마다 자동 오버레이 표시", "소싱점수 + 가격 + 리뷰 + 1688/저장 버튼", "상단 상태바로 파싱 현황 확인", "서버 자동 전송 (UI는 가볍게, 서버는 무겁게)", "history.pushState 오버라이드 제거 → 쿠팡 React 충돌 해결", "background.js SPA 재주입 제거 → 서비스워커 안정화"],
                   },
                   {
                     version: "v4.0.0",

@@ -1,9 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v5.1
-   세션 스토리지 관리 + 검색 히스토리 + 순위 추적 + 상세 파싱 + 서버 동기화
-   + 순위 변동 알림 + 자동 순위 체크 + WING 인기상품 데이터 수집
-   + 소싱 코치 (점수/마진/리스크/뱃지)
-   + AI 소싱 분석 (WING 인기상품 OpenAI 연동)
+   Coupang Sourcing Helper — Background Service Worker v5.3
+   v5.3: content.js가 자체 URL 감지 (history 오버라이드 없음)
+         background는 메시지 중계 + 데이터 저장에만 집중
    ============================================================ */
 
 importScripts('api-client.js');
@@ -21,42 +19,16 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v5.1.3 — reloaded coupang tabs`);
+    console.log(`[SH] Extension ${details.reason}d — v5.3.0 — reloaded coupang tabs`);
   }
 });
 
-// ---- 탭 URL 변경 감지 (SPA Navigation 대응) ----
-// 쿠팡이 SPA로 동작할 때 URL만 바뀌고 content script가 다시 로드되지 않는 문제 해결
-// tabs.onUpdated로 URL 변경 시 content.js를 프로그래밍 방식으로 재주입
-const injectedTabs = new Set();
-
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // URL이 변경되었고, 쿠팡 검색 페이지인 경우
-  if (changeInfo.url && changeInfo.url.includes('coupang.com/np/search')) {
-    try {
-      // content script가 이미 주입되어 있으면 visibilitychange 이벤트로 재파싱 트리거
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          // content.js의 URL 변경 감지를 트리거
-          document.dispatchEvent(new Event('visibilitychange'));
-        }
-      });
-    } catch (e) {
-      // content script가 아직 없으면 주입 시도
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content.js']
-        });
-      } catch (e2) { /* 무시 */ }
-    }
-  }
-});
+// ---- v5.3: SPA 재주입 제거 ----
+// content.js가 자체적으로 setInterval + popstate + MutationObserver로 URL 변경 감지
+// background에서 executeScript 호출은 쿠팡 React와 충돌 가능 → 제거
 
 // 탭이 닫히면 세션 데이터 정리
 chrome.tabs.onRemoved.addListener((tabId) => {
-  injectedTabs.delete(tabId);
   chrome.storage.session.remove([`results:${tabId}`]).catch(() => {});
 });
 
