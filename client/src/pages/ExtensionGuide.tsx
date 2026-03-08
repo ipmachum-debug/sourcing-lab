@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.1.5";
+const EXTENSION_VERSION = "5.1.6";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,10 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.1.3",
+                    version: "v5.1.6",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["모달형 UX 전환 (셀록홈즈/아이템스카우트 참고)", "AI 사전매칭 엔진: 상품명→1688 검색어 자동 생성", "상품카드 하단 데이터바 + 우상단 점수 배지", "우측 고정 모달 패널 (360px) — 상품 분석 + 1688/알리 + AI", "v5.0 잔재 자동 정리 + 버전 가드 시스템"],
+                    changes: ["데이터바 표시 버그 수정 — !important CSS로 쿠팡 스타일 오버라이드", "데이터바 가시성 검증 + 자동 재배치 (overflow:hidden 회피)", "실시간 디버그 패널 (좌측 하단) — 파싱/삽입 상태 모니터링", "시그니처 체크 개선: 바 미삽입 시 재스캔 허용", "부모 체인 overflow 자동 해제 (3단계)"],
                   },
                   {
                     version: "v4.0.0",
