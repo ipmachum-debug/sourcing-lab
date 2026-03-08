@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.7";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.5.zip";
-const EXTENSION_FILE_SIZE = "80KB";
+const EXTENSION_VERSION = "5.6.0";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.6.zip";
+const EXTENSION_FILE_SIZE = "89KB";
 
 function AccordionSection({
   icon: Icon,
