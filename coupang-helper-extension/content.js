@@ -1,21 +1,22 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.0
-   "상품 카드 중심 UX" — 셀록홈즈 방식
+   Coupang Sourcing Helper — Content Script v5.1
+   "모달 패널 UX" — 셀록홈즈/아이템스카우트 참고
 
-   v5.0: 사이드패널 중심 → 상품 카드 오버레이 UX 전환
-   - Auto Scan: 페이지 로드시 자동 분석
-   - 상품 카드에 소싱점수/마진/1688/알리/저장 버튼 삽입
-   - 빠른 점수 계산 (0.1초, AI 없이)
-   - AI 분석은 백그라운드 → 완료시 카드 업데이트
-   - 클릭 4번 → 1번
+   v5.1: overlay→모달형 전환
+   - 상품 카드: 하단 데이터바 + 우상단 점수 배지 (가림 없음)
+   - 클릭시: 우측 고정 모달 패널 열림 (360px)
+   - 모달: 상품정보 + 점수 + 1688/알리 + AI 사전매칭 + 저장
+   - Auto Scan 유지
    ============================================================ */
 (function () {
   const MAX_ITEMS = 36;
-  const OVERLAY_ATTR = 'data-sh-overlay'; // 오버레이 마커
+  const BADGE_ATTR = 'data-sh-badge';
   let debounceTimer = null;
   let lastSignature = '';
   let lastUrl = location.href;
-  let allParsedItems = []; // 파싱된 전체 상품 데이터
+  let allParsedItems = [];
+  let activeModal = null;  // 현재 열린 모달
+  let activeProductId = null;
 
   // ---- 유틸리티 ----
   function text(el) {
@@ -36,170 +37,425 @@
   }
 
   // ============================================================
-  //  스타일 삽입 (한 번만)
+  //  스타일 삽입
   // ============================================================
   function injectStyles() {
-    if (document.getElementById('sh-overlay-styles')) return;
+    if (document.getElementById('sh-modal-styles')) return;
     const style = document.createElement('style');
-    style.id = 'sh-overlay-styles';
+    style.id = 'sh-modal-styles';
     style.textContent = `
-      .sh-card-overlay {
-        position: absolute;
-        bottom: 0; left: 0; right: 0;
-        background: linear-gradient(transparent, rgba(0,0,0,0.85) 30%);
-        padding: 28px 8px 6px;
-        z-index: 100;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        pointer-events: auto;
-        border-radius: 0 0 8px 8px;
-        opacity: 0;
-        transition: opacity 0.2s;
-      }
-      *:hover > .sh-card-overlay,
-      .sh-card-overlay.sh-visible {
-        opacity: 1;
-      }
-      .sh-score-row {
+      /* ===== 상품 카드 데이터바 ===== */
+      .sh-databar {
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 4px;
+        padding: 5px 8px;
+        background: #f8f9fb;
+        border-top: 1px solid #e5e7eb;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 11px;
+        color: #374151;
+        cursor: pointer;
+        transition: background 0.15s;
+        position: relative;
+        z-index: 50;
       }
-      .sh-score-badge {
+      .sh-databar:hover {
+        background: #eef2ff;
+      }
+      .sh-databar-grade {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 36px; height: 20px;
+        min-width: 22px;
+        height: 18px;
+        padding: 0 5px;
         border-radius: 4px;
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 10px;
+        font-weight: 800;
         color: #fff;
         letter-spacing: -0.3px;
       }
-      .sh-score-s { background: #16a34a; }
-      .sh-score-a { background: #3b82f6; }
-      .sh-score-b { background: #f59e0b; }
-      .sh-score-c { background: #9ca3af; }
-      .sh-score-d { background: #dc2626; }
-      .sh-score-num {
+      .sh-grade-s { background: #16a34a; }
+      .sh-grade-a { background: #3b82f6; }
+      .sh-grade-b { background: #f59e0b; }
+      .sh-grade-c { background: #9ca3af; }
+      .sh-grade-d { background: #dc2626; }
+      .sh-databar-score {
+        font-weight: 700;
+        font-size: 11px;
+        color: #111827;
+      }
+      .sh-databar-sep {
+        color: #d1d5db;
+        font-size: 10px;
+      }
+      .sh-databar-info {
+        font-size: 10px;
+        color: #6b7280;
+      }
+      .sh-databar-detail {
+        margin-left: auto;
+        font-size: 10px;
+        color: #6366f1;
+        font-weight: 600;
+      }
+
+      /* ===== 우상단 미니 배지 ===== */
+      .sh-mini-badge {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        z-index: 60;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #fff;
+        pointer-events: none;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      .sh-relative { position: relative !important; }
+
+      /* ===== 우측 고정 모달 패널 ===== */
+      .sh-modal-backdrop {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.18);
+        z-index: 99999;
+        animation: sh-fadeIn 0.15s ease;
+      }
+      @keyframes sh-fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes sh-slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+      .sh-modal-panel {
+        position: fixed;
+        top: 0; right: 0;
+        width: 380px;
+        max-width: 90vw;
+        height: 100vh;
+        background: #ffffff;
+        box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+        z-index: 100000;
+        overflow-y: auto;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+        animation: sh-slideIn 0.2s ease;
+      }
+
+      /* 모달 헤더 */
+      .sh-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f8fafc;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .sh-modal-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .sh-modal-close {
+        width: 28px; height: 28px;
+        border: none;
+        background: #f3f4f6;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        color: #6b7280;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+      }
+      .sh-modal-close:hover { background: #e5e7eb; }
+
+      /* 상품 정보 영역 */
+      .sh-modal-product {
+        display: flex;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #f3f4f6;
+      }
+      .sh-modal-img {
+        width: 80px; height: 80px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: #f3f4f6;
+        flex-shrink: 0;
+      }
+      .sh-modal-product-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .sh-modal-product-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #111827;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-bottom: 6px;
+      }
+      .sh-modal-product-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        color: #6b7280;
+      }
+      .sh-modal-product-meta span {
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+
+      /* 점수 카드 */
+      .sh-score-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #f3f4f6;
+      }
+      .sh-score-circle {
+        width: 56px; height: 56px;
+        border-radius: 50%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        flex-shrink: 0;
+      }
+      .sh-score-circle-grade {
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1;
+      }
+      .sh-score-circle-num {
+        font-size: 11px;
+        font-weight: 600;
+        opacity: 0.9;
+        margin-top: 1px;
+      }
+      .sh-score-details {
+        flex: 1;
+      }
+      .sh-score-label {
         font-size: 13px;
         font-weight: 700;
-        color: #fff;
+        color: #111827;
+        margin-bottom: 4px;
       }
-      .sh-margin-text {
+      .sh-score-desc {
         font-size: 11px;
-        color: #d1d5db;
-        margin-left: auto;
+        color: #6b7280;
+        line-height: 1.4;
       }
-      .sh-btn-row {
+
+      /* 액션 버튼 그룹 */
+      .sh-action-group {
+        padding: 14px 16px;
+        border-bottom: 1px solid #f3f4f6;
+      }
+      .sh-action-group-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #374151;
+        margin-bottom: 8px;
         display: flex;
-        gap: 3px;
-        margin-top: 4px;
+        align-items: center;
+        gap: 4px;
       }
-      .sh-btn {
+      .sh-action-btns {
+        display: flex;
+        gap: 6px;
+      }
+      .sh-action-btn {
         flex: 1;
-        padding: 4px 2px;
+        padding: 10px 8px;
         border: none;
-        border-radius: 4px;
-        font-size: 10px;
-        font-weight: 600;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 700;
         cursor: pointer;
         text-align: center;
         transition: all 0.15s;
         color: #fff;
-        line-height: 1.2;
-        white-space: nowrap;
-      }
-      .sh-btn:hover {
-        transform: scale(1.05);
-        filter: brightness(1.15);
-      }
-      .sh-btn-1688 { background: #ff6a00; }
-      .sh-btn-ali { background: #e43225; }
-      .sh-btn-save { background: #6366f1; }
-      .sh-btn-ai { background: #059669; font-size: 9px; }
-      .sh-btn-saved { background: #4f46e5 !important; opacity: 0.7; }
-
-      /* 항상 보이는 미니 배지 (hover 아닐 때) */
-      .sh-mini-badge {
-        position: absolute;
-        top: 6px; right: 6px;
-        z-index: 101;
-        display: inline-flex;
+        display: flex;
+        flex-direction: column;
         align-items: center;
         gap: 3px;
-        padding: 2px 6px;
+      }
+      .sh-action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      }
+      .sh-action-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none !important;
+      }
+      .sh-action-btn-icon { font-size: 18px; }
+      .sh-action-btn-label { font-size: 11px; }
+      .sh-btn-1688 { background: linear-gradient(135deg, #ff6a00, #ee5a00); }
+      .sh-btn-ali { background: linear-gradient(135deg, #e43225, #cc2518); }
+      .sh-btn-save { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+      .sh-btn-ai { background: linear-gradient(135deg, #059669, #047857); }
+      .sh-btn-saved { background: #a5b4fc !important; }
+
+      /* AI 사전매칭 검색어 패널 */
+      .sh-prematch-section {
+        padding: 14px 16px;
+        border-bottom: 1px solid #f3f4f6;
+        display: none;
+      }
+      .sh-prematch-section.sh-active { display: block; }
+      .sh-prematch-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #374151;
+        margin-bottom: 8px;
+      }
+      .sh-prematch-loading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        background: #f8fafc;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .sh-prematch-loading .sh-spinner {
+        width: 16px; height: 16px;
+        border: 2px solid #e5e7eb;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: sh-spin 0.6s linear infinite;
+      }
+      @keyframes sh-spin { to { transform: rotate(360deg); } }
+
+      .sh-kw-list { list-style: none; padding: 0; margin: 0; }
+      .sh-kw-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        margin-bottom: 4px;
+        background: #f8fafc;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.12s;
+        text-decoration: none;
+      }
+      .sh-kw-item:hover { background: #eef2ff; }
+      .sh-kw-num {
+        width: 20px; height: 20px;
+        border-radius: 50%;
+        background: #ff6a00;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .sh-kw-num.sh-kw-ali { background: #e43225; }
+      .sh-kw-text {
+        flex: 1;
+        font-size: 12px;
+        font-weight: 600;
+        color: #111827;
+      }
+      .sh-kw-tag {
+        font-size: 9px;
+        color: #9ca3af;
+        background: #f3f4f6;
+        padding: 1px 5px;
+        border-radius: 3px;
+      }
+      .sh-kw-arrow {
+        color: #d1d5db;
+        font-size: 12px;
+      }
+      .sh-tips-box {
+        margin-top: 8px;
+        padding: 8px 10px;
+        background: #eff6ff;
         border-radius: 6px;
         font-size: 11px;
-        font-weight: 700;
-        color: #fff;
-        pointer-events: none;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+        color: #3b82f6;
+        line-height: 1.4;
       }
 
-      /* AI 로딩 표시 */
-      .sh-ai-loading {
-        font-size: 9px;
-        color: #93c5fd;
-        margin-top: 2px;
-        text-align: center;
+      /* AI 분석 결과 */
+      .sh-ai-section {
+        padding: 14px 16px;
+        border-bottom: 1px solid #f3f4f6;
+        display: none;
       }
-      .sh-ai-done {
-        font-size: 9px;
-        color: #86efac;
-        margin-top: 2px;
-        text-align: center;
+      .sh-ai-section.sh-active { display: block; }
+      .sh-ai-result {
+        padding: 10px 12px;
+        background: #f0fdf4;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #166534;
+        line-height: 1.5;
       }
-
-      /* 상품 컨테이너에 relative 보장 */
-      .sh-relative { position: relative !important; overflow: visible !important; }
+      .sh-ai-result.sh-error {
+        background: #fef2f2;
+        color: #dc2626;
+      }
     `;
     document.head.appendChild(style);
   }
 
   // ============================================================
-  //  빠른 소싱 점수 계산 (AI 없이, 0.05초)
+  //  빠른 소싱 점수 계산 (AI 없이)
   // ============================================================
   function quickScore(item, allItems) {
-    let score = 50; // 기본점수
-
-    // 1) 리뷰 수 기반 (경쟁도) — 리뷰 적을수록 기회
+    let score = 50;
     if (item.reviewCount < 50) score += 20;
     else if (item.reviewCount < 200) score += 12;
     else if (item.reviewCount < 500) score += 5;
     else if (item.reviewCount > 2000) score -= 10;
-
-    // 2) 평점 기반
     if (item.rating >= 4.5) score += 5;
     else if (item.rating < 3.5 && item.rating > 0) score -= 5;
-
-    // 3) 가격대 기반 (중저가가 소싱에 유리)
     if (item.price >= 5000 && item.price <= 30000) score += 10;
     else if (item.price > 0 && item.price < 3000) score -= 5;
     else if (item.price > 50000) score -= 5;
-
-    // 4) 광고 상품이면 경쟁 치열
     if (item.isAd) score -= 8;
-
-    // 5) 전체 평균 대비 리뷰 수 비교
     if (allItems.length > 3) {
       const avgReview = allItems.reduce((a, b) => a + b.reviewCount, 0) / allItems.length;
-      if (item.reviewCount < avgReview * 0.3) score += 8; // 평균보다 리뷰 매우 적음 → 기회
+      if (item.reviewCount < avgReview * 0.3) score += 8;
     }
-
     return Math.max(0, Math.min(100, Math.round(score)));
   }
 
   function scoreGrade(score) {
-    if (score >= 80) return { grade: 'S', cls: 'sh-score-s', color: '#16a34a' };
-    if (score >= 65) return { grade: 'A', cls: 'sh-score-a', color: '#3b82f6' };
-    if (score >= 50) return { grade: 'B', cls: 'sh-score-b', color: '#f59e0b' };
-    if (score >= 35) return { grade: 'C', cls: 'sh-score-c', color: '#9ca3af' };
-    return { grade: 'D', cls: 'sh-score-d', color: '#dc2626' };
+    if (score >= 80) return { grade: 'S', cls: 'sh-grade-s', color: '#16a34a', label: '추천 (경쟁 낮고 기회 높음)' };
+    if (score >= 65) return { grade: 'A', cls: 'sh-grade-a', color: '#3b82f6', label: '양호 (소싱 검토 가치 있음)' };
+    if (score >= 50) return { grade: 'B', cls: 'sh-grade-b', color: '#f59e0b', label: '보통 (추가 분석 필요)' };
+    if (score >= 35) return { grade: 'C', cls: 'sh-grade-c', color: '#9ca3af', label: '주의 (경쟁 치열)' };
+    return { grade: 'D', cls: 'sh-grade-d', color: '#dc2626', label: '비추천 (경쟁 과열)' };
   }
 
   // ============================================================
-  //  스마트 키워드 추출 (한→중, 한→영)
+  //  스마트 키워드 (폴백용)
   // ============================================================
   const NOISE = new Set(['1개','2개','3개','4개','5개','1P','2P','3P','1+1','2+1',
     '무료배송','당일발송','최저가','특가','세일','할인','핫딜','정품','국내정품',
@@ -239,14 +495,12 @@
   }
 
   // ============================================================
-  //  상품 카드에 오버레이 UI 삽입
+  //  상품 카드에 데이터바 + 배지 삽입 (상품 가림 없음)
   // ============================================================
-  function insertOverlay(container, item, allItems) {
-    // 이미 삽입된 경우 스킵
-    if (container.getAttribute(OVERLAY_ATTR)) return;
-    container.setAttribute(OVERLAY_ATTR, item.productId || 'true');
+  function insertDataBar(container, item, allItems) {
+    if (container.getAttribute(BADGE_ATTR)) return;
+    container.setAttribute(BADGE_ATTR, item.productId || 'true');
 
-    // relative 위치 보장
     const pos = getComputedStyle(container).position;
     if (pos === 'static' || pos === '') {
       container.classList.add('sh-relative');
@@ -254,95 +508,351 @@
 
     const score = quickScore(item, allItems);
     const { grade, cls, color } = scoreGrade(score);
+
+    // 1) 우상단 미니 배지
+    const badge = document.createElement('div');
+    badge.className = 'sh-mini-badge';
+    badge.style.background = color;
+    badge.textContent = `${grade} ${score}`;
+    container.appendChild(badge);
+
+    // 2) 하단 데이터바
+    const bar = document.createElement('div');
+    bar.className = 'sh-databar';
+    bar.innerHTML = `
+      <span class="sh-databar-grade ${cls}">${grade}</span>
+      <span class="sh-databar-score">${score}점</span>
+      <span class="sh-databar-sep">|</span>
+      <span class="sh-databar-info">${item.reviewCount > 0 ? '리뷰 ' + item.reviewCount.toLocaleString() : '리뷰 없음'}</span>
+      <span class="sh-databar-sep">|</span>
+      <span class="sh-databar-info">${formatPrice(item.price)}</span>
+      ${item.isAd ? '<span class="sh-databar-info" style="color:#ef4444;">AD</span>' : ''}
+      <span class="sh-databar-detail">분석 ></span>
+    `;
+    container.appendChild(bar);
+
+    // 3) 클릭 → 모달 열기
+    bar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openModal(item, score, grade, cls, color, allItems);
+    });
+
+    // 미니 배지도 클릭 가능하게
+    badge.style.pointerEvents = 'auto';
+    badge.style.cursor = 'pointer';
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openModal(item, score, grade, cls, color, allItems);
+    });
+  }
+
+  // ============================================================
+  //  모달 패널 열기
+  // ============================================================
+  function openModal(item, score, grade, cls, color, allItems) {
+    // 같은 상품이면 닫기 (토글)
+    if (activeProductId === item.productId && activeModal) {
+      closeModal();
+      return;
+    }
+
+    // 기존 모달 닫기
+    closeModal();
+
+    activeProductId = item.productId;
+    const { label } = scoreGrade(score);
     const cnKw = toChinese(item.title);
     const koKw = extractKeyword(item.title);
 
-    // 미니 배지 (항상 표시)
-    const miniBadge = document.createElement('div');
-    miniBadge.className = 'sh-mini-badge';
-    miniBadge.style.background = color;
-    miniBadge.innerHTML = `${grade} ${score}`;
-    container.appendChild(miniBadge);
+    // 백드롭
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sh-modal-backdrop';
+    backdrop.addEventListener('click', () => closeModal());
 
-    // 오버레이 (hover시 표시)
-    const overlay = document.createElement('div');
-    overlay.className = 'sh-card-overlay';
-    overlay.dataset.productId = item.productId || '';
-    overlay.innerHTML = `
-      <div class="sh-score-row">
-        <span class="sh-score-badge ${cls}">${grade}</span>
-        <span class="sh-score-num">${score}점</span>
-        <span class="sh-margin-text">${item.price ? formatPrice(item.price) : ''}</span>
+    // 패널
+    const panel = document.createElement('div');
+    panel.className = 'sh-modal-panel';
+    panel.addEventListener('click', (e) => e.stopPropagation());
+
+    panel.innerHTML = `
+      <!-- 헤더 -->
+      <div class="sh-modal-header">
+        <span class="sh-modal-title">AI 소싱 분석</span>
+        <button class="sh-modal-close" id="shModalClose">&times;</button>
       </div>
-      <div class="sh-btn-row">
-        <button class="sh-btn sh-btn-1688" data-action="1688" title="1688 검색">1688</button>
-        <button class="sh-btn sh-btn-ali" data-action="ali" title="AliExpress 검색">알리</button>
-        <button class="sh-btn sh-btn-save" data-action="save" title="후보 저장">저장</button>
-        <button class="sh-btn sh-btn-ai" data-action="ai" title="AI 상세 분석">AI</button>
+
+      <!-- 상품 정보 -->
+      <div class="sh-modal-product">
+        <img class="sh-modal-img" src="${item.imageUrl || ''}" alt="" onerror="this.style.display='none'">
+        <div class="sh-modal-product-info">
+          <div class="sh-modal-product-name">${item.title || '제목 없음'}</div>
+          <div class="sh-modal-product-meta">
+            <span>${formatPrice(item.price)}</span>
+            ${item.rating > 0 ? `<span>${item.rating}점</span>` : ''}
+            <span>리뷰 ${item.reviewCount.toLocaleString()}</span>
+            ${item.isAd ? '<span style="color:#ef4444;">AD</span>' : ''}
+            ${item.isRocket ? '<span style="color:#3b82f6;">로켓</span>' : ''}
+          </div>
+        </div>
       </div>
-      <div class="sh-ai-status"></div>
+
+      <!-- 점수 카드 -->
+      <div class="sh-score-card">
+        <div class="sh-score-circle" style="background:${color}">
+          <div class="sh-score-circle-grade">${grade}</div>
+          <div class="sh-score-circle-num">${score}점</div>
+        </div>
+        <div class="sh-score-details">
+          <div class="sh-score-label">소싱점수 ${score} — ${grade}등급</div>
+          <div class="sh-score-desc">${label}</div>
+        </div>
+      </div>
+
+      <!-- 액션 버튼 -->
+      <div class="sh-action-group">
+        <div class="sh-action-group-title">소싱 액션</div>
+        <div class="sh-action-btns">
+          <button class="sh-action-btn sh-btn-1688" id="shBtn1688">
+            <span class="sh-action-btn-icon">🏭</span>
+            <span class="sh-action-btn-label">1688</span>
+          </button>
+          <button class="sh-action-btn sh-btn-ali" id="shBtnAli">
+            <span class="sh-action-btn-icon">🌐</span>
+            <span class="sh-action-btn-label">알리</span>
+          </button>
+          <button class="sh-action-btn sh-btn-ai" id="shBtnAI">
+            <span class="sh-action-btn-icon">🤖</span>
+            <span class="sh-action-btn-label">AI 분석</span>
+          </button>
+          <button class="sh-action-btn sh-btn-save" id="shBtnSave">
+            <span class="sh-action-btn-icon">💾</span>
+            <span class="sh-action-btn-label">저장</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- AI 사전매칭 검색어 (1688 버튼 클릭시) -->
+      <div class="sh-prematch-section" id="shPrematchSection">
+        <div class="sh-prematch-title">AI 추천 1688 검색어</div>
+        <div id="shPrematchContent">
+          <div class="sh-prematch-loading">
+            <div class="sh-spinner"></div>
+            <span>AI가 최적 검색어를 생성 중...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 분석 결과 (AI 버튼 클릭시) -->
+      <div class="sh-ai-section" id="shAISection">
+        <div class="sh-prematch-title">AI 소싱 분석</div>
+        <div id="shAIContent">
+          <div class="sh-prematch-loading">
+            <div class="sh-spinner"></div>
+            <span>AI 분석 중...</span>
+          </div>
+        </div>
+      </div>
     `;
-    container.appendChild(overlay);
 
-    // ---- 버튼 이벤트 ----
-    overlay.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const btn = e.target.closest('.sh-btn');
-      if (!btn) return;
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    activeModal = { backdrop, panel };
 
-      const action = btn.dataset.action;
+    // ---- 이벤트 바인딩 ----
+    panel.querySelector('#shModalClose').addEventListener('click', closeModal);
 
-      if (action === '1688') {
-        const kw = cnKw || koKw;
-        if (kw) {
-          window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(kw)}`, '_blank');
-        } else {
-          window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(koKw)}`, '_blank');
-        }
+    // 캐시
+    let preMatchCache = null;
+
+    // [1688 버튼] → AI 사전매칭 → 검색어 패널
+    panel.querySelector('#shBtn1688').addEventListener('click', async () => {
+      const section = panel.querySelector('#shPrematchSection');
+      const content = panel.querySelector('#shPrematchContent');
+      const btn = panel.querySelector('#shBtn1688');
+
+      // 이미 캐시 있으면 토글
+      if (preMatchCache) {
+        section.classList.toggle('sh-active');
+        return;
       }
 
-      if (action === 'ali') {
+      section.classList.add('sh-active');
+      content.innerHTML = `<div class="sh-prematch-loading"><div class="sh-spinner"></div><span>AI가 최적 검색어를 생성 중...</span></div>`;
+      btn.querySelector('.sh-action-btn-label').textContent = 'AI...';
+      btn.disabled = true;
+
+      try {
+        const resp = await chrome.runtime.sendMessage({
+          type: 'PRE_MATCH',
+          productName: item.title,
+          price: item.price,
+          imageUrl: item.imageUrl,
+        });
+
+        btn.querySelector('.sh-action-btn-label').textContent = '1688';
+        btn.disabled = false;
+
+        if (resp && resp.success && resp.keywords1688?.length) {
+          preMatchCache = resp;
+          renderPreMatchKeywords(content, resp, cnKw, koKw);
+        } else {
+          // AI 실패 → 폴백: 기본 검색어로 바로 열기
+          const kw = cnKw || koKw;
+          content.innerHTML = `
+            <div class="sh-tips-box">AI 생성 실패. 기본 검색어로 열립니다.</div>
+          `;
+          window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(kw)}`, '_blank');
+        }
+      } catch (err) {
+        btn.querySelector('.sh-action-btn-label').textContent = '1688';
+        btn.disabled = false;
+        const kw = cnKw || koKw;
+        content.innerHTML = `<div class="sh-tips-box">네트워크 오류. 기본 검색어로 열립니다.</div>`;
+        window.open(`https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(kw)}`, '_blank');
+      }
+    });
+
+    // [알리 버튼]
+    panel.querySelector('#shBtnAli').addEventListener('click', () => {
+      if (preMatchCache?.keywordsAliExpress?.length) {
+        window.open(`https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(preMatchCache.keywordsAliExpress[0].keyword)}`, '_blank');
+      } else {
         window.open(`https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(koKw)}`, '_blank');
       }
+    });
 
-      if (action === 'save') {
-        btn.textContent = '저장됨';
-        btn.classList.add('sh-btn-saved');
-        chrome.runtime.sendMessage({
-          type: 'SAVE_CANDIDATE',
-          product: item,
-          score: score,
-          grade: grade,
-        }).catch(() => {});
-      }
+    // [저장 버튼]
+    panel.querySelector('#shBtnSave').addEventListener('click', () => {
+      const btn = panel.querySelector('#shBtnSave');
+      btn.classList.add('sh-btn-saved');
+      btn.querySelector('.sh-action-btn-label').textContent = '저장됨';
+      btn.disabled = true;
+      chrome.runtime.sendMessage({
+        type: 'SAVE_CANDIDATE',
+        product: item,
+        score: score,
+        grade: grade,
+      }).catch(() => {});
+    });
 
-      if (action === 'ai') {
-        btn.textContent = '분석중...';
-        btn.disabled = true;
-        const statusEl = overlay.querySelector('.sh-ai-status');
-        statusEl.innerHTML = '<div class="sh-ai-loading">AI 분석 중...</div>';
+    // [AI 분석 버튼]
+    panel.querySelector('#shBtnAI').addEventListener('click', async () => {
+      const section = panel.querySelector('#shAISection');
+      const content = panel.querySelector('#shAIContent');
+      const btn = panel.querySelector('#shBtnAI');
 
-        chrome.runtime.sendMessage({
+      section.classList.add('sh-active');
+      content.innerHTML = `<div class="sh-prematch-loading"><div class="sh-spinner"></div><span>AI 소싱 분석 중...</span></div>`;
+      btn.querySelector('.sh-action-btn-label').textContent = '분석중';
+      btn.disabled = true;
+
+      try {
+        const resp = await chrome.runtime.sendMessage({
           type: 'REQUEST_AI_ANALYSIS',
           product: item,
           score: score,
-        }).then(resp => {
-          if (resp && resp.success) {
-            statusEl.innerHTML = `<div class="sh-ai-done">AI: ${resp.summary || '분석 완료'}</div>`;
-          } else {
-            statusEl.innerHTML = '<div class="sh-ai-loading">AI 분석 실패</div>';
-          }
-          btn.textContent = 'AI';
-          btn.disabled = false;
-        }).catch(() => {
-          statusEl.innerHTML = '<div class="sh-ai-loading">AI 연결 실패</div>';
-          btn.textContent = 'AI';
-          btn.disabled = false;
         });
+
+        btn.querySelector('.sh-action-btn-label').textContent = 'AI 분석';
+        btn.disabled = false;
+
+        if (resp && resp.success) {
+          const data = resp.data;
+          const summary = resp.summary || '분석 완료';
+          let detailHtml = `<div class="sh-ai-result">`;
+          detailHtml += `<div style="font-weight:700;margin-bottom:6px;">📊 ${summary}</div>`;
+          if (data?.beginnerFit) {
+            detailHtml += `<div>초보 적합도: ${data.beginnerFit.score || '-'}점</div>`;
+            if (data.beginnerFit.reason) detailHtml += `<div style="font-size:11px;color:#4b5563;">${data.beginnerFit.reason}</div>`;
+          }
+          if (data?.risks?.length) {
+            detailHtml += `<div style="margin-top:6px;color:#dc2626;">⚠️ 리스크: ${data.risks.join(', ')}</div>`;
+          }
+          if (data?.recommendations?.length) {
+            detailHtml += `<div style="margin-top:6px;">💡 ${data.recommendations.join(' / ')}</div>`;
+          }
+          detailHtml += `</div>`;
+          content.innerHTML = detailHtml;
+        } else {
+          content.innerHTML = `<div class="sh-ai-result sh-error">AI 분석 실패: ${resp?.error || '서버 오류'}</div>`;
+        }
+      } catch (err) {
+        btn.querySelector('.sh-action-btn-label').textContent = 'AI 분석';
+        btn.disabled = false;
+        content.innerHTML = `<div class="sh-ai-result sh-error">네트워크 오류</div>`;
       }
     });
   }
+
+  // ============================================================
+  //  사전매칭 검색어 렌더링
+  // ============================================================
+  function renderPreMatchKeywords(container, resp, cnKw, koKw) {
+    const kws = resp.keywords1688 || [];
+    const aliKws = resp.keywordsAliExpress || [];
+
+    let html = `<ul class="sh-kw-list">`;
+
+    // 1688 검색어
+    kws.forEach((k, i) => {
+      html += `
+        <li>
+          <a class="sh-kw-item" href="https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(k.keyword)}" target="_blank" rel="noreferrer">
+            <span class="sh-kw-num">${i + 1}</span>
+            <span class="sh-kw-text">${k.keyword}</span>
+            ${k.strategy ? `<span class="sh-kw-tag">${k.strategy}</span>` : ''}
+            <span class="sh-kw-arrow">›</span>
+          </a>
+        </li>`;
+    });
+
+    // AliExpress 검색어
+    if (aliKws.length) {
+      html += `<li style="padding:8px 0 4px;font-size:12px;font-weight:700;color:#e43225;">AliExpress 검색어</li>`;
+      aliKws.forEach((k, i) => {
+        html += `
+          <li>
+            <a class="sh-kw-item" href="https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(k.keyword)}" target="_blank" rel="noreferrer">
+              <span class="sh-kw-num sh-kw-ali">${i + 1}</span>
+              <span class="sh-kw-text">${k.keyword}</span>
+              <span class="sh-kw-arrow">›</span>
+            </a>
+          </li>`;
+      });
+    }
+
+    html += `</ul>`;
+
+    // 정제 정보
+    if (resp.coreProduct) {
+      html += `<div class="sh-tips-box">
+        <strong>핵심 품목:</strong> ${resp.coreProduct}<br>
+        ${resp.normalizedName ? `<strong>정제명:</strong> ${resp.normalizedName}<br>` : ''}
+        ${resp.searchTips ? `💡 ${resp.searchTips}` : ''}
+      </div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  // ============================================================
+  //  모달 닫기
+  // ============================================================
+  function closeModal() {
+    if (activeModal) {
+      activeModal.backdrop.remove();
+      activeModal.panel.remove();
+      activeModal = null;
+      activeProductId = null;
+    }
+  }
+
+  // ESC 키로 모달 닫기
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
 
   // ============================================================
   //  검색어 추출 — 다중 소스 교차 검증
@@ -387,10 +897,10 @@
     if (!newUrl.includes('/np/search')) return;
     lastUrl = newUrl;
     lastSignature = '';
-    // 이전 오버레이 제거
-    document.querySelectorAll(`[${OVERLAY_ATTR}]`).forEach(el => {
-      el.removeAttribute(OVERLAY_ATTR);
-      el.querySelectorAll('.sh-card-overlay, .sh-mini-badge').forEach(o => o.remove());
+    closeModal();
+    document.querySelectorAll(`[${BADGE_ATTR}]`).forEach(el => {
+      el.removeAttribute(BADGE_ATTR);
+      el.querySelectorAll('.sh-databar, .sh-mini-badge').forEach(o => o.remove());
       el.classList.remove('sh-relative');
     });
     scheduleScan(300);
@@ -482,7 +992,7 @@
     return products;
   }
 
-  // ---- 파싱 헬퍼 (동일) ----
+  // ---- 파싱 헬퍼 ----
   function findProductContainer(link) {
     let el = link.parentElement, depth = 0;
     while (el && depth < 8) {
@@ -573,10 +1083,10 @@
     // 스타일 삽입
     injectStyles();
 
-    // 각 상품 카드에 오버레이 삽입
+    // 각 상품 카드에 데이터바 + 배지 삽입
     for (const item of allParsedItems) {
       if (item._container) {
-        insertOverlay(item._container, item, allParsedItems);
+        insertDataBar(item._container, item, allParsedItems);
       }
     }
 
@@ -598,7 +1108,6 @@
   // ============================================================
   hookHistoryApi();
 
-  // MutationObserver (새 상품 로드 감지)
   const observer = new MutationObserver(() => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(autoScan, 600);

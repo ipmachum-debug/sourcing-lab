@@ -1414,4 +1414,166 @@ export const sourcingCoachRouter = router({
         analyzedAt: new Date().toISOString(),
       };
     }),
+
+  // ============================================================
+  //  AI 사전 매칭 엔진 (AI Pre-Match Engine)
+  //  쿠팡 상품명 → 1688/AliExpress 검색어 자동 생성
+  //  1단계: 상품명 정제 + 속성 추출
+  //  2단계: 1688용 검색어 5~10개 생성
+  // ============================================================
+  preMatch: publicProcedure
+    .input(z.object({
+      productName: z.string().min(1),
+      price: z.number().optional(),
+      category: z.string().optional(),
+      brand: z.string().optional(),
+      imageUrl: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { productName, price, category, brand } = input;
+
+      const systemPrompt = `당신은 한국 쿠팡 상품을 중국 1688/AliExpress에서 소싱하기 위한 **검색어 생성 전문가**입니다.
+
+역할: 쿠팡 상품명을 분석하여 1688에서 정확히 찾을 수 있는 검색어를 생성합니다.
+
+규칙:
+1. 브랜드명, 광고문구, 감성 수식어, 프로모션 표현을 모두 제거
+2. 핵심 품목명 + 재질 + 용도 + 형태 중심으로 정제
+3. 중국 판매자가 실제 사용하는 표현으로 번역 (직역 금지)
+4. 검색어는 구체적 → 일반적 순으로 5~8개 생성
+5. 각 검색어에 검색 전략 유형 태그 부여
+
+반드시 JSON 형식으로 응답하세요.`;
+
+      const userPrompt = `쿠팡 상품:
+- 상품명: ${productName}
+${price ? `- 가격: ${price}원` : ''}
+${category ? `- 카테고리: ${category}` : ''}
+${brand ? `- 브랜드: ${brand}` : ''}
+
+아래 JSON 형식으로 응답해주세요:
+{
+  "normalizedName": "정제된 한국어 상품명 (브랜드/광고 제거)",
+  "coreProduct": "핵심 품목명 (한국어, 2~4단어)",
+  "attributes": {
+    "type": "품목 유형",
+    "material": "재질 (있으면)",
+    "usage": "용도",
+    "feature": "특징/형태",
+    "size": "크기/용량 (있으면)"
+  },
+  "excludedTerms": ["제거된 브랜드/광고 단어 목록"],
+  "keywords1688": [
+    {"keyword": "중국어 검색어", "strategy": "핵심명사형", "priority": 1},
+    {"keyword": "중국어 검색어2", "strategy": "속성조합형", "priority": 2},
+    {"keyword": "중국어 검색어3", "strategy": "재질구조형", "priority": 3},
+    {"keyword": "중국어 검색어4", "strategy": "용도형", "priority": 4},
+    {"keyword": "중국어 검색어5", "strategy": "짧은검색어", "priority": 5}
+  ],
+  "keywordsAliExpress": [
+    {"keyword": "영어 검색어", "priority": 1},
+    {"keyword": "영어 검색어2", "priority": 2},
+    {"keyword": "영어 검색어3", "priority": 3}
+  ],
+  "searchTips": "이 상품을 1688에서 찾을 때 주의할 점 (한국어, 1~2문장)"
+}`;
+
+      let aiResult: any = null;
+
+      // 1차: invokeLLM 시도
+      try {
+        const raw = await invokeLLM({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.5,
+        });
+        const content = typeof raw === 'string' ? raw : (raw as any)?.content;
+        const text = typeof content === 'string' ? content : (content as any)?.[0]?.text || '';
+        aiResult = JSON.parse(text);
+      } catch (e: any) {
+        console.error('[PreMatch] LLM 실패:', e.message);
+      }
+
+      // 2차: OpenAI 직접 폴백
+      if (!aiResult) {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (apiKey) {
+          try {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userPrompt },
+                ],
+                temperature: 0.5,
+                max_tokens: 2048,
+                response_format: { type: 'json_object' },
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json() as any;
+              const content = data.choices?.[0]?.message?.content;
+              if (content) aiResult = JSON.parse(content);
+            }
+          } catch (e2: any) {
+            console.error('[PreMatch] OpenAI 폴백 실패:', e2.message);
+          }
+        }
+      }
+
+      // 3차: 규칙 기반 폴백
+      if (!aiResult) {
+        aiResult = generateRuleBasedPreMatch(productName, brand);
+      }
+
+      return {
+        success: true,
+        aiPowered: !!aiResult?.keywords1688,
+        ...aiResult,
+      };
+    }),
 });
+
+/** 규칙 기반 사전 매칭 폴백 */
+function generateRuleBasedPreMatch(productName: string, brand?: string) {
+  // 브랜드/광고 제거
+  let cleaned = productName
+    .replace(/\[.*?\]/g, ' ').replace(/\(.*?\)/g, ' ').replace(/【.*?】/g, ' ')
+    .replace(/[\/\\|~`!@#$%^&*=+{};:'"<>,.?]/g, ' ')
+    .replace(/\d+(ml|g|kg|cm|mm|개입|매입|세트|팩)/gi, ' ')
+    .replace(/\d+\+\d+/g, ' ')
+    .replace(/무료배송|당일발송|최저가|특가|세일|할인|핫딜|정품|국내정품|고급|프리미엄|대용량|1개|2개|3개/g, ' ')
+    .trim();
+
+  if (brand) {
+    cleaned = cleaned.replace(new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
+  }
+
+  const words = cleaned.split(/\s+/).filter(w => w.length > 1);
+  const coreWords = words.slice(0, 4);
+  const koKw = coreWords.join(' ');
+
+  // 간단한 한→중 변환
+  const cnParts = coreWords.map(w => KO_TO_CN[w]).filter(Boolean);
+  const cnKw = cnParts.length > 0 ? cnParts.join(' ') : koKw;
+
+  return {
+    normalizedName: koKw,
+    coreProduct: coreWords.slice(0, 2).join(' '),
+    attributes: { type: coreWords[0] || '', material: '', usage: '', feature: '', size: '' },
+    excludedTerms: brand ? [brand] : [],
+    keywords1688: [
+      { keyword: cnKw, strategy: '핵심명사형', priority: 1 },
+      { keyword: cnParts[0] || koKw, strategy: '짧은검색어', priority: 2 },
+    ],
+    keywordsAliExpress: [
+      { keyword: coreWords.join(' '), priority: 1 },
+    ],
+    searchTips: 'AI 분석을 사용할 수 없어 규칙 기반으로 생성되었습니다.',
+  };
+}

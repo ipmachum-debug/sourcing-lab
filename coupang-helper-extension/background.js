@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v5.0
+   Coupang Sourcing Helper — Background Service Worker v5.1
    세션 스토리지 관리 + 검색 히스토리 + 순위 추적 + 상세 파싱 + 서버 동기화
    + 순위 변동 알림 + 자동 순위 체크 + WING 인기상품 데이터 수집
    + 소싱 코치 (점수/마진/리스크/뱃지)
@@ -449,6 +449,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'CLEAR_AI_ANALYSIS_CACHE': {
       chrome.storage.local.set({ aiAnalysisCache: {} }).then(() => {
         sendResponse({ ok: true });
+      });
+      return true;
+    }
+
+    // ===== v5.1: AI 사전매칭 — 상품명→1688 검색어 자동 생성 =====
+    case 'PRE_MATCH': {
+      const productName = message.productName;
+      if (!productName) {
+        sendResponse({ success: false, error: 'No product name' });
+        return true;
+      }
+      apiClient.preMatch({
+        productName,
+        price: message.price || 0,
+        category: message.category || '',
+        brand: message.brand || '',
+        imageUrl: message.imageUrl || '',
+      }).then(resp => {
+        const data = resp?.result?.data;
+        if (data) {
+          sendResponse({ success: true, ...data });
+        } else {
+          sendResponse({ success: false, error: 'No data returned' });
+        }
+      }).catch(e => {
+        console.error('[PRE_MATCH] Error:', e.message);
+        sendResponse({ success: false, error: e.message });
       });
       return true;
     }
