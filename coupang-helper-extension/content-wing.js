@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — WING Content Script v4.6
+   Coupang Sourcing Helper — WING Content Script v5.0
    wing.coupang.com 인기상품검색 데이터 자동 수집
    
    전략:
@@ -98,7 +98,7 @@
   }
 
   // ============================================================
-  //  3) DOM 기반 인기상품 파싱 (Fallback) — v4.6 대폭 개선
+  //  3) DOM 기반 인기상품 파싱 (Fallback) — v5.0 대폭 개선
   // ============================================================
 
   function parseWingPopularProducts() {
@@ -127,7 +127,7 @@
       return items;
     }
 
-    // -- 전략 B: WING 인기상품 카드/리스트 기반 파싱 (v4.6 강화)
+    // -- 전략 B: WING 인기상품 카드/리스트 기반 파싱 (v5.0 강화)
     const cardSelectors = [
       // React/WING 컴포넌트 기반 선택자
       '[class*="ProductCard"]',
@@ -176,7 +176,7 @@
       return items;
     }
 
-    // -- 전략 C: 범용 DOM 탐색 (v4.6 새로 추가)
+    // -- 전략 C: 범용 DOM 탐색 (v5.0 새로 추가)
     // WING 인기상품 페이지의 실제 DOM 구조를 범용적으로 탐색
     const genericItems = parseGenericProductList();
     if (genericItems.length >= 1) {
@@ -556,7 +556,7 @@
   }
 
   // ============================================================
-  //  검색 컨텍스트 감지 — v4.6 searchKeywords(복수형) 추가
+  //  검색 컨텍스트 감지 — v5.0 searchKeywords(복수형) 추가
   // ============================================================
 
   function detectSearchContext() {
@@ -787,7 +787,7 @@
   }
 
   // ============================================================
-  //  SPA 네비게이션 감지 (v4.6 신규)
+  //  SPA 네비게이션 감지 (v5.0 신규)
   // ============================================================
 
   function checkUrlChange() {

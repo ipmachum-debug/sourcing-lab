@@ -1,12 +1,12 @@
 /* ============================================================
-   Coupang Sourcing Helper — WING XHR/Fetch Interceptor v4.6
+   Coupang Sourcing Helper — WING XHR/Fetch Interceptor v5.0
    wing.coupang.com 페이지에 인젝트되어 fetch/XHR 응답을 가로채고
    인기상품검색 관련 데이터를 content script로 전달합니다.
    ============================================================ */
 (function () {
   'use strict';
 
-  // 인기상품검색 관련 URL 패턴 — v4.6 대폭 확대
+  // 인기상품검색 관련 URL 패턴 — v5.0 대폭 확대
   const WING_API_PATTERNS = [
     /popular.*product/i,
     /product.*popular/i,
@@ -25,7 +25,7 @@
     /wing.*api.*search/i,
     /srp\//i,
     /catalog/i,
-    // v4.6 추가 패턴
+    // v5.0 추가 패턴
     /popular.*search/i,
     /search.*popular/i,
     /popular.*keyword/i,
@@ -82,7 +82,7 @@
     return WING_API_PATTERNS.some(p => p.test(url));
   }
 
-  // v4.6: 더 넓은 범위의 상품 데이터 감지
+  // v5.0: 더 넓은 범위의 상품 데이터 감지
   function isProductListResponse(data) {
     if (!data) return false;
 
@@ -197,7 +197,7 @@
   }
 
   // ============================================================
-  //  v4.6: 모든 XHR/fetch 응답에서 상품 데이터 탐색 (Aggressive Mode)
+  //  v5.0: 모든 XHR/fetch 응답에서 상품 데이터 탐색 (Aggressive Mode)
   // ============================================================
 
   function tryExtractProducts(url, json, method, body) {
@@ -288,5 +288,5 @@
 
   // 인젝션 완료 알림
   sendToContentScript('WING_INJECTED_READY', { version: '4.5' });
-  console.log('[SourcingHelper] WING injected v4.6 ready');
+  console.log('[SourcingHelper] WING injected v5.0 ready');
 })();

@@ -381,7 +381,7 @@ export default function ExtensionDashboard() {
         doc.setPage(i);
         doc.setFontSize(8);
         doc.setTextColor(180, 180, 180);
-        doc.text(`Coupang Sourcing Helper v4.6 | lumiriz.kr | Page ${i}/${pageCount}`, pageWidth / 2, 290, { align: "center" });
+        doc.text(`Coupang Sourcing Helper v5.0 | lumiriz.kr | Page ${i}/${pageCount}`, pageWidth / 2, 290, { align: "center" });
       }
 
       doc.save(`sourcing_report_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -473,7 +473,7 @@ export default function ExtensionDashboard() {
               {pdfGenerating ? "생성중..." : "PDF 보고서"}
             </Button>
 
-            <Badge variant="outline" className="text-xs">v4.6</Badge>
+            <Badge variant="outline" className="text-xs">v5.0</Badge>
           </div>
         </div>
 

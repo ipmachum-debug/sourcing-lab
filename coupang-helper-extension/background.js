@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v4.6
+   Coupang Sourcing Helper — Background Service Worker v5.0
    세션 스토리지 관리 + 검색 히스토리 + 순위 추적 + 상세 파싱 + 서버 동기화
    + 순위 변동 알림 + 자동 순위 체크 + WING 인기상품 데이터 수집
    + 소싱 코치 (점수/마진/리스크/뱃지)
@@ -122,13 +122,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== 후보 관리 =====
-    case 'SAVE_CANDIDATE': {
-      saveCandidateItem(message.item).then((result) => {
-        sendResponse({ ok: true, ...result });
-      });
-      return true;
-    }
+    // ===== 후보 관리 (SAVE_CANDIDATE는 하단 v5.0 블록에서 처리) =====
 
     case 'REMOVE_CANDIDATE': {
       removeCandidateItem(message.productId).then(() => {
@@ -401,7 +395,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== AI 소싱 코치 v4.6 (WING 인기상품 AI 분석) =====
+    // ===== AI 소싱 코치 v5.0 (WING 인기상품 AI 분석) =====
     case 'AI_ANALYZE_WING': {
       apiClient.aiAnalyzeWing(message.data).then((resp) => {
         const data = resp?.result?.data;
@@ -456,6 +450,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.storage.local.set({ aiAnalysisCache: {} }).then(() => {
         sendResponse({ ok: true });
       });
+      return true;
+    }
+
+    // ===== v5.0: 상품 카드에서 바로 AI 분석 요청 =====
+    case 'REQUEST_AI_ANALYSIS': {
+      const product = message.product;
+      if (!product) {
+        sendResponse({ success: false, error: 'No product data' });
+        return true;
+      }
+      // 서버 AI 분석 호출
+      apiClient.aiAnalyzeWingProduct({
+        keyword: product.query || product.title || '',
+        product: {
+          name: product.title,
+          price: product.price,
+          reviewCount: product.reviewCount,
+          rating: product.rating,
+          brand: product.brand || '',
+          rank: product.position,
+        },
+        marketAvg: {
+          avgPrice: product.price, // 단일 상품이므로 자기 가격
+          avgReviews: product.reviewCount,
+          avgRating: product.rating,
+        },
+      }).then((resp) => {
+        const data = resp?.result?.data;
+        let summary = '';
+        if (data) {
+          const fit = data.beginnerFit?.score || data.score || message.score || '-';
+          const risk = data.risks?.[0] || data.riskLevel || '';
+          summary = `적합도 ${fit}점`;
+          if (risk) summary += ` | ${risk}`;
+        }
+        sendResponse({ success: true, data, summary });
+      }).catch(e => {
+        sendResponse({ success: false, error: e.message, summary: '' });
+      });
+      return true;
+    }
+
+    // ===== v5.0: 상품 카드에서 후보 저장 (product 필드 호환) =====
+    case 'SAVE_CANDIDATE': {
+      const item = message.item || message.product;
+      if (item) {
+        // score/grade 추가 저장
+        if (message.score) item._quickScore = message.score;
+        if (message.grade) item._grade = message.grade;
+        saveCandidateItem(item).then((result) => {
+          sendResponse({ ok: true, ...result });
+        });
+      } else {
+        sendResponse({ ok: false, error: 'No item data' });
+      }
       return true;
     }
   }
