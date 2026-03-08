@@ -218,8 +218,13 @@ async function startServer() {
 
       // Step 2: install dependencies
       log.push("[2/5] pnpm install...");
-      const installResult = execSync("pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1", { cwd, timeout: 60000 }).toString();
-      log.push(installResult.trim().slice(-200));
+      try {
+        const installResult = execSync("pnpm install 2>&1", { cwd, timeout: 120000, shell: "/bin/bash" }).toString();
+        log.push(installResult.trim().slice(-500));
+      } catch (installErr: any) {
+        log.push("pnpm install failed: " + (installErr.stdout?.toString() || "").slice(-500) + " | stderr: " + (installErr.stderr?.toString() || "").slice(-500));
+        // Continue with build anyway - deps might already be installed
+      }
 
       // Step 3: DB migrations
       log.push("[3/5] DB migrations...");
