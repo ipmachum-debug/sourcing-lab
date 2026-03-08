@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "description": "쿠팡 AI 소싱 코치 — AI 분석 · 소싱 점수 · 마진 추정 · 리스크 분석 · 초보 추천 · 1688 키워드 · 경쟁도 · 순위추적 · WING",
   "permissions": ["storage", "tabs", "sidePanel", "scripting", "alarms", "notifications", "webRequest"],
   "host_permissions": ["https://www.coupang.com/*", "https://wing.coupang.com/*", "https://m-wing.coupang.com/*", "https://lumiriz.kr/*"],

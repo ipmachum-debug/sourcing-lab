@@ -9,6 +9,7 @@
    - Auto Scan 유지
    ============================================================ */
 (function () {
+  console.log('%c[Coupang Sourcing Helper] v5.1.2 모달형 로드됨', 'color:#16a34a;font-weight:bold;font-size:14px;');
   const MAX_ITEMS = 36;
   const BADGE_ATTR = 'data-sh-badge';
   let debounceTimer = null;
