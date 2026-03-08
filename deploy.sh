@@ -14,19 +14,24 @@ echo " Sourcing Lab Deploy Script"
 echo " $(date '+%Y-%m-%d %H:%M:%S')"
 echo "==============================="
 
-# 1. Git pull
-echo "[1/5] Git pull..."
+# 1. Git pull (reset local changes like rebuilt zip files)
+echo "[1/5] Git reset + pull..."
+git checkout -- . 2>&1 || true
 git pull origin main 2>&1
 
 # 2. Install deps
 echo "[2/5] Installing dependencies..."
 pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1
 
-# 3. Run DB migration (if new migration exists)
+# 3. Run DB migrations (if new migration exists)
 echo "[3/5] Checking DB migrations..."
 if [ -f drizzle/0008_keyword_daily_stats.sql ]; then
   echo "  Applying 0008_keyword_daily_stats.sql..."
   mysql -u root sourcing_lab < drizzle/0008_keyword_daily_stats.sql 2>&1 || echo "  (already applied or skipped)"
+fi
+if [ -f drizzle/0009_product_tracking.sql ]; then
+  echo "  Applying 0009_product_tracking.sql..."
+  mysql -u root sourcing_lab < drizzle/0009_product_tracking.sql 2>&1 || echo "  (already applied or skipped)"
 fi
 
 # 4. Build

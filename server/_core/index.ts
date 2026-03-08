@@ -210,23 +210,33 @@ async function startServer() {
       const cwd = process.cwd();
       const log: string[] = [];
 
-      // Step 1: git pull
-      log.push("[1/4] git pull...");
+      // Step 1: git reset + pull (clean any local changes like rebuilt zips)
+      log.push("[1/5] git reset + pull...");
+      execSync("git checkout -- . 2>&1 || true", { cwd, timeout: 10000 });
       const pullResult = execSync("git pull origin main", { cwd, timeout: 30000 }).toString();
       log.push(pullResult.trim());
 
       // Step 2: install dependencies
-      log.push("[2/4] pnpm install...");
+      log.push("[2/5] pnpm install...");
       const installResult = execSync("pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1", { cwd, timeout: 60000 }).toString();
       log.push(installResult.trim().slice(-200));
 
-      // Step 3: build
-      log.push("[3/4] pnpm run build...");
+      // Step 3: DB migrations
+      log.push("[3/5] DB migrations...");
+      try {
+        execSync("mysql -u root sourcing_lab < drizzle/0009_product_tracking.sql 2>&1 || true", { cwd, timeout: 15000 });
+        log.push("migration 0009 applied (or already exists)");
+      } catch (migErr: any) {
+        log.push("migration: " + (migErr.message || "").slice(0, 200));
+      }
+
+      // Step 4: build
+      log.push("[4/5] pnpm run build...");
       const buildResult = execSync("pnpm run build 2>&1", { cwd, timeout: 120000 }).toString();
       log.push(buildResult.trim().slice(-300));
 
-      // Step 4: pm2 restart (graceful, will apply to next process)
-      log.push("[4/4] pm2 restart...");
+      // Step 5: pm2 restart (graceful, will apply to next process)
+      log.push("[5/5] pm2 restart...");
       try {
         execSync("pm2 restart sourcing-lab --update-env 2>&1 || pm2 restart all 2>&1", { cwd, timeout: 15000 });
         log.push("pm2 restart OK");
