@@ -29,6 +29,9 @@ import {
 //  쿠팡윙 = 운영 원장  /  내 시스템 = 분석·판단·손익·기록
 // ================================================================
 
+/** Drizzle-ORM returns decimal/SUM results as string — always coerce to number */
+function N(v: any): number { return Number(v) || 0; }
+
 export const coupangRouter = router({
 
   // ━━━━━━━━━━━━━━━ 1) API 계정 관리 ━━━━━━━━━━━━━━━
@@ -561,11 +564,11 @@ export const coupangRouter = router({
         .limit(5);
 
       return {
-        daily: { qty: dailySales?.totalQty || 0, grossSales: dailySales?.totalGrossSales || 0, adSpend: dailySales?.totalAdSpend || 0, payout: dailySettle?.totalPayout || 0, commission: dailySettle?.totalCommission || 0, label: today },
-        weekly: { qty: weeklySales?.totalQty || 0, grossSales: weeklySales?.totalGrossSales || 0, adSpend: weeklySales?.totalAdSpend || 0, payout: weeklySettle?.totalPayout || 0, commission: weeklySettle?.totalCommission || 0, label: `${weekStart} ~ ${weekEnd}` },
-        monthly: { qty: monthlySales?.totalQty || 0, grossSales: monthlySales?.totalGrossSales || 0, adSpend: monthlySales?.totalAdSpend || 0, payout: monthlySettle?.totalPayout || 0, commission: monthlySettle?.totalCommission || 0, label: `${year}년 ${month}월` },
-        mappingCount: mappingCount?.count || 0,
-        activeMappingCount: activeMappingCount?.count || 0,
+        daily: { qty: N(dailySales?.totalQty), grossSales: N(dailySales?.totalGrossSales), adSpend: N(dailySales?.totalAdSpend), payout: N(dailySettle?.totalPayout), commission: N(dailySettle?.totalCommission), label: today },
+        weekly: { qty: N(weeklySales?.totalQty), grossSales: N(weeklySales?.totalGrossSales), adSpend: N(weeklySales?.totalAdSpend), payout: N(weeklySettle?.totalPayout), commission: N(weeklySettle?.totalCommission), label: `${weekStart} ~ ${weekEnd}` },
+        monthly: { qty: N(monthlySales?.totalQty), grossSales: N(monthlySales?.totalGrossSales), adSpend: N(monthlySales?.totalAdSpend), payout: N(monthlySettle?.totalPayout), commission: N(monthlySettle?.totalCommission), label: `${year}년 ${month}월` },
+        mappingCount: N(mappingCount?.count),
+        activeMappingCount: N(activeMappingCount?.count),
         recentJobs,
       };
     }),

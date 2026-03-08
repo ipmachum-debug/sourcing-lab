@@ -10,6 +10,9 @@ import {
 import { eq, and, desc, sql, like, asc, gte, ne, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
+/** Drizzle-ORM returns decimal/SUM/AVG/COUNT results as string — always coerce to number */
+function N(v: any): number { return Number(v) || 0; }
+
 export const extensionRouter = router({
   // ===== 검색 스냅샷 =====
 
@@ -199,7 +202,17 @@ export const extensionRouter = router({
       .orderBy(sql`COUNT(*) DESC`)
       .limit(10);
 
-    return { ...stats, topQueries };
+    return {
+      totalSearches: N(stats?.totalSearches),
+      uniqueQueries: N(stats?.uniqueQueries),
+      avgCompetition: N(stats?.avgCompetition),
+      avgPrice: N(stats?.avgPrice),
+      topQueries: topQueries.map(q => ({
+        ...q,
+        count: N(q.count),
+        avgCompetition: N(q.avgCompetition),
+      })),
+    };
   }),
 
   // ===== 소싱 후보 =====
@@ -338,11 +351,17 @@ export const extensionRouter = router({
       const today = new Date().toISOString().slice(0, 10);
       const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       const weekday = dayNames[new Date().getDay()];
+      // weekKey 계산
+      const todayDate = new Date();
+      const onejan = new Date(todayDate.getFullYear(), 0, 1);
+      const weekNum = Math.ceil(((todayDate.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7);
+      const weekKey = `${todayDate.getFullYear()}-W${weekNum.toString().padStart(2, "0")}`;
 
       const result = await db.insert(products).values({
         userId: ctx.user!.id,
         recordDate: today,
         weekday,
+        weekKey,
         productName: candidate.title || "확장프로그램 후보",
         status: "reviewing",
         priority: "medium",
@@ -385,7 +404,12 @@ export const extensionRouter = router({
       .from(extCandidates)
       .where(eq(extCandidates.userId, ctx.user!.id));
 
-    return { statusCounts, ...totals };
+    return {
+      statusCounts: statusCounts.map(s => ({ ...s, count: N(s.count) })),
+      total: N(totals?.total),
+      avgScore: N(totals?.avgScore),
+      avgPrice: N(totals?.avgPrice),
+    };
   }),
 
   // ===== 순위 추적 =====
@@ -628,7 +652,13 @@ export const extensionRouter = router({
         .groupBy(sql`DATE(${extSearchSnapshots.createdAt})`)
         .orderBy(asc(sql`DATE(${extSearchSnapshots.createdAt})`));
 
-      return trends;
+      return trends.map(t => ({
+        date: t.date,
+        count: N(t.count),
+        uniqueQueries: N(t.uniqueQueries),
+        avgCompetition: N(t.avgCompetition),
+        avgPrice: N(t.avgPrice),
+      }));
     }),
 
   // 키워드별 경쟁도 트렌드
@@ -672,7 +702,7 @@ export const extensionRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      return db.select({
+      const rows = await db.select({
         date: sql<string>`DATE(${extRankTrackings.capturedAt})`,
         avgPosition: sql<number>`ROUND(AVG(${extRankTrackings.position}))`,
         minPosition: sql<number>`MIN(${extRankTrackings.position})`,
@@ -689,6 +719,15 @@ export const extensionRouter = router({
         ))
         .groupBy(sql`DATE(${extRankTrackings.capturedAt})`)
         .orderBy(asc(sql`DATE(${extRankTrackings.capturedAt})`));
+
+      return rows.map(r => ({
+        date: r.date,
+        avgPosition: N(r.avgPosition),
+        minPosition: N(r.minPosition),
+        maxPosition: N(r.maxPosition),
+        price: N(r.price),
+        reviewCount: N(r.reviewCount),
+      }));
     }),
 
   // 경쟁자 모니터링: 특정 키워드의 상위 상품 변동 추적
@@ -926,10 +965,10 @@ export const extensionRouter = router({
 
       return {
         period: input.days,
-        searches: recentSearches?.count || 0,
-        candidates: recentCandidates?.count || 0,
-        rankRecords: recentRanks?.count || 0,
-        productDetails: recentDetails?.count || 0,
+        searches: N(recentSearches?.count),
+        candidates: N(recentCandidates?.count),
+        rankRecords: N(recentRanks?.count),
+        productDetails: N(recentDetails?.count),
       };
     }),
 
@@ -1138,7 +1177,7 @@ export const extensionRouter = router({
           eq(extNotifications.isRead, false),
         ));
 
-      return { count: result?.count || 0 };
+      return { count: N(result?.count) };
     }),
 
   // 알림 읽음 처리
@@ -1265,9 +1304,23 @@ export const extensionRouter = router({
       return {
         period: input.days,
         generatedAt: new Date().toISOString(),
-        searchStats: searchStats || {},
-        candidateStats: { ...(candStats || {}), statusCounts },
-        topQueries,
+        searchStats: searchStats ? {
+          totalSearches: N(searchStats.totalSearches),
+          uniqueQueries: N(searchStats.uniqueQueries),
+          avgCompetition: N(searchStats.avgCompetition),
+          avgPrice: N(searchStats.avgPrice),
+        } : {},
+        candidateStats: {
+          total: N(candStats?.total),
+          avgScore: N(candStats?.avgScore),
+          statusCounts: statusCounts.map(s => ({ ...s, count: N(s.count) })),
+        },
+        topQueries: topQueries.map(q => ({
+          ...q,
+          count: N(q.count),
+          avgCompetition: N(q.avgCompetition),
+          avgPrice: N(q.avgPrice),
+        })),
         trackedKeywords,
         recentAnalyses: recentAnalyses.map(a => {
           const safeJsonParse = (str: string | null) => {
@@ -1449,10 +1502,28 @@ export const extensionRouter = router({
         .orderBy(asc(sql`DATE(created_at)`));
 
       return {
-        ...stats,
-        topKeywords,
-        categories,
-        dailySearches,
+        totalSearches: N(stats?.totalSearches),
+        uniqueKeywords: N(stats?.uniqueKeywords),
+        uniqueCategories: N(stats?.uniqueCategories),
+        avgPrice: N(stats?.avgPrice),
+        avgRating: N(stats?.avgRating),
+        totalProducts: N(stats?.totalProducts),
+        topKeywords: topKeywords.map(k => ({
+          ...k,
+          count: N(k.count),
+          avgPrice: N(k.avgPrice),
+          avgItems: N(k.avgItems),
+        })),
+        categories: categories.map(c => ({
+          ...c,
+          count: N(c.count),
+          avgPrice: N(c.avgPrice),
+        })),
+        dailySearches: dailySearches.map(d => ({
+          ...d,
+          count: N(d.count),
+          totalProducts: N(d.totalProducts),
+        })),
       };
     }),
 
@@ -1717,7 +1788,15 @@ export const extensionRouter = router({
           )`,
         ));
 
-      return overview || {};
+      return overview ? {
+        totalKeywords: N(overview.totalKeywords),
+        avgDemandScore: N(overview.avgDemandScore),
+        avgKeywordScore: N(overview.avgKeywordScore),
+        avgCompetition: N(overview.avgCompetition),
+        totalSalesEstimate: N(overview.totalSalesEstimate),
+        avgPrice: N(overview.avgPrice),
+        totalReviewGrowth: N(overview.totalReviewGrowth),
+      } : {};
     }),
 
   // 키워드 삭제 (키워드 데이터 전체 제거: 스냅샷 + 일별통계)

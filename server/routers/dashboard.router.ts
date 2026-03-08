@@ -39,7 +39,7 @@ export const dashboardRouter = router({
         .from(products)
         .where(and(eq(products.userId, userId), eq(products.status, "test_candidate")));
 
-      // 평균 점수
+      // 평균 점수 — N() coerce because Drizzle may return string for AVG
       const [avgResult] = await db.select({ avg: sql<number>`COALESCE(AVG(score), 0)` })
         .from(products)
         .where(and(eq(products.userId, userId), eq(products.weekKey, currentWeek)));
@@ -108,10 +108,10 @@ export const dashboardRouter = router({
 
       return {
         currentWeek,
-        weekSourcedCount: weekCount?.count || 0,
-        totalProductCount: totalCount?.count || 0,
-        testCandidateCount: testCount?.count || 0,
-        weekAvgScore: Math.round(avgResult?.avg || 0),
+        weekSourcedCount: N(weekCount?.count),
+        totalProductCount: N(totalCount?.count),
+        testCandidateCount: N(testCount?.count),
+        weekAvgScore: Math.round(N(avgResult?.avg)),
         topProducts,
         categoryStats,
         topKeywords,
