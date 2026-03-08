@@ -1,5 +1,4 @@
-import { config } from "dotenv";
-config({ override: true });
+import "./env"; // dotenv is loaded here before ENV is used
 import express from "express";
 import { createServer } from "http";
 import net from "net";
