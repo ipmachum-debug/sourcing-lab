@@ -85,6 +85,12 @@ function generateHmacSignature(
   secretKey: string,
   accessKey: string
 ): string {
+  if (!secretKey || secretKey.trim().length === 0) {
+    throw new Error('Coupang Secret Key가 비어있습니다. API 키를 확인해주세요.');
+  }
+  if (!accessKey || accessKey.trim().length === 0) {
+    throw new Error('Coupang Access Key가 비어있습니다. API 키를 확인해주세요.');
+  }
   // datetime in UTC: yyMMddTHHmmssZ
   const now = new Date();
   const datetime =
@@ -159,6 +165,13 @@ async function coupangRequest<T = any>(
   vendorId?: string,
   rawQuery?: string
 ): Promise<CoupangApiResponse<T>> {
+  // API 키 유효성 사전 체크
+  if (!accessKey?.trim() || !secretKey?.trim()) {
+    return {
+      success: false,
+      error: 'Coupang API 키가 설정되지 않았습니다. 계정 설정에서 Access Key와 Secret Key를 입력해주세요.',
+    } as CoupangApiResponse<T>;
+  }
   // ★ 핵심: queryString 하나만 만들고, 이걸 서명에도 URL에도 동일하게 사용
   const queryString = rawQuery !== undefined ? rawQuery : buildQueryString(params);
 
