@@ -163,12 +163,27 @@ function calcScore100(item, market) {
 }
 
 function estimateMargin(price) {
-  if (!price || price <= 0) return { marginRate: 0, advice: '-', adviceType: 'danger', profit: 0 };
-  const rate = 190;
-  const cnyCost = Math.round(price * 0.15 / rate * 10) / 10;
-  const costKrw = Math.round(cnyCost * rate);
-  const totalCost = costKrw + 3000 + 3000 + Math.round(costKrw * 0.08);
-  const fees = Math.round(price * 0.108) + Math.round(price * 0.05) + Math.round(price * 0.03);
+  if (!price || price <= 0) return { marginRate: 0, advice: '-', adviceType: 'danger', profit: 0, tooltip: '' };
+  // 1688 추정 원가: 판매가의 15~25% (카테고리별 평균)
+  // 가격대별 원가율 조정 (저가 상품일수록 원가 비율 높음)
+  let costRatio;
+  if (price >= 50000) costRatio = 0.12;       // 5만원 이상: 원가율 12%
+  else if (price >= 20000) costRatio = 0.15;   // 2~5만원: 15%
+  else if (price >= 10000) costRatio = 0.18;   // 1~2만원: 18%
+  else if (price >= 5000) costRatio = 0.22;    // 5천~1만원: 22%
+  else costRatio = 0.30;                        // 5천원 미만: 30%
+
+  const rate = 190; // 위안-원 환율
+  const estimatedCostKrw = Math.round(price * costRatio);
+  const cnyCost = Math.round(estimatedCostKrw / rate * 10) / 10;
+  const shipping = 3000;   // 국제배송비 추정
+  const domestic = 3000;    // 국내배송비
+  const customs = Math.round(estimatedCostKrw * 0.08); // 관세+부가세
+  const totalCost = estimatedCostKrw + shipping + domestic + customs;
+  const coupangFee = Math.round(price * 0.108); // 쿠팡 수수료 10.8%
+  const adFee = Math.round(price * 0.05);       // 광고비 5%
+  const etcFee = Math.round(price * 0.03);      // 기타 3%
+  const fees = coupangFee + adFee + etcFee;
   const profit = price - totalCost - fees;
   const marginRate = Math.round((profit / price) * 1000) / 10;
   let advice, adviceType;
@@ -177,7 +192,8 @@ function estimateMargin(price) {
   else if (marginRate >= 10) { advice = '마진 낮음'; adviceType = 'caution'; }
   else if (marginRate >= 0) { advice = '광고 시 손실'; adviceType = 'danger'; }
   else { advice = '적자 예상'; adviceType = 'danger'; }
-  return { marginRate, advice, adviceType, profit };
+  const tooltip = `추정 원가: ~${estimatedCostKrw.toLocaleString()}원 (판매가의 ${Math.round(costRatio*100)}%)\n국제배송: ${shipping.toLocaleString()}원 | 국내: ${domestic.toLocaleString()}원\n관세: ${customs.toLocaleString()}원 | 수수료: ${fees.toLocaleString()}원\n총 비용: ${(totalCost+fees).toLocaleString()}원\n추정 이익: ${profit.toLocaleString()}원\n※ 1688 원가 미정 시 추정치입니다`;
+  return { marginRate, advice, adviceType, profit, tooltip };
 }
 
 function analyzeRiskLocal(item) {
@@ -831,7 +847,7 @@ function renderItems(items, comp) {
         </div>
         <div class="coach-line coach-margin-line">
           <span class="coach-label">💰 마진</span>
-          <span class="coach-value" style="color:${marginColor}">${m.marginRate != null ? m.marginRate + '%' : '-'} (${m.advice || '-'})</span>
+          <span class="coach-value" style="color:${marginColor}" title="${(m.tooltip || '').replace(/"/g, '&quot;')}">${m.marginRate != null ? m.marginRate + '%' : '-'} (${m.advice || '-'})</span>
         </div>
         <div class="coach-line coach-risk-line">
           <span class="coach-label">⚡ 리스크</span>
@@ -1143,6 +1159,33 @@ function renderDetail(detail) {
     gridHtml += `<div class="detail-grid-item"><span class="dg-label">${d.label}</span><span class="dg-value">${d.value}</span></div>`;
   }
   grid.innerHTML = gridHtml;
+
+  // 소싱 코치 분석 (상세 페이지용)
+  const detailCoachEl = $('#detailCoach');
+  if (detailCoachEl && detail.price > 0) {
+    const mg = estimateMargin(detail.price);
+    const rk = analyzeRiskLocal(detail);
+    const marginColor = mg.adviceType === 'good' ? '#059669' : mg.adviceType === 'caution' ? '#d97706' : '#dc2626';
+    const riskColor = rk.level === 'critical' ? '#dc2626' : rk.level === 'high' ? '#f97316' : rk.level === 'medium' ? '#eab308' : '#22c55e';
+    detailCoachEl.style.display = '';
+    detailCoachEl.innerHTML = `
+      <div style="margin-top:8px;padding:8px;background:#f8f9fa;border-radius:8px;font-size:11px">
+        <div style="font-weight:700;margin-bottom:4px;color:#374151">📊 소싱 분석 (추정)</div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>💰 예상 마진</span>
+          <span style="font-weight:600;color:${marginColor}" title="${(mg.tooltip || '').replace(/"/g, '&quot;')}">${mg.marginRate}% (${mg.advice})</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>⚡ 리스크</span>
+          <span style="color:${riskColor}">${rk.level === 'low' ? '낮음' : rk.level === 'medium' ? '보통' : rk.level === 'high' ? '높음' : '매우높음'}</span>
+        </div>
+        ${rk.warnings.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:2px">${rk.warnings.slice(0,3).map(w => `<span style="font-size:10px;padding:1px 4px;border:1px solid ${w.severity==='danger'?'#dc2626':'#f59e0b'};border-radius:3px;color:${w.severity==='danger'?'#dc2626':'#92400e'}">${w.icon} ${w.label}</span>`).join('')}</div>` : ''}
+        <div style="margin-top:4px;font-size:10px;color:#9ca3af">※ 1688 원가 미정 시 판매가 기준 추정치</div>
+      </div>
+    `;
+  } else if (detailCoachEl) {
+    detailCoachEl.style.display = 'none';
+  }
 
   // 1688 버튼
   $('#detailBtn1688').onclick = (e) => {

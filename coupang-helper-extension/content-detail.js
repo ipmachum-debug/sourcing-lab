@@ -3,6 +3,15 @@
    쿠팡 상품 상세 페이지에서 가격, 평점, 리뷰수, 구매수,
    판매자, 옵션 등 상세 데이터 파싱
 
+   v5.5.5 변경사항:
+   - 가격: meta[product:price:amount] + JSON-LD 우선 전략 추가 (가장 신뢰)
+   - 가격: 적립금/포인트/캐시/쿠폰/코팩/와우할인 영역 제외 강화
+   - 가격: "N원 이상 구매" 패턴 제외
+   - 가격: 빈도 기반 가격 선택 (가장 자주 등장하는 가격 우선)
+   - 리뷰: "N개 상품평" 텍스트 패턴을 1순위로 승격
+   - 리뷰: .count 범용 셀렉터 제거 (다른 카운트와 혼동 방지)
+   - 디버그: 가격 파싱 결과 콘솔 로그 추가
+
    v5.5.3 변경사항:
    - 쿠팡 React SPA에 대응하여 텍스트 패턴 기반 파싱으로 전면 재작성
    - 가격: 할인가 우선, "N% N,NNN원" 패턴, 적립금/단위가격 제외
@@ -77,19 +86,43 @@
     let originalPrice = 0;
     let discountRate = 0;
 
+    // === 전략 0: 쿠팡 가격 메타태그 (가장 신뢰) ===
+    const metaPrice = document.querySelector('meta[property="product:price:amount"]');
+    if (metaPrice) {
+      const v = nm(metaPrice.getAttribute('content') || '');
+      if (v >= 100 && v < 1e8) price = v;
+    }
+    // JSON-LD에서 가격 추출
+    if (!price) {
+      for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+        try {
+          const json = JSON.parse(script.textContent);
+          const offers = json.offers || json?.mainEntity?.offers;
+          if (offers) {
+            const p = parseInt(offers.price || offers.lowPrice || '0', 10);
+            if (p >= 100 && p < 1e8) { price = p; break; }
+          }
+        } catch (e) {}
+      }
+    }
+
     // === 전략 1: 클래스 기반 직접 추출 (구 DOM 호환) ===
-    const priceSelectors = [
-      '.total-price strong',
-      '.prod-price .total-price',
-      '[class*="total-price"] strong',
-      'strong.price-value',
-      '.price-value',
-    ];
-    for (const sel of priceSelectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const v = nm(tx(el));
-        if (v >= 100 && v < 1e8) { price = v; break; }
+    if (!price) {
+      const priceSelectors = [
+        '.total-price strong',
+        '.prod-price .total-price',
+        '[class*="total-price"] strong',
+        'strong.price-value',
+        '.price-value',
+      ];
+      for (const sel of priceSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+          // 적립금 영역 내부인지 확인
+          if (el.closest('[class*="reward"]') || el.closest('[class*="point"]') || el.closest('[class*="benefit"]')) continue;
+          const v = nm(tx(el));
+          if (v >= 100 && v < 1e8) { price = v; break; }
+        }
       }
     }
 
@@ -128,6 +161,8 @@
       for (const el of allEls) {
         // 패널 내부 무시
         if (el.closest('#sh-panel') || el.closest('[class*="review"]') || el.closest('[class*="option-price"]')) continue;
+        // 적립금/캐시/포인트/혜택 영역 무시
+        if (el.closest('[class*="reward"]') || el.closest('[class*="point"]') || el.closest('[class*="benefit"]') || el.closest('[class*="cashback"]')) continue;
 
         const t = tx(el);
         if (!t || t.length > 100) continue;
@@ -144,8 +179,10 @@
         if (/배송비/.test(t)) continue;
         // 제외: 카드 할인
         if (/카드/.test(t)) continue;
-        // 제외: 캐시/쿠폰
-        if (/캐시|쿠폰|포인트/.test(t)) continue;
+        // 제외: 캐시/쿠폰/포인트/코팩/와우
+        if (/캐시|쿠폰|포인트|코팩|와우|할인.*적용/.test(t)) continue;
+        // 제외: "이상 구매" 패턴
+        if (/이상\s*(구매|주문)/.test(t)) continue;
 
         const priceMatch = t.match(/([\d,]+)\s*원/);
         if (priceMatch) {
@@ -163,8 +200,11 @@
         const origPrices = candidates.filter(c => c.isOriginal);
 
         if (salePrices.length > 0) {
-          // 판매가 중 가장 자주 등장하는 가격 (또는 가장 작은)
-          price = Math.min(...salePrices.map(c => c.value));
+          // 판매가는 가장 빈도 높은 가격 → 같으면 가장 큰 값 우선 (너무 작은 값은 부가 정보)
+          const freqMap = new Map();
+          for (const c of salePrices) freqMap.set(c.value, (freqMap.get(c.value) || 0) + 1);
+          const sorted = [...freqMap.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+          price = sorted[0][0];
         } else if (origPrices.length > 0) {
           price = Math.min(...origPrices.map(c => c.value));
         }
@@ -181,7 +221,8 @@
         .replace(/최대\s*[\d,]+\s*원\s*적립/g, '')
         .replace(/[\d,]+\s*원\s*적립/g, '')
         .replace(/\d+\s*(g|kg|ml|l|개|매|입)\s*당\s*[\d,]+\s*원/gi, '')
-        .replace(/배송비\s*[\d,]+\s*원/g, '');
+        .replace(/배송비\s*[\d,]+\s*원/g, '')
+        .replace(/[\d,]+\s*원\s*이상\s*(?:구매|주문)/g, '');
 
       const discMatch = cleanText.match(/(\d{1,3})%\s*([\d,]+)\s*원/);
       if (discMatch) {
@@ -192,6 +233,8 @@
         }
       }
     }
+
+    console.log(`[SH Detail] 가격 파싱: ${price}원 (원가:${originalPrice}, 할인:${discountRate}%)`);
 
     // 할인율 계산 (가격으로부터)
     if (!discountRate && originalPrice > 0 && price > 0 && originalPrice > price) {
@@ -283,13 +326,26 @@
   //  리뷰 수 추출 (다중 전략)
   // ============================================================
   function parseReviewCount() {
-    // 전략 1: 클래스 기반
+    // 전략 0: "N개 상품평" 텍스트 패턴 우선 (가장 확실)
+    for (const el of document.querySelectorAll('a, span, div, button, em, strong')) {
+      if (el.closest('#sh-panel')) continue;
+      const t = tx(el);
+      if (t.length > 80) continue;
+      let m = t.match(/([\d,]+)\s*개?\s*상품평/);
+      if (!m) m = t.match(/상품평\s*\(?\s*([\d,]+)\s*\)?/);
+      if (m) {
+        const v = nm(m[1]);
+        if (v > 0 && v < 1e8) return v;
+      }
+    }
+
+    // 전략 1: 클래스 기반 (구체적 셀렉터만)
     const revSelectors = [
       '.prod-buy-header__review-count',
-      '.count',
       'span.rating-total-count',
       '.rating-total-count',
       '[class*="review-count"]',
+      // '.count'는 너무 범용적이라 제외
     ];
     for (const sel of revSelectors) {
       const el = document.querySelector(sel);
