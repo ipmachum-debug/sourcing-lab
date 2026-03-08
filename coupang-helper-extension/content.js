@@ -1,372 +1,201 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.4.0
-   "플로팅 패널" — 셀록홈즈 스타일 자동 오버레이 패널
+   Coupang Sourcing Helper — Content Script v5.5.0
+   "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
-   1) 검색 결과 페이지에서 자동으로 플로팅 패널 표시
-   2) 패널은 화면 오른쪽에 떠 있는 형태 (드래그 가능)
-   3) 각 상품: 점수·가격·리뷰·1688·저장 버튼
-   4) 접기/펼치기 토글
-   5) 쿠팡 DOM 최소 건드림
+   1) 검색 시 자동 플로팅 패널 (오른쪽)
+   2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
+   3) TOP 3 상품만 간결 표시
+   4) 쿠팡 DOM 최소 건드림
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.4.0';
+  const VER = '5.5.0';
 
-  // ---- 중복 방지 ----
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
 
-  // 모든 이전 버전 잔재 제거
+  // 이전 버전 잔재 제거
   document.querySelectorAll(
     '#sh-float-bar,#sh-topbar,#sh-card-styles,#sh-styles-v531,' +
     '.sh-card-overlay,.sh-databar,.sh-mini-badge,.sh-card-box,' +
     '.sh-modal-backdrop,.sh-modal-panel,.sh-hover-highlight,' +
     '[data-sh-badge],[data-sh-overlay],[data-sh-card],[data-sh],' +
     '#sh-overlay-styles,#sh-modal-styles,#sh-debug-panel,#sh-version-badge,' +
-    '.sh-tag,#sh-panel'
+    '.sh-tag,#sh-panel,#sh-panel-css'
   ).forEach(el => el.remove());
 
-  console.log(`%c[SH] v${VER} 플로팅 패널 로드`, 'color:#16a34a;font-weight:bold;font-size:13px;');
+  console.log(`%c[SH] v${VER} 마켓 대시보드 로드`, 'color:#16a34a;font-weight:bold;font-size:13px;');
 
   // ============================================================
-  //  CSS — 플로팅 패널 전체 스타일
+  //  CSS
   // ============================================================
   const css = document.createElement('style');
   css.id = 'sh-panel-css';
   css.textContent = `
-    /* ---- 패널 컨테이너 ---- */
     #sh-panel {
       position: fixed !important;
       top: 60px !important;
-      right: 12px !important;
-      width: 380px !important;
+      right: 10px !important;
+      width: 340px !important;
       max-height: calc(100vh - 80px) !important;
       z-index: 2147483640 !important;
       font-family: -apple-system, 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
       font-size: 12px !important;
       color: #1e293b !important;
-      background: #ffffff !important;
-      border-radius: 12px !important;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08) !important;
+      background: #fff !important;
+      border-radius: 14px !important;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.06) !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
-      border: 1px solid #e2e8f0 !important;
-      transition: width 0.2s ease, opacity 0.2s ease !important;
+      border: 1px solid rgba(0,0,0,0.06) !important;
       user-select: none !important;
+      transition: opacity 0.2s !important;
     }
-    #sh-panel.sh-collapsed {
-      width: 48px !important;
-      max-height: 48px !important;
-      border-radius: 24px !important;
-      cursor: pointer !important;
+    #sh-panel.sh-min {
+      width: 44px !important; max-height: 44px !important;
+      border-radius: 22px !important; cursor: pointer !important;
     }
-    #sh-panel.sh-collapsed .sh-header-content,
-    #sh-panel.sh-collapsed .sh-body {
-      display: none !important;
-    }
-    #sh-panel.sh-dragging {
-      opacity: 0.85 !important;
-      cursor: grabbing !important;
-    }
+    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body { display: none !important; }
+    #sh-panel.sh-drag { opacity: 0.8 !important; cursor: grabbing !important; }
 
-    /* ---- 헤더 ---- */
-    .sh-header {
-      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+    /* 헤더 */
+    .sh-hd {
+      background: linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%) !important;
       color: #fff !important;
       padding: 10px 14px !important;
-      display: flex !important;
+      display: flex !important; align-items: center !important; justify-content: space-between !important;
+      cursor: grab !important; flex-shrink: 0 !important;
+      border-radius: 14px 14px 0 0 !important;
+    }
+    #sh-panel.sh-min .sh-hd { border-radius: 22px !important; padding: 10px !important; justify-content: center !important; }
+    .sh-hd .logo { font-size: 15px !important; font-weight: 800 !important; }
+    .sh-hc { display: flex !important; align-items: center !important; gap: 6px !important; flex:1 !important; }
+    .sh-hc .ver { font-size: 8px !important; opacity: .6 !important; background: rgba(255,255,255,.12) !important; padding: 1px 5px !important; border-radius: 3px !important; }
+    .sh-hc .qr { font-size: 11px !important; background: rgba(255,255,255,.18) !important; padding: 2px 8px !important; border-radius: 5px !important; max-width: 120px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; font-weight: 600 !important; }
+    .sh-hc .cnt { font-size: 10px !important; background: rgba(255,255,255,.22) !important; padding: 2px 6px !important; border-radius: 5px !important; font-weight: 700 !important; }
+    .sh-hbtns { display: flex !important; gap: 3px !important; }
+    .sh-hb { width: 22px !important; height: 22px !important; display: flex !important; align-items: center !important; justify-content: center !important; border: none !important; background: rgba(255,255,255,.12) !important; color: #fff !important; border-radius: 5px !important; cursor: pointer !important; font-size: 12px !important; padding: 0 !important; }
+    .sh-hb:hover { background: rgba(255,255,255,.28) !important; }
+
+    /* 바디 */
+    .sh-body { overflow-y: auto !important; flex: 1 !important; }
+    .sh-body::-webkit-scrollbar { width: 3px !important; }
+    .sh-body::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 3px !important; }
+
+    /* 섹션 */
+    .sh-sec { padding: 12px 14px !important; border-bottom: 1px solid #f1f5f9 !important; }
+    .sh-sec-title { font-size: 10px !important; font-weight: 700 !important; color: #94a3b8 !important; text-transform: uppercase !important; letter-spacing: .5px !important; margin-bottom: 8px !important; }
+
+    /* 시장 통계 그리드 */
+    .sh-stats { display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; gap: 8px !important; }
+    .sh-st {
+      background: #f8fafc !important; border-radius: 8px !important; padding: 8px 10px !important;
+      display: flex !important; flex-direction: column !important; align-items: center !important;
+      border: 1px solid #f1f5f9 !important;
+    }
+    .sh-st-v { font-size: 15px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
+    .sh-st-v.accent { color: #6366f1 !important; }
+    .sh-st-v.red { color: #dc2626 !important; }
+    .sh-st-v.green { color: #16a34a !important; }
+    .sh-st-v.amber { color: #d97706 !important; }
+    .sh-st-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 2px !important; }
+
+    /* 경쟁도 바 */
+    .sh-comp-bar { height: 6px !important; border-radius: 3px !important; background: #f1f5f9 !important; margin-top: 6px !important; overflow: hidden !important; }
+    .sh-comp-fill { height: 100% !important; border-radius: 3px !important; transition: width .3s !important; }
+    .sh-comp-lbl { display: flex !important; justify-content: space-between !important; margin-top: 3px !important; font-size: 9px !important; color: #94a3b8 !important; }
+    .sh-comp-easy { background: #16a34a !important; }
+    .sh-comp-mid { background: #f59e0b !important; }
+    .sh-comp-hard { background: #dc2626 !important; }
+
+    /* 미니 차트 (가격 분포, 리뷰 분포) */
+    .sh-charts { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; margin-top: 10px !important; }
+    .sh-chart {
+      background: #f8fafc !important; border-radius: 8px !important; padding: 8px !important;
+      border: 1px solid #f1f5f9 !important;
+    }
+    .sh-chart-title { font-size: 9px !important; font-weight: 600 !important; color: #94a3b8 !important; margin-bottom: 6px !important; }
+    .sh-bars { display: flex !important; align-items: flex-end !important; gap: 2px !important; height: 40px !important; }
+    .sh-bar {
+      flex: 1 !important; background: #c7d2fe !important; border-radius: 2px 2px 0 0 !important;
+      min-height: 2px !important; transition: height .3s !important; position: relative !important;
+    }
+    .sh-bar:hover { background: #6366f1 !important; }
+    .sh-bar-lbl { position: absolute !important; bottom: -13px !important; left: 50% !important; transform: translateX(-50%) !important; font-size: 7px !important; color: #94a3b8 !important; white-space: nowrap !important; }
+    .sh-bar-active { background: #6366f1 !important; }
+
+    /* TOP3 상품 */
+    .sh-top {
+      display: flex !important; gap: 8px !important; padding: 8px 0 !important;
+      border-bottom: 1px solid #f1f5f9 !important; align-items: flex-start !important;
+      cursor: pointer !important; transition: background .15s !important;
+    }
+    .sh-top:last-child { border-bottom: none !important; }
+    .sh-top:hover { background: #f8fafc !important; border-radius: 6px !important; }
+    .sh-top-rank {
+      width: 20px !important; height: 20px !important; border-radius: 5px !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      font-size: 10px !important; font-weight: 800 !important; flex-shrink: 0 !important;
+    }
+    .sh-r1 { background: #fef3c7 !important; color: #92400e !important; }
+    .sh-r2 { background: #e0e7ff !important; color: #3730a3 !important; }
+    .sh-r3 { background: #f1f5f9 !important; color: #64748b !important; }
+    .sh-top-img {
+      width: 40px !important; height: 40px !important; border-radius: 6px !important;
+      object-fit: cover !important; flex-shrink: 0 !important; background: #f1f5f9 !important;
+    }
+    .sh-top-info { flex: 1 !important; min-width: 0 !important; }
+    .sh-top-name {
+      font-size: 11px !important; font-weight: 600 !important; color: #1e293b !important;
+      white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+      margin-bottom: 3px !important; line-height: 1.3 !important;
+    }
+    .sh-top-meta {
+      display: flex !important; align-items: center !important; gap: 5px !important; flex-wrap: wrap !important;
+    }
+    .sh-top-price { font-size: 11px !important; font-weight: 700 !important; color: #dc2626 !important; }
+    .sh-top-rev { font-size: 9px !important; color: #64748b !important; }
+    .sh-top-grade {
+      font-size: 9px !important; font-weight: 800 !important; padding: 1px 5px !important;
+      border-radius: 3px !important; color: #fff !important;
+    }
+    .sh-gs { background: #16a34a !important; }
+    .sh-ga { background: #3b82f6 !important; }
+    .sh-gb { background: #f59e0b !important; }
+    .sh-gc { background: #9ca3af !important; }
+    .sh-gd { background: #dc2626 !important; }
+
+    .sh-top-btns { display: flex !important; gap: 3px !important; margin-top: 4px !important; }
+    .sh-tb {
+      height: 20px !important; padding: 0 7px !important; border: none !important;
+      border-radius: 4px !important; font-size: 9px !important; font-weight: 700 !important;
+      cursor: pointer !important; color: #fff !important; display: inline-flex !important;
       align-items: center !important;
-      justify-content: space-between !important;
-      cursor: grab !important;
-      flex-shrink: 0 !important;
-      border-radius: 12px 12px 0 0 !important;
     }
-    #sh-panel.sh-collapsed .sh-header {
-      border-radius: 24px !important;
-      padding: 12px !important;
-      justify-content: center !important;
-    }
-    .sh-logo {
-      font-size: 16px !important;
-      font-weight: 800 !important;
-      letter-spacing: -0.5px !important;
-    }
-    .sh-header-content {
-      display: flex !important;
-      align-items: center !important;
-      gap: 8px !important;
-      flex: 1 !important;
-    }
-    .sh-ver {
-      font-size: 9px !important;
-      opacity: 0.7 !important;
-      background: rgba(255,255,255,0.15) !important;
-      padding: 1px 5px !important;
-      border-radius: 4px !important;
-    }
-    .sh-query-badge {
-      font-size: 11px !important;
-      background: rgba(255,255,255,0.2) !important;
-      padding: 2px 8px !important;
-      border-radius: 6px !important;
-      max-width: 140px !important;
-      overflow: hidden !important;
-      text-overflow: ellipsis !important;
-      white-space: nowrap !important;
-    }
-    .sh-count-badge {
-      font-size: 10px !important;
-      background: rgba(255,255,255,0.25) !important;
-      padding: 2px 6px !important;
-      border-radius: 6px !important;
-      font-weight: 700 !important;
-    }
-    .sh-header-btns {
-      display: flex !important;
-      gap: 4px !important;
-    }
-    .sh-hbtn {
-      width: 24px !important;
-      height: 24px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      border: none !important;
-      background: rgba(255,255,255,0.15) !important;
-      color: #fff !important;
-      border-radius: 6px !important;
-      cursor: pointer !important;
-      font-size: 13px !important;
-      line-height: 1 !important;
-      padding: 0 !important;
-    }
-    .sh-hbtn:hover { background: rgba(255,255,255,0.3) !important; }
+    .sh-tb:hover { opacity: .85 !important; }
+    .sh-tb-1688 { background: #ea580c !important; }
+    .sh-tb-ali { background: #dc2626 !important; }
+    .sh-tb-save { background: #6366f1 !important; }
+    .sh-tb-saved { background: #16a34a !important; }
 
-    /* ---- 요약 바 ---- */
-    .sh-summary {
-      background: #f8fafc !important;
-      padding: 8px 14px !important;
-      display: flex !important;
-      gap: 12px !important;
-      border-bottom: 1px solid #e2e8f0 !important;
-      flex-shrink: 0 !important;
-      flex-wrap: wrap !important;
-    }
-    .sh-stat {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-    }
-    .sh-stat-val {
-      font-size: 14px !important;
-      font-weight: 800 !important;
-      color: #4f46e5 !important;
-    }
-    .sh-stat-lbl {
-      font-size: 9px !important;
-      color: #94a3b8 !important;
-      margin-top: 1px !important;
-    }
+    /* 하이라이트 */
+    .sh-hl { outline: 3px solid #6366f1 !important; outline-offset: -2px !important; transition: outline .15s !important; }
 
-    /* ---- 상품 리스트 ---- */
-    .sh-body {
-      overflow-y: auto !important;
-      flex: 1 !important;
-      max-height: calc(100vh - 200px) !important;
+    /* 풋터 */
+    .sh-foot {
+      padding: 6px 14px !important; background: #f8fafc !important; border-top: 1px solid #f1f5f9 !important;
+      font-size: 9px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
     }
-    .sh-body::-webkit-scrollbar { width: 4px !important; }
-    .sh-body::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 4px !important; }
+    .sh-foot a { color: #6366f1 !important; text-decoration: none !important; font-weight: 600 !important; }
 
-    .sh-item {
-      display: flex !important;
-      align-items: flex-start !important;
-      gap: 10px !important;
-      padding: 10px 14px !important;
-      border-bottom: 1px solid #f1f5f9 !important;
-      transition: background 0.15s !important;
-      cursor: pointer !important;
-    }
-    .sh-item:hover {
-      background: #f8fafc !important;
-    }
-    .sh-item.sh-item-active {
-      background: #eff6ff !important;
-      border-left: 3px solid #4f46e5 !important;
-    }
-
-    /* 순위 번호 */
-    .sh-rank {
-      width: 22px !important;
-      height: 22px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      border-radius: 6px !important;
-      font-size: 10px !important;
-      font-weight: 800 !important;
-      flex-shrink: 0 !important;
-      margin-top: 2px !important;
-    }
-    .sh-rank-top { background: #fef3c7 !important; color: #92400e !important; }
-    .sh-rank-mid { background: #e2e8f0 !important; color: #475569 !important; }
-    .sh-rank-low { background: #f1f5f9 !important; color: #94a3b8 !important; }
-
-    /* 이미지 */
-    .sh-thumb {
-      width: 48px !important;
-      height: 48px !important;
-      border-radius: 6px !important;
-      object-fit: cover !important;
-      flex-shrink: 0 !important;
-      background: #f1f5f9 !important;
-    }
-
-    /* 상품 정보 */
-    .sh-info {
-      flex: 1 !important;
-      min-width: 0 !important;
-    }
-    .sh-title {
-      font-size: 11px !important;
-      font-weight: 600 !important;
-      color: #1e293b !important;
-      line-height: 1.3 !important;
-      display: -webkit-box !important;
-      -webkit-line-clamp: 2 !important;
-      -webkit-box-orient: vertical !important;
-      overflow: hidden !important;
-      margin-bottom: 4px !important;
-    }
-    .sh-meta {
-      display: flex !important;
-      align-items: center !important;
-      gap: 6px !important;
-      flex-wrap: wrap !important;
-    }
-
-    /* 등급 뱃지 */
-    .sh-grade {
-      display: inline-flex !important;
-      align-items: center !important;
-      gap: 2px !important;
-      font-size: 10px !important;
-      font-weight: 800 !important;
-      padding: 1px 6px !important;
-      border-radius: 4px !important;
-      color: #fff !important;
-    }
-    .sh-grade-s { background: #16a34a !important; }
-    .sh-grade-a { background: #3b82f6 !important; }
-    .sh-grade-b { background: #f59e0b !important; }
-    .sh-grade-c { background: #9ca3af !important; }
-    .sh-grade-d { background: #dc2626 !important; }
-
-    .sh-price {
-      font-size: 11px !important;
-      font-weight: 700 !important;
-      color: #dc2626 !important;
-    }
-    .sh-review {
-      font-size: 10px !important;
-      color: #64748b !important;
-    }
-    .sh-flags {
-      display: flex !important;
-      gap: 3px !important;
-    }
-    .sh-flag {
-      font-size: 9px !important;
-      padding: 0 4px !important;
-      border-radius: 3px !important;
-      font-weight: 600 !important;
-    }
-    .sh-flag-ad { background: #fee2e2 !important; color: #b91c1c !important; }
-    .sh-flag-rocket { background: #dbeafe !important; color: #1d4ed8 !important; }
-
-    /* 액션 버튼 행 */
-    .sh-actions {
-      display: flex !important;
-      gap: 4px !important;
-      margin-top: 5px !important;
-    }
-    .sh-btn {
-      height: 22px !important;
-      padding: 0 8px !important;
-      border: none !important;
-      border-radius: 4px !important;
-      font-size: 10px !important;
-      font-weight: 700 !important;
-      cursor: pointer !important;
-      color: #fff !important;
-      display: inline-flex !important;
-      align-items: center !important;
-      gap: 3px !important;
-      white-space: nowrap !important;
-    }
-    .sh-btn:hover { opacity: 0.85 !important; }
-    .sh-btn-1688 { background: #ea580c !important; }
-    .sh-btn-ali { background: #dc2626 !important; }
-    .sh-btn-save { background: #4f46e5 !important; }
-    .sh-btn-saved { background: #16a34a !important; }
-    .sh-btn-detail { background: #6366f1 !important; }
-
-    /* 상세 펼치기 */
-    .sh-expand {
-      display: none;
-      padding: 8px 14px 8px 80px !important;
-      background: #f8fafc !important;
-      border-bottom: 1px solid #f1f5f9 !important;
-      font-size: 10px !important;
-      color: #64748b !important;
-      line-height: 1.5 !important;
-    }
-    .sh-expand.sh-open { display: block !important; }
-    .sh-expand-row {
-      display: flex !important;
-      justify-content: space-between !important;
-      padding: 2px 0 !important;
-    }
-    .sh-expand-label { color: #94a3b8 !important; }
-    .sh-expand-value { color: #1e293b !important; font-weight: 600 !important; }
-    .sh-kw-tag {
-      display: inline-block !important;
-      background: #fef3c7 !important;
-      color: #92400e !important;
-      padding: 1px 6px !important;
-      border-radius: 4px !important;
-      font-size: 9px !important;
-      margin: 1px 2px !important;
-    }
-
-    /* ---- 로딩/빈 상태 ---- */
-    .sh-empty {
-      padding: 40px 20px !important;
-      text-align: center !important;
-      color: #94a3b8 !important;
-    }
-    .sh-empty-icon { font-size: 32px !important; margin-bottom: 8px !important; }
-    .sh-empty-text { font-size: 12px !important; }
-
-    /* ---- 호버 하이라이트 (쿠팡 상품에) ---- */
-    .sh-highlight {
-      outline: 2px solid #4f46e5 !important;
-      outline-offset: -2px !important;
-      transition: outline 0.15s !important;
-    }
-
-    /* ---- 반응형 ---- */
-    @media (max-width: 1200px) {
-      #sh-panel {
-        width: 320px !important;
-      }
-    }
+    @media (max-width: 1200px) { #sh-panel { width: 300px !important; } }
   `;
   document.head.appendChild(css);
 
   // ============================================================
-  //  키워드 매핑 (KO → CN)
+  //  키워드 매핑
   // ============================================================
   const CN = {
     '텀블러':'保温杯','물병':'水杯','수건':'毛巾','비누':'肥皂','칫솔':'牙刷',
@@ -421,41 +250,40 @@
     return Math.max(0, Math.min(100, Math.round(s)));
   }
 
-  function getGrade(score) {
-    if (score >= 80) return { letter: 'S', cls: 'sh-grade-s' };
-    if (score >= 65) return { letter: 'A', cls: 'sh-grade-a' };
-    if (score >= 50) return { letter: 'B', cls: 'sh-grade-b' };
-    if (score >= 35) return { letter: 'C', cls: 'sh-grade-c' };
-    return { letter: 'D', cls: 'sh-grade-d' };
+  function getGrade(sc) {
+    if (sc >= 80) return { l: 'S', c: 'sh-gs' };
+    if (sc >= 65) return { l: 'A', c: 'sh-ga' };
+    if (sc >= 50) return { l: 'B', c: 'sh-gb' };
+    if (sc >= 35) return { l: 'C', c: 'sh-gc' };
+    return { l: 'D', c: 'sh-gd' };
   }
 
   // ============================================================
   //  상품 파싱
   // ============================================================
-  const MAX_ITEMS = 36;
+  const MAX = 36;
 
-  function getQuery() {
+  function getQ() {
     try {
       const u = new URL(location.href);
       return u.searchParams.get('q') || u.searchParams.get('query') || u.searchParams.get('keyword') || '';
     } catch { return ''; }
   }
-
   function tx(el) { return (el?.textContent || '').replace(/\s+/g, ' ').trim(); }
   function nm(s) { return parseInt((s || '').replace(/[^0-9]/g, ''), 10) || 0; }
+  function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
   function parseProducts() {
-    const items = [], seen = new Set(), q = getQuery();
+    const items = [], seen = new Set(), q = getQ();
 
     for (const a of document.querySelectorAll('a[href*="/vp/products/"]')) {
-      if (items.length >= MAX_ITEMS) break;
+      if (items.length >= MAX) break;
       const m = (a.href || '').match(/\/vp\/products\/(\d+)/);
       if (!m) continue;
       const pid = m[1];
       if (seen.has(pid)) continue;
       seen.add(pid);
 
-      // 컨테이너 찾기
       let box = a;
       for (let i = 0; i < 6 && box.parentElement; i++) {
         box = box.parentElement;
@@ -488,326 +316,342 @@
       const href = a.href.startsWith('http') ? a.href : 'https://www.coupang.com' + a.href;
 
       items.push({
-        productId: pid,
-        title,
-        price,
-        rating,
-        reviewCount,
-        url: href,
-        imageUrl: img?.src || img?.getAttribute('data-img-src') || '',
-        position: items.length + 1,
-        query: q,
-        isAd,
-        isRocket,
-        _box: box,  // DOM 참조 (하이라이트용)
+        productId: pid, title, price, rating, reviewCount,
+        url: href, imageUrl: img?.src || img?.getAttribute('data-img-src') || '',
+        position: items.length + 1, query: q, isAd, isRocket, _box: box,
       });
     }
     return items;
   }
 
   // ============================================================
-  //  플로팅 패널 생성
+  //  미니 차트 유틸 (히스토그램 생성)
+  // ============================================================
+  function makeHistogram(values, bucketCount) {
+    if (!values.length) return [];
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (min === max) return [{ label: String(min), count: values.length }];
+    const step = (max - min) / bucketCount;
+    const buckets = [];
+    for (let i = 0; i < bucketCount; i++) {
+      const lo = min + step * i;
+      const hi = min + step * (i + 1);
+      const count = values.filter(v => i === bucketCount - 1 ? v >= lo && v <= hi : v >= lo && v < hi).length;
+      buckets.push({ lo, hi, count, label: formatShort(lo) });
+    }
+    return buckets;
+  }
+
+  function formatShort(n) {
+    if (n >= 10000) return Math.round(n / 10000) + '만';
+    if (n >= 1000) return Math.round(n / 1000) + '천';
+    return String(Math.round(n));
+  }
+
+  function renderBars(buckets) {
+    const maxC = Math.max(...buckets.map(b => b.count), 1);
+    return buckets.map((b, i) => {
+      const h = Math.max(2, Math.round((b.count / maxC) * 36));
+      const active = b.count === maxC ? ' sh-bar-active' : '';
+      return `<div class="sh-bar${active}" style="height:${h}px !important;" title="${b.label}~: ${b.count}개"><span class="sh-bar-lbl">${b.label}</span></div>`;
+    }).join('');
+  }
+
+  // ============================================================
+  //  경쟁도 계산
+  // ============================================================
+  function calcCompetition(items) {
+    const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
+    const avgRev = reviews.length ? reviews.reduce((a, b) => a + b, 0) / reviews.length : 0;
+    const highRev = items.filter(i => i.reviewCount >= 100).length;
+    const highRatio = items.length ? highRev / items.length : 0;
+    const adRatio = items.length ? items.filter(i => i.isAd).length / items.length : 0;
+    const ratings = items.map(i => i.rating).filter(r => r > 0);
+    const avgRat = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+
+    let sc = 0;
+    if (avgRev > 1000) sc += 35; else if (avgRev > 500) sc += 25; else if (avgRev > 100) sc += 15; else if (avgRev > 30) sc += 8;
+    if (highRatio > .6) sc += 25; else if (highRatio > .4) sc += 15; else if (highRatio > .2) sc += 8;
+    if (avgRat >= 4.5) sc += 15; else if (avgRat >= 4.0) sc += 8;
+    if (adRatio > .3) sc += 20; else if (adRatio > .15) sc += 10;
+    sc = Math.min(100, sc);
+
+    const level = sc >= 70 ? 'hard' : sc >= 40 ? 'mid' : 'easy';
+    const label = sc >= 70 ? '경쟁 치열' : sc >= 40 ? '보통' : '진입 용이';
+    const cls = sc >= 70 ? 'sh-comp-hard' : sc >= 40 ? 'sh-comp-mid' : 'sh-comp-easy';
+    return { sc, level, label, cls };
+  }
+
+  // ============================================================
+  //  플로팅 패널
   // ============================================================
   let panel = null;
   let allItems = [];
-  let savedSet = new Set(); // 저장된 상품 ID
-  let isCollapsed = false;
+  let savedSet = new Set();
+  let isMin = false;
 
   function createPanel() {
     if (panel) panel.remove();
-
     panel = document.createElement('div');
     panel.id = 'sh-panel';
     panel.innerHTML = `
-      <div class="sh-header" id="sh-drag-handle">
-        <span class="sh-logo">🐢</span>
-        <div class="sh-header-content">
-          <span class="sh-ver">v${VER}</span>
-          <span class="sh-query-badge" id="sh-query"></span>
-          <span class="sh-count-badge" id="sh-count">0개</span>
+      <div class="sh-hd" id="sh-drag">
+        <span class="logo">🐢</span>
+        <div class="sh-hc">
+          <span class="ver">v${VER}</span>
+          <span class="qr" id="sh-q"></span>
+          <span class="cnt" id="sh-cnt">0개</span>
         </div>
-        <div class="sh-header-btns">
-          <button class="sh-hbtn" id="sh-btn-refresh" title="새로고침">↻</button>
-          <button class="sh-hbtn" id="sh-btn-collapse" title="접기">—</button>
+        <div class="sh-hbtns">
+          <button class="sh-hb" id="sh-ref" title="새로고침">↻</button>
+          <button class="sh-hb" id="sh-min" title="접기">—</button>
         </div>
       </div>
-      <div class="sh-summary" id="sh-summary"></div>
-      <div class="sh-body" id="sh-list"></div>
+      <div class="sh-body" id="sh-body"></div>
+      <div class="sh-foot">🐢 소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
     `;
     document.body.appendChild(panel);
-
-    // ---- 드래그 ----
     initDrag();
 
-    // ---- 접기/펼치기 ----
-    document.getElementById('sh-btn-collapse').addEventListener('click', (e) => {
+    document.getElementById('sh-min').addEventListener('click', (e) => {
       e.stopPropagation();
-      isCollapsed = !isCollapsed;
-      panel.classList.toggle('sh-collapsed', isCollapsed);
+      isMin = !isMin;
+      panel.classList.toggle('sh-min', isMin);
     });
-    panel.addEventListener('click', () => {
-      if (isCollapsed) {
-        isCollapsed = false;
-        panel.classList.remove('sh-collapsed');
-      }
-    });
-
-    // ---- 새로고침 ----
-    document.getElementById('sh-btn-refresh').addEventListener('click', (e) => {
-      e.stopPropagation();
-      doScan(true);
-    });
-
-    return panel;
+    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-min'); } });
+    document.getElementById('sh-ref').addEventListener('click', (e) => { e.stopPropagation(); doScan(true); });
   }
 
-  // ---- 드래그 ----
   function initDrag() {
-    const handle = document.getElementById('sh-drag-handle');
-    let isDragging = false, startX, startY, startRight, startTop;
-
-    handle.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.sh-hbtn')) return;
-      isDragging = true;
-      panel.classList.add('sh-dragging');
-      const rect = panel.getBoundingClientRect();
-      startX = e.clientX;
-      startY = e.clientY;
-      startRight = window.innerWidth - rect.right;
-      startTop = rect.top;
+    const h = document.getElementById('sh-drag');
+    let drag = false, sx, sy, sr, st;
+    h.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.sh-hb')) return;
+      drag = true; panel.classList.add('sh-drag');
+      const r = panel.getBoundingClientRect();
+      sx = e.clientX; sy = e.clientY; sr = innerWidth - r.right; st = r.top;
       e.preventDefault();
     });
-
     document.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      const newTop = Math.max(0, Math.min(window.innerHeight - 60, startTop + dy));
-      const newRight = Math.max(0, Math.min(window.innerWidth - 60, startRight - dx));
-      panel.style.top = newTop + 'px';
-      panel.style.right = newRight + 'px';
+      if (!drag) return;
+      panel.style.top = Math.max(0, Math.min(innerHeight - 50, st + e.clientY - sy)) + 'px';
+      panel.style.right = Math.max(0, Math.min(innerWidth - 50, sr - (e.clientX - sx))) + 'px';
     });
-
-    document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        panel.classList.remove('sh-dragging');
-      }
-    });
+    document.addEventListener('mouseup', () => { if (drag) { drag = false; panel.classList.remove('sh-drag'); } });
   }
 
   // ============================================================
-  //  패널 렌더링
+  //  패널 렌더링 — 시장 개요 + 차트 + TOP3
   // ============================================================
   function renderPanel(items) {
     if (!panel) createPanel();
-    if (isCollapsed) return;
+    if (isMin) return;
 
-    const q = getQuery();
-    document.getElementById('sh-query').textContent = q ? `"${q}"` : '';
-    document.getElementById('sh-count').textContent = items.length + '개';
+    const q = getQ();
+    document.getElementById('sh-q').textContent = q ? `"${q}"` : '';
+    document.getElementById('sh-cnt').textContent = items.length + '개';
 
-    // ---- 요약 통계 ----
+    const body = document.getElementById('sh-body');
+    if (!items.length) {
+      body.innerHTML = '<div style="padding:40px 20px !important;text-align:center !important;color:#94a3b8 !important;"><div style="font-size:28px !important;">📦</div><div style="font-size:11px !important;margin-top:6px !important;">상품 파싱 중...</div></div>';
+      return;
+    }
+
+    // 통계 계산
     const prices = items.map(i => i.price).filter(p => p > 0);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
     const ratings = items.map(i => i.rating).filter(r => r > 0);
     const avgPrice = prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
-    const avgReview = reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0;
+    const minPrice = prices.length ? Math.min(...prices) : 0;
+    const maxPrice = prices.length ? Math.max(...prices) : 0;
+    const totalRev = reviews.reduce((a, b) => a + b, 0);
+    const avgReview = reviews.length ? Math.round(totalRev / reviews.length) : 0;
     const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : '-';
-    const adCount = items.filter(i => i.isAd).length;
-    const sScoreItems = items.filter(i => calcScore(i) >= 80);
+    const adCnt = items.filter(i => i.isAd).length;
+    const rocketCnt = items.filter(i => i.isRocket).length;
+    const comp = calcCompetition(items);
 
-    document.getElementById('sh-summary').innerHTML = `
-      <div class="sh-stat"><span class="sh-stat-val">${avgPrice ? avgPrice.toLocaleString() + '원' : '-'}</span><span class="sh-stat-lbl">평균가</span></div>
-      <div class="sh-stat"><span class="sh-stat-val">${avgRating}</span><span class="sh-stat-lbl">평균평점</span></div>
-      <div class="sh-stat"><span class="sh-stat-val">${avgReview.toLocaleString()}</span><span class="sh-stat-lbl">평균리뷰</span></div>
-      <div class="sh-stat"><span class="sh-stat-val">${adCount}</span><span class="sh-stat-lbl">광고</span></div>
-      <div class="sh-stat"><span class="sh-stat-val" style="color:#16a34a !important;">${sScoreItems.length}</span><span class="sh-stat-lbl">S등급</span></div>
-    `;
+    // 차트 데이터
+    const priceBuckets = makeHistogram(prices, 6);
+    const revBuckets = makeHistogram(reviews, 5);
 
-    // ---- 상품 리스트 ----
-    const listEl = document.getElementById('sh-list');
-    if (!items.length) {
-      listEl.innerHTML = `
-        <div class="sh-empty">
-          <div class="sh-empty-icon">📦</div>
-          <div class="sh-empty-text">상품을 파싱 중입니다...</div>
+    // TOP3
+    const top3 = items.slice(0, 3);
+
+    body.innerHTML = `
+      <!-- 시장 개요 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">📊 시장 개요</div>
+        <div class="sh-stats">
+          <div class="sh-st">
+            <span class="sh-st-v accent">${items.length}</span>
+            <span class="sh-st-l">상품수</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '원' : '-'}</span>
+            <span class="sh-st-l">평균가</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v">${avgRating}</span>
+            <span class="sh-st-l">평균평점</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v amber">${avgReview.toLocaleString()}</span>
+            <span class="sh-st-l">평균리뷰</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v">${adCnt}</span>
+            <span class="sh-st-l">광고</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v">${rocketCnt}</span>
+            <span class="sh-st-l">로켓</span>
+          </div>
         </div>
-      `;
-      return;
-    }
 
-    listEl.innerHTML = items.map((item, idx) => {
-      const sc = calcScore(item);
-      const g = getGrade(sc);
-      const kw = extractKw(item.title);
-      const rankCls = idx < 3 ? 'sh-rank-top' : idx < 10 ? 'sh-rank-mid' : 'sh-rank-low';
-      const isSaved = savedSet.has(item.productId);
+        <!-- 경쟁도 -->
+        <div style="margin-top:10px !important;">
+          <div style="display:flex !important;justify-content:space-between !important;align-items:center !important;">
+            <span style="font-size:10px !important;font-weight:600 !important;color:#64748b !important;">경쟁 강도</span>
+            <span style="font-size:10px !important;font-weight:700 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label} (${comp.sc}점)</span>
+          </div>
+          <div class="sh-comp-bar"><div class="sh-comp-fill ${comp.cls}" style="width:${comp.sc}% !important;"></div></div>
+        </div>
+      </div>
 
-      return `
-        <div class="sh-item" data-pid="${item.productId}" data-idx="${idx}">
-          <div class="sh-rank ${rankCls}">${idx + 1}</div>
-          ${item.imageUrl ? `<img class="sh-thumb" src="${item.imageUrl}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
-          <div class="sh-info">
-            <div class="sh-title">${escHtml(item.title)}</div>
-            <div class="sh-meta">
-              <span class="sh-grade ${g.cls}">${g.letter}${sc}</span>
-              ${item.price ? `<span class="sh-price">${item.price.toLocaleString()}원</span>` : ''}
-              ${item.rating > 0 ? `<span class="sh-review">★${item.rating}</span>` : ''}
-              ${item.reviewCount > 0 ? `<span class="sh-review">(${item.reviewCount.toLocaleString()})</span>` : ''}
-              <div class="sh-flags">
-                ${item.isAd ? '<span class="sh-flag sh-flag-ad">AD</span>' : ''}
-                ${item.isRocket ? '<span class="sh-flag sh-flag-rocket">🚀</span>' : ''}
-              </div>
+      <!-- 가격 & 리뷰 분포 차트 -->
+      <div class="sh-sec" style="padding-top:8px !important;">
+        <div class="sh-charts">
+          <div class="sh-chart">
+            <div class="sh-chart-title">💰 가격 분포</div>
+            <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(priceBuckets)}</div>
+            <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
+              <span>${minPrice ? minPrice.toLocaleString() + '원' : ''}</span>
+              <span>${maxPrice ? maxPrice.toLocaleString() + '원' : ''}</span>
             </div>
-            <div class="sh-actions">
-              <button class="sh-btn sh-btn-1688" data-pid="${item.productId}">1688</button>
-              <button class="sh-btn sh-btn-ali" data-pid="${item.productId}">Ali</button>
-              <button class="sh-btn ${isSaved ? 'sh-btn-saved' : 'sh-btn-save'}" data-pid="${item.productId}" data-action="save">${isSaved ? '✓저장됨' : '저장'}</button>
-              <button class="sh-btn sh-btn-detail" data-pid="${item.productId}" data-action="expand">더보기</button>
+          </div>
+          <div class="sh-chart">
+            <div class="sh-chart-title">💬 리뷰 분포</div>
+            <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(revBuckets)}</div>
+            <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
+              <span>적음</span>
+              <span>많음</span>
             </div>
           </div>
         </div>
-        <div class="sh-expand" id="sh-expand-${item.productId}">
-          <div class="sh-expand-row"><span class="sh-expand-label">상품ID</span><span class="sh-expand-value">${item.productId}</span></div>
-          <div class="sh-expand-row"><span class="sh-expand-label">소싱점수</span><span class="sh-expand-value">${sc}점 (${g.letter}등급)</span></div>
-          ${item.rating > 0 ? `<div class="sh-expand-row"><span class="sh-expand-label">평점</span><span class="sh-expand-value">★ ${item.rating} (${item.reviewCount.toLocaleString()}개)</span></div>` : ''}
-          <div class="sh-expand-row"><span class="sh-expand-label">1688 키워드</span><span class="sh-expand-value">${kw.cn ? `<span class="sh-kw-tag">${escHtml(kw.cn)}</span>` : '-'}</span></div>
-          <div class="sh-expand-row"><span class="sh-expand-label">한국어</span><span class="sh-expand-value">${kw.ko ? `<span class="sh-kw-tag">${escHtml(kw.ko)}</span>` : '-'}</span></div>
-          <div class="sh-expand-row"><span class="sh-expand-label">광고</span><span class="sh-expand-value">${item.isAd ? '✅ 광고상품' : '❌ 일반상품'}</span></div>
-          <div class="sh-expand-row"><span class="sh-expand-label">로켓배송</span><span class="sh-expand-value">${item.isRocket ? '✅ 로켓배송' : '❌'}</span></div>
-        </div>
-      `;
-    }).join('');
-  }
+      </div>
 
-  function escHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
+      <!-- TOP 3 상품 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">🏆 TOP 3 상품</div>
+        ${top3.map((item, idx) => {
+          const sc = calcScore(item);
+          const g = getGrade(sc);
+          const rcls = ['sh-r1','sh-r2','sh-r3'][idx];
+          const isSaved = savedSet.has(item.productId);
+          return `
+            <div class="sh-top" data-pid="${item.productId}">
+              <div class="sh-top-rank ${rcls}">${idx + 1}</div>
+              ${item.imageUrl ? `<img class="sh-top-img" src="${item.imageUrl}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
+              <div class="sh-top-info">
+                <div class="sh-top-name">${esc(item.title)}</div>
+                <div class="sh-top-meta">
+                  <span class="sh-top-grade ${g.c}">${g.l}${sc}</span>
+                  ${item.price ? `<span class="sh-top-price">${item.price.toLocaleString()}원</span>` : ''}
+                  ${item.reviewCount > 0 ? `<span class="sh-top-rev">리뷰 ${item.reviewCount.toLocaleString()}</span>` : ''}
+                  ${item.isAd ? '<span class="sh-top-rev" style="color:#dc2626 !important;">AD</span>' : ''}
+                </div>
+                <div class="sh-top-btns">
+                  <button class="sh-tb sh-tb-1688" data-pid="${item.productId}">1688</button>
+                  <button class="sh-tb sh-tb-ali" data-pid="${item.productId}">Ali</button>
+                  <button class="sh-tb ${isSaved ? 'sh-tb-saved' : 'sh-tb-save'}" data-pid="${item.productId}" data-act="save">${isSaved ? '✓' : '저장'}</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
   }
 
   // ============================================================
-  //  이벤트 핸들러 (이벤트 위임)
+  //  이벤트 핸들러
   // ============================================================
   document.addEventListener('click', (e) => {
-    // ---- 1688 버튼 ----
-    const btn1688 = e.target.closest('.sh-btn-1688');
-    if (btn1688) {
-      e.preventDefault();
-      e.stopPropagation();
-      const pid = btn1688.dataset.pid;
-      const item = allItems.find(i => i.productId === pid);
+    // 1688
+    const b1 = e.target.closest('.sh-tb-1688');
+    if (b1) {
+      e.preventDefault(); e.stopPropagation();
+      const item = allItems.find(i => i.productId === b1.dataset.pid);
       if (!item) return;
-
-      btn1688.textContent = '..';
-      chrome.runtime.sendMessage({
-        type: 'PRE_MATCH', productName: item.title, price: item.price, imageUrl: item.imageUrl,
-      }).then(r => {
-        const kw = extractKw(item.title);
-        const keyword = (r?.success && r.keywords1688?.length) ? r.keywords1688[0].keyword : kw.cn;
-        window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(keyword), '_blank');
-        btn1688.textContent = '1688';
-      }).catch(() => {
-        const kw = extractKw(item.title);
-        window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(kw.cn), '_blank');
-        btn1688.textContent = '1688';
-      });
+      b1.textContent = '..';
+      chrome.runtime.sendMessage({ type: 'PRE_MATCH', productName: item.title, price: item.price, imageUrl: item.imageUrl })
+        .then(r => {
+          const kw = extractKw(item.title);
+          const keyword = (r?.success && r.keywords1688?.length) ? r.keywords1688[0].keyword : kw.cn;
+          window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(keyword), '_blank');
+          b1.textContent = '1688';
+        }).catch(() => {
+          window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(extractKw(item.title).cn), '_blank');
+          b1.textContent = '1688';
+        });
       return;
     }
 
-    // ---- Ali 버튼 ----
-    const btnAli = e.target.closest('.sh-btn-ali');
-    if (btnAli) {
-      e.preventDefault();
-      e.stopPropagation();
-      const pid = btnAli.dataset.pid;
-      const item = allItems.find(i => i.productId === pid);
+    // Ali
+    const b2 = e.target.closest('.sh-tb-ali');
+    if (b2) {
+      e.preventDefault(); e.stopPropagation();
+      const item = allItems.find(i => i.productId === b2.dataset.pid);
       if (!item) return;
       const kw = extractKw(item.title);
       window.open('https://www.aliexpress.com/wholesale?SearchText=' + encodeURIComponent(kw.cn || kw.ko), '_blank');
       return;
     }
 
-    // ---- 저장 버튼 ----
-    const btnSave = e.target.closest('[data-action="save"]');
-    if (btnSave) {
-      e.preventDefault();
-      e.stopPropagation();
-      const pid = btnSave.dataset.pid;
-      const item = allItems.find(i => i.productId === pid);
+    // 저장
+    const bs = e.target.closest('[data-act="save"]');
+    if (bs) {
+      e.preventDefault(); e.stopPropagation();
+      const item = allItems.find(i => i.productId === bs.dataset.pid);
       if (!item) return;
-
       const { _box, ...clean } = item;
-      chrome.runtime.sendMessage({
-        type: 'SAVE_CANDIDATE', product: clean,
-        score: calcScore(item), grade: getGrade(calcScore(item)).letter,
-      }).catch(() => {});
-      savedSet.add(pid);
-      btnSave.textContent = '✓저장됨';
-      btnSave.className = 'sh-btn sh-btn-saved';
+      chrome.runtime.sendMessage({ type: 'SAVE_CANDIDATE', product: clean, score: calcScore(item), grade: getGrade(calcScore(item)).l }).catch(() => {});
+      savedSet.add(item.productId);
+      bs.textContent = '✓'; bs.className = 'sh-tb sh-tb-saved';
       return;
     }
 
-    // ---- 더보기 토글 ----
-    const btnExpand = e.target.closest('[data-action="expand"]');
-    if (btnExpand) {
-      e.preventDefault();
-      e.stopPropagation();
-      const pid = btnExpand.dataset.pid;
-      const expandEl = document.getElementById('sh-expand-' + pid);
-      if (expandEl) {
-        expandEl.classList.toggle('sh-open');
-        btnExpand.textContent = expandEl.classList.contains('sh-open') ? '접기' : '더보기';
-      }
-      return;
-    }
-
-    // ---- 상품 아이템 클릭 → 쿠팡 상품으로 스크롤 & 하이라이트 ----
-    const itemEl = e.target.closest('.sh-item');
-    if (itemEl && !e.target.closest('.sh-btn')) {
-      e.preventDefault();
-      e.stopPropagation();
-      const pid = itemEl.dataset.pid;
-      const item = allItems.find(i => i.productId === pid);
+    // TOP3 상품 클릭 → 쿠팡 페이지에서 하이라이트
+    const top = e.target.closest('.sh-top');
+    if (top && !e.target.closest('.sh-tb')) {
+      e.preventDefault(); e.stopPropagation();
+      const item = allItems.find(i => i.productId === top.dataset.pid);
       if (!item?._box) return;
-
-      // 기존 하이라이트 제거
-      document.querySelectorAll('.sh-highlight').forEach(el => el.classList.remove('sh-highlight'));
-      document.querySelectorAll('.sh-item-active').forEach(el => el.classList.remove('sh-item-active'));
-
-      // 하이라이트 + 스크롤
-      item._box.classList.add('sh-highlight');
-      itemEl.classList.add('sh-item-active');
+      document.querySelectorAll('.sh-hl').forEach(el => el.classList.remove('sh-hl'));
+      item._box.classList.add('sh-hl');
       item._box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-      // 3초 후 하이라이트 제거
-      setTimeout(() => {
-        item._box.classList.remove('sh-highlight');
-      }, 3000);
+      setTimeout(() => item._box.classList.remove('sh-hl'), 3000);
       return;
     }
   }, true);
 
   // ============================================================
-  //  메인 스캔
+  //  스캔
   // ============================================================
   let lastSig = '';
-  let scanTimer = null;
+  let timer = null;
 
   function doScan(force = false) {
     if (!location.href.includes('/np/search')) {
-      // 검색 페이지가 아니면 패널 숨기기
       if (panel) panel.style.display = 'none';
       return;
     }
 
     const items = parseProducts();
     if (!items.length) {
-      if (panel) {
-        panel.style.display = '';
-        renderPanel([]);
-      }
+      if (panel) { panel.style.display = ''; renderPanel([]); }
       return;
     }
 
@@ -817,36 +661,26 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
-      console.log(`%c[SH] ✅ ${items.length}개 상품 파싱 완료`, 'color:#16a34a;font-weight:bold;');
+      console.log(`%c[SH] ✅ ${items.length}개 파싱`, 'color:#16a34a;font-weight:bold;');
     }
 
-    // 패널 표시
     if (!panel) createPanel();
     panel.style.display = '';
 
     if (isNew) {
       renderPanel(items);
-
-      // 서버에 전송
-      const q = getQuery();
       const clean = items.map(({ _box, ...c }) => c);
-      chrome.runtime.sendMessage({
-        type: 'SEARCH_RESULTS_PARSED', query: q, items: clean,
-      }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'SEARCH_RESULTS_PARSED', query: getQ(), items: clean }).catch(() => {});
     }
   }
 
-  // ============================================================
-  //  URL 변경 감지 (SPA 대응)
-  // ============================================================
+  // URL 변경 감지
   let lastUrl = location.href;
-
   function urlCheck() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      lastSig = '';
-      allItems = [];
-      document.querySelectorAll('.sh-highlight').forEach(el => el.classList.remove('sh-highlight'));
+      lastSig = ''; allItems = [];
+      document.querySelectorAll('.sh-hl').forEach(el => el.classList.remove('sh-hl'));
       setTimeout(() => doScan(true), 300);
       setTimeout(() => doScan(true), 800);
       setTimeout(() => doScan(true), 1500);
@@ -855,30 +689,17 @@
 
   window.addEventListener('popstate', () => setTimeout(urlCheck, 100));
   setInterval(urlCheck, 800);
-
-  // visibilitychange 이벤트 수신 (사이드패널에서 재파싱 요청)
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) setTimeout(() => doScan(true), 300);
-  });
-
-  // force-reparse 커스텀 이벤트 수신
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => doScan(true), 300); });
   document.addEventListener('force-reparse', () => setTimeout(() => doScan(true), 300));
 
-  // MutationObserver (디바운스)
-  const observer = new MutationObserver(() => {
-    clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => doScan(), 600);
-  });
-  observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  const obs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(() => doScan(), 600); });
+  obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
-  // ============================================================
-  //  초기 실행
-  // ============================================================
+  // 초기 실행
   doScan();
-  setTimeout(() => doScan(), 500);
-  setTimeout(() => doScan(), 1200);
-  setTimeout(() => doScan(), 2500);
+  setTimeout(doScan, 500);
+  setTimeout(doScan, 1200);
+  setTimeout(doScan, 2500);
 
-  // 페이지 타입 알림
   chrome.runtime.sendMessage({ type: 'PAGE_DETECTED', pageType: 'search', url: location.href }).catch(() => {});
 })();

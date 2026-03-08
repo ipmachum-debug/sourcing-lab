@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.4.0";
+const EXTENSION_VERSION = "5.5.0";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
@@ -586,10 +586,15 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.4.0",
+                    version: "v5.5.0",
                     date: "2026-03-08",
                     badge: "Latest",
-                    changes: ["셀록홈즈 스타일 플로팅 패널 — 검색 시 자동으로 오른쪽에 패널 표시", "모든 상품을 스크롤 가능한 리스트로 한눈에 확인", "상품별 소싱점수·가격·리뷰·1688·Ali·저장 버튼", "상품 클릭 시 쿠팡 페이지에서 해당 상품 하이라이트", "더보기 토글: 1688 키워드, 광고/로켓 여부 상세 확인", "요약 통계: 평균가·평균평점·평균리뷰·광고수·S등급수", "패널 드래그 이동 + 접기/펼치기 지원"],
+                    changes: ["마켓 대시보드 패널 — 시장 분석 + 미니 차트 + TOP3", "시장 개요: 상품수·평균가·평점·평균리뷰·광고·로켓", "경쟁 강도 시각화: 점수 + 진행 바", "미니 차트: 가격 분포 히스토그램 + 리뷰 분포 히스토그램", "TOP3 상품만 간결 표시 (1688/Ali/저장 버튼)", "패널 드래그 이동 + 접기/펼치기"],
+                  },
+                  {
+                    version: "v5.4.0",
+                    date: "2026-03-08",
+                    changes: ["셀록홈즈 스타일 플로팅 패널", "모든 상품 스크롤 리스트", "패널 드래그 + 접기/펼치기"],
                   },
                   {
                     version: "v5.3.0",
