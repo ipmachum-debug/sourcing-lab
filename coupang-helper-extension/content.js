@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.5.3
+   Coupang Sourcing Helper — Content Script v5.5.4
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -7,6 +7,12 @@
    2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
+
+   v5.5.4 1688 키워드 버그 수정:
+   - extractKw()가 CN 매핑 없을 때 한국어를 cn으로 반환하던 버그 수정
+   - 1688 버튼: 서버AI → 로컬사전 → Google Translate → 한국어 4단계 폴백
+   - 콘솔에 상세 디버그 로그 추가 (키워드 변환 과정)
+   - AliExpress 버튼: 한국어 키워드 사용 (AliExpress는 한국어 잘 지원)
 
    v5.5.3 파싱 전면 재작성:
    - 가격: 할인가 우선, "N% N,NNN원" 패턴 추출
@@ -21,7 +27,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.5.3';
+  const VER = '5.5.4';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -36,7 +42,11 @@
     '.sh-tag,#sh-panel,#sh-panel-css'
   ).forEach(el => el.remove());
 
-  console.log(`%c[SH] v${VER} 마켓 대시보드 로드`, 'color:#16a34a;font-weight:bold;font-size:13px;');
+  console.log(`%c[SH] v${VER} 마켓 대시보드 로드`, 'color:#16a34a;font-weight:bold;font-size:14px;');
+  console.log(`%c═══════════════════════════════════════`, 'color:#6366f1;font-weight:bold;');
+  console.log(`%c  🐢 소싱 헬퍼 v${VER} 로딩됨`, 'color:#6366f1;font-weight:bold;font-size:12px;');
+  console.log(`%c  1688 사전: ${Object.keys(CN).length}개 매핑`, 'color:#6366f1;');
+  console.log(`%c═══════════════════════════════════════`, 'color:#6366f1;font-weight:bold;');
 
   // ============================================================
   //  CSS
@@ -275,13 +285,19 @@
     '블랙','화이트','그레이','네이비','베이지','브라운','핑크',
     '레드','블루','그린','옐로우','퍼플','오렌지',
     '입점특가','단품','혼합색상',
+    // 모델명/수식어 (검색 방해)
+    '파워','플러스','프로','슈퍼','울트라','맥스','라이트','미니','매직',
+    '터보','스마트','원터치','오토','듀얼','멀티','에코','클래식',
+    '뉴','올뉴','리뉴얼','업그레이드','개선','신형','최신','스페셜',
+    '초고속','고속','저소음','강력','휴대용','이온','음이온',
   ]);
   const BRANDS = new Set([
     '삼성','엘지','LG','SAMSUNG','APPLE','애플','나이키','NIKE',
     '아디다스','ADIDAS','뉴발란스','컨버스','무인양품','이케아','IKEA',
     '샤오미','XIAOMI','앤커','ANKER','로지텍','필립스','다이슨',
     '소니','SONY','파나소닉','보쉬','쿠쿠','쿠첸','위닉스',
-    '블라우풍트','유닉스','CKI',
+    '블라우풍트','유닉스','CKI','Rotima','SUNGDIN','SAMSEA',
+    '쿠팡브랜드','곰곰','탐사','코멧','오뚜기','CJ','비비고',
   ]);
 
   function extractKw(title) {
@@ -290,6 +306,7 @@
       .replace(/[\/\\|~`!@#$%^&*=+{};:'"<>,.?]/g, ' ')
       .replace(/\d+(ml|g|kg|cm|mm|개입|매입|세트|팩|롤)/gi, ' ')
       .replace(/\d+[Ww]\b/g, ' ') // 2400W 같은 와트수 제거 (검색 방해)
+      .replace(/\d+rpm/gi, ' ') // rpm 스펙 제거
       .trim();
     let w = c.split(/\s+/).filter(x => {
       if (x.length <= 1) return false;
@@ -308,12 +325,16 @@
         w.splice(i, 2, compound);
       }
     }
-    const coreWords = w.slice(0, 4);
+    // CN 매핑이 있는 단어를 우선 배치
+    const mapped = w.filter(x => CN[x]);
+    const unmapped = w.filter(x => !CN[x]);
+    const sorted = [...mapped, ...unmapped];
+    const coreWords = sorted.slice(0, 4);
     const cnParts = coreWords.map(x => CN[x]).filter(Boolean);
     const koKw = coreWords.join(' ');
-    // 중국어 키워드가 있으면 우선 사용, 없으면 한국어
+    // 중국어 키워드가 있으면 사용, 없으면 빈 문자열 (한국어 폴백 금지 — 1688에서 깨짐)
     const cnKw = cnParts.length > 0 ? cnParts.join(' ') : '';
-    return { cn: cnKw || koKw, ko: koKw };
+    return { cn: cnKw, ko: koKw };
   }
 
   // ============================================================
@@ -1035,16 +1056,56 @@
       const item = allItems.find(i => i.productId === b1.dataset.pid);
       if (!item) return;
       b1.textContent = '..';
-      chrome.runtime.sendMessage({ type: 'PRE_MATCH', productName: item.title, price: item.price, imageUrl: item.imageUrl })
-        .then(r => {
-          const kw = extractKw(item.title);
-          const keyword = (r?.success && r.keywords1688?.length) ? r.keywords1688[0].keyword : kw.cn;
-          window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(keyword), '_blank');
-          b1.textContent = '1688';
-        }).catch(() => {
-          window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(extractKw(item.title).cn), '_blank');
-          b1.textContent = '1688';
-        });
+
+      // 1단계: 로컬 사전으로 즉시 중국어 키워드 추출
+      const kw = extractKw(item.title);
+      console.log(`[SH] 1688 클릭: "${item.title}" → cn:"${kw.cn}" ko:"${kw.ko}"`);
+
+      // 2단계: 서버 AI 매칭 시도 (타임아웃 3초)
+      const timeout = new Promise(resolve => setTimeout(() => resolve(null), 3000));
+      const serverCall = chrome.runtime.sendMessage({
+        type: 'PRE_MATCH', productName: item.title, price: item.price, imageUrl: item.imageUrl
+      }).catch(() => null);
+
+      Promise.race([serverCall, timeout]).then(async r => {
+        let keyword = '';
+
+        // 서버 AI 결과 우선
+        if (r?.success && r.keywords1688?.length) {
+          keyword = r.keywords1688[0].keyword;
+          console.log(`[SH] 1688 서버 AI 키워드: "${keyword}"`);
+        }
+
+        // 서버 실패 시 로컬 사전
+        if (!keyword && kw.cn) {
+          keyword = kw.cn;
+          console.log(`[SH] 1688 로컬 사전 키워드: "${keyword}"`);
+        }
+
+        // 사전에도 없으면 Google Translate 폴백
+        if (!keyword && kw.ko) {
+          try {
+            const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=zh-CN&dt=t&q=${encodeURIComponent(kw.ko)}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data?.[0]?.[0]?.[0]) {
+              keyword = data[0][0][0];
+              console.log(`[SH] 1688 Google Translate 키워드: "${keyword}"`);
+            }
+          } catch (e) {
+            console.warn('[SH] Google Translate 실패:', e);
+          }
+        }
+
+        // 최종 폴백: 한국어 그대로 (1688이 자체 번역 지원)
+        if (!keyword) {
+          keyword = kw.ko;
+          console.log(`[SH] 1688 한국어 폴백: "${keyword}"`);
+        }
+
+        window.open('https://s.1688.com/selloffer/offer_search.htm?keywords=' + encodeURIComponent(keyword), '_blank');
+        b1.textContent = '1688';
+      });
       return;
     }
 
@@ -1055,7 +1116,9 @@
       const item = allItems.find(i => i.productId === b2.dataset.pid);
       if (!item) return;
       const kw = extractKw(item.title);
-      window.open('https://www.aliexpress.com/wholesale?SearchText=' + encodeURIComponent(kw.cn || kw.ko), '_blank');
+      // AliExpress는 영어가 최적, 없으면 중국어, 마지막으로 한국어
+      const aliKw = kw.ko; // AliExpress는 한국어도 잘 지원
+      window.open('https://www.aliexpress.com/wholesale?SearchText=' + encodeURIComponent(aliKw), '_blank');
       return;
     }
 

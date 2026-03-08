@@ -11,8 +11,8 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.5.3";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.1.zip";
+const EXTENSION_VERSION = "5.5.4";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.5.zip";
 const EXTENSION_FILE_SIZE = "80KB";
 
 function AccordionSection({
@@ -586,9 +586,14 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v5.5.3",
+                    version: "v5.5.4",
                     date: "2026-03-08",
                     badge: "Latest",
+                    changes: ["1688 키워드 버그 수정: 중국어 매핑 없을 때 한국어가 1688 URL에 그대로 전달되던 문제 해결", "1688 검색 4단계 폴백: 서버AI → 로컬사전 → Google Translate → 한국어", "콘솔에 1688 키워드 변환 과정 상세 로그 추가", "AliExpress 버튼: 중국어 대신 한국어 키워드 사용 (AliExpress는 한국어 지원)", "디버그 강화: 확장 버전·사전 매핑 수 콘솔 출력"],
+                  },
+                  {
+                    version: "v5.5.3",
+                    date: "2026-03-08",
                     changes: ["검색 페이지: 가격 파싱 완전 재설계 (엘리먼트 레벨 TreeWalker 기반)", "검색 페이지: 적립금·단위가격·배송비를 DOM 요소 수준에서 정밀 제외", "검색 페이지: 할인가 vs 정가(del태그) 자동 구분", "검색 페이지: 평점 5중 방법 (star width + aria-label + em.rating + filled star + 보수적추정)", "검색 페이지: 리뷰 (N,NNN) 괄호 패턴, 단위가격 괄호 정밀 제외", "검색 페이지: 광고 4중 감지, 로켓 5중 감지, 순위 배지 감지", "상세 페이지: 텍스트 패턴 기반 파싱 전면 재작성 (React SPA 호환)", "상세 페이지: 가격·평점·리뷰수·구매수·판매자·로켓 정확 추출", "상세 페이지: OG 이미지 fallback, 페이지 title fallback", "1688 사전 확장: 드라이어/드라이기/고데기/가전/뷰티 등 70개+ 매핑 추가", "1688 키워드: 브랜드 자동 제거, 복합어 자동 매칭 (헤어+드라이어→헤어드라이어)", "통계: 전체 36개 상품 기준 평균가/평점/리뷰/경쟁도 정확 계산"],
                   },
                   {
