@@ -194,12 +194,14 @@ export async function computeDailyAggregation(
   const ratings = items.map((i: any) => N(i.rating)).filter((r: number) => r > 0);
   const reviews = items.map((i: any) => N(i.reviewCount)).filter((r: number) => r > 0);
 
-  const avgPrice = prices.length ? Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length) : 0;
-  const minPrice = prices.length ? Math.min(...prices) : 0;
-  const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const INT_MAX = 2147483647; // MySQL INT 최대값
+  const clampInt = (v: number) => Math.min(Math.max(Math.round(v), 0), INT_MAX);
+  const avgPrice = clampInt(prices.length ? prices.reduce((a: number, b: number) => a + b, 0) / prices.length : 0);
+  const minPrice = clampInt(prices.length ? Math.min(...prices) : 0);
+  const maxPrice = clampInt(prices.length ? Math.max(...prices) : 0);
   const avgRating = ratings.length ? +(ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length).toFixed(1) : 0;
-  const avgReview = reviews.length ? Math.round(reviews.reduce((a: number, b: number) => a + b, 0) / reviews.length) : 0;
-  const totalReviewSum = reviews.reduce((a: number, b: number) => a + b, 0);
+  const avgReview = clampInt(reviews.length ? reviews.reduce((a: number, b: number) => a + b, 0) / reviews.length : 0);
+  const totalReviewSum = clampInt(reviews.reduce((a: number, b: number) => a + b, 0));
 
   // 중앙값 리뷰
   const sortedReviews = [...reviews].sort((a, b) => a - b);

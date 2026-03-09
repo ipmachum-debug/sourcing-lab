@@ -1,17 +1,11 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.0
+   Coupang Sourcing Helper — Background Service Worker v7.1
+   v7.1: tRPC SuperJSON 응답 해제 수정 (핵심 버그 수정)
+         - api-client _call() 에서 result.data.json 자동 해제
+         - 서버 키워드 정상 로딩 + 자동 수집 동작
    v7.0: 하이브리드 수집 아키텍처 대개편
          - Background fetch + DOMParser (셀러라이프 방식)
-         - V2 DOM 자동감지 (ProductUnit, aria-label 평점)
-         - 배송유형 6종 분류
-         - declarativeNetRequest 헤더 위조
          - 배치 수집 완전 재작성 (순차 1개씩, 50~89초 간격)
-         - 모바일 리뷰 API 통합
-         - SSR JSON 파싱 폴백
-   v6.6: 검색수요 분석 + 자동배치 토글 + 분할 배치
-   v6.5: 상세페이지 정밀파싱 연동
-   v6.4: 자동 순회 수집기
-   v5.3: content.js가 자체 URL 감지
    ============================================================ */
 
 importScripts('api-client.js');

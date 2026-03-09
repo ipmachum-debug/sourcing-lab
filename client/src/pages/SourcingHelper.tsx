@@ -137,14 +137,14 @@ export default function SourcingHelper() {
             </div>
             <p className="text-xs text-gray-500">설치 방법, 기능 설명, 워크플로우</p>
           </button>
-          <a href="/coupang-helper-extension-v7.0.zip" download
+          <a href="/coupang-helper-extension-v7.1.zip" download
             className="text-left border rounded-xl p-4 hover:shadow-md hover:border-green-200 transition-all bg-gradient-to-br from-green-50 to-white group">
             <div className="flex items-center gap-2 mb-2">
               <Download className="w-5 h-5 text-green-500" />
               <span className="font-semibold text-sm">다운로드</span>
               <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-green-400 ml-auto transition-colors" />
             </div>
-            <p className="text-xs text-gray-500">Chrome 확장프로그램 v7.0.0</p>
+            <p className="text-xs text-gray-500">Chrome 확장프로그램 v7.1.0</p>
           </a>
           <button onClick={() => setLocation("/extension")}
             className="text-left border rounded-xl p-4 hover:shadow-md hover:border-emerald-200 transition-all bg-gradient-to-br from-emerald-50 to-white group relative">

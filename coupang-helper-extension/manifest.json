@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "7.0.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v7.0 — 하이브리드수집(Background+Content) · V2 DOM자동감지 · aria-label평점 · 배송6종분류 · 모바일리뷰API · declarativeNetRequest헤더위조 · SSR JSON파싱 · 배치재설계(순차1건28~90초) · 검색수요분석 · 자동배치 · 상세페이지정밀파싱 · AI분석 · 1688 · 순위추적 · WING · AliExpress",
+  "version": "7.1.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v7.1 — 하이브리드수집(Background+Content) · V2 DOM자동감지 · 서버키워드자동수집 · 배치재설계(순차1개씩50~89초) · 검색수요분석 · 상세페이지정밀파싱 · AI분석 · WING · AliExpress",
   "permissions": [
     "storage",
     "tabs",

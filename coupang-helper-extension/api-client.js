@@ -1,6 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Server API Client v6.5
+   Coupang Sourcing Helper — Server API Client v7.1
    lumiriz.kr 서버와 통신하는 API 클라이언트
+   v7.1: tRPC SuperJSON 래핑(result.data.json) 자동 해제
    + AI 소싱 코치 + 하이브리드 수집 + 자동 순회 수집
    + 상세 페이지 확장 파싱 데이터 저장
    ============================================================ */
@@ -270,8 +271,13 @@ class ApiClient {
     }
 
     const data = await resp.json();
-    if (Array.isArray(data)) return data[0];
-    return data;
+    // tRPC 배치 응답은 배열로 래핑됨: [{result:{data:{json:...}}}]
+    const unwrapped = Array.isArray(data) ? data[0] : data;
+    // tRPC SuperJSON 래핑 해제: result.data.json → result.data
+    if (unwrapped?.result?.data?.json !== undefined) {
+      unwrapped.result.data = unwrapped.result.data.json;
+    }
+    return unwrapped;
   }
 }
 
