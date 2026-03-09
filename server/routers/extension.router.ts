@@ -5,9 +5,20 @@ import {
   extSearchSnapshots, extCandidates, extRankTrackings, extTrackedKeywords,
   extProductDetails, extNotifications, extReviewAnalyses, extWingSearches,
   extKeywordDailyStats, extProductTrackings, extProductDailySnapshots,
+  extCategoryReviewRates, extProductSalesEstimates,
+  extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
   products, productChannelMappings
 } from "../../drizzle/schema";
-import { eq, and, desc, sql, like, asc, gte, ne, lt } from "drizzle-orm";
+import {
+  calculateSalesEstimate, buildWindowMetrics, matchCategoryKey,
+  DEFAULT_CATEGORY_REVIEW_RATES, getSalesGradeLabel,
+  type EstimateInput, type SnapshotRow
+} from "../salesEstimate";
+import { eq, and, desc, sql, like, asc, gte, ne, lt, isNull } from "drizzle-orm";
+import {
+  selectBatchKeywords, computeDailyAggregation, runDailyBatch,
+  recomputeCompositeScore, diagnoseParsingQuality,
+} from "../batchCollector";
 import { TRPCError } from "@trpc/server";
 
 /** Drizzle-ORM returns decimal/SUM/AVG/COUNT results as string — always coerce to number */
@@ -616,6 +627,117 @@ export const extensionRouter = router({
         rating: extProductDetails.rating,
         reviewCount: extProductDetails.reviewCount,
         purchaseCount: extProductDetails.purchaseCount,
+        capturedAt: extProductDetails.capturedAt,
+      })
+        .from(extProductDetails)
+        .where(and(
+          eq(extProductDetails.userId, ctx.user!.id),
+          eq(extProductDetails.coupangProductId, input.coupangProductId),
+          sql`${extProductDetails.capturedAt} >= DATE_SUB(NOW(), INTERVAL ${input.days} DAY)`,
+        ))
+        .orderBy(desc(extProductDetails.capturedAt))
+        .limit(200);
+    }),
+
+  // ===== v6.5: 상세 페이지 확장 스냅샷 저장 =====
+  saveDetailSnapshot: protectedProcedure
+    .input(z.object({
+      coupangProductId: z.string(),
+      vendorItemId: z.string().optional().nullable(),
+      title: z.string().optional(),
+      price: z.number().int().default(0),
+      originalPrice: z.number().int().default(0),
+      discountRate: z.number().int().default(0),
+      rating: z.number().default(0),
+      reviewCount: z.number().int().default(0),
+      purchaseCount: z.string().optional(),
+      sellerName: z.string().optional(),
+      brandName: z.string().optional().nullable(),
+      manufacturer: z.string().optional().nullable(),
+      origin: z.string().optional().nullable(),
+      deliveryType: z.string().optional(),
+      isRocket: z.boolean().default(false),
+      isFreeShipping: z.boolean().default(false),
+      soldOut: z.boolean().default(false),
+      categoryPath: z.string().optional(),
+      optionCount: z.number().int().default(0),
+      imageUrl: z.string().optional(),
+      confidence: z.number().int().default(0),
+      reviewSamples: z.array(z.object({
+        rating: z.number().nullable().optional(),
+        text: z.string(),
+        dateText: z.string().nullable().optional(),
+      })).optional(),
+      optionSummary: z.array(z.object({
+        optionName: z.string(),
+        priceDelta: z.number().nullable().optional(),
+        soldOut: z.boolean().optional(),
+      })).optional(),
+      badgeText: z.string().optional().nullable(),
+      keyword: z.string().optional(),
+      source: z.enum(['manual', 'auto_collect', 'user_browse']).default('manual'),
+      detailJson: z.any().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const extJson = {
+        ...(input.detailJson || {}),
+        vendorItemId: input.vendorItemId || null,
+        brandName: input.brandName || null,
+        manufacturer: input.manufacturer || null,
+        origin: input.origin || null,
+        deliveryType: input.deliveryType || 'STANDARD',
+        soldOut: input.soldOut || false,
+        confidence: input.confidence || 0,
+        reviewSamples: input.reviewSamples || [],
+        optionSummary: input.optionSummary || [],
+        badgeText: input.badgeText || null,
+        keyword: input.keyword || null,
+        source: input.source || 'manual',
+      };
+      const result = await db.insert(extProductDetails).values({
+        userId: ctx.user!.id,
+        coupangProductId: input.coupangProductId,
+        title: input.title || null,
+        price: input.price,
+        originalPrice: input.originalPrice,
+        discountRate: input.discountRate,
+        rating: input.rating.toFixed(1),
+        reviewCount: input.reviewCount,
+        purchaseCount: input.purchaseCount || null,
+        sellerName: input.sellerName || null,
+        isRocket: input.isRocket,
+        isFreeShipping: input.isFreeShipping,
+        categoryPath: input.categoryPath || null,
+        optionCount: input.optionCount,
+        imageUrl: input.imageUrl || null,
+        detailJson: JSON.stringify(extJson),
+      });
+      return { success: true, id: (result as any)?.[0]?.insertId };
+    }),
+
+  getDetailHistory: protectedProcedure
+    .input(z.object({
+      coupangProductId: z.string(),
+      days: z.number().int().min(1).max(90).default(30),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return db.select({
+        id: extProductDetails.id,
+        price: extProductDetails.price,
+        originalPrice: extProductDetails.originalPrice,
+        discountRate: extProductDetails.discountRate,
+        rating: extProductDetails.rating,
+        reviewCount: extProductDetails.reviewCount,
+        purchaseCount: extProductDetails.purchaseCount,
+        sellerName: extProductDetails.sellerName,
+        isRocket: extProductDetails.isRocket,
+        isFreeShipping: extProductDetails.isFreeShipping,
+        optionCount: extProductDetails.optionCount,
+        detailJson: extProductDetails.detailJson,
         capturedAt: extProductDetails.capturedAt,
       })
         .from(extProductDetails)
@@ -2764,6 +2886,1121 @@ export const extensionRouter = router({
           rankChanges: "순위추적에 등록된 키워드만 해당. 검색할 때마다 각 상품의 순위를 기록합니다.",
           rating: "검색 결과 페이지에서 별점을 파싱합니다. v5.6.1에서 12단계 전략으로 파싱 정확도를 대폭 향상했습니다.",
         },
+      };
+    }),
+
+  // ===================================================================
+  //  판매량 추정 시스템 (Sales Estimation System)
+  // ===================================================================
+
+  // 카테고리별 리뷰 작성률 목록 조회
+  getCategoryReviewRates: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    const rows = await db.select()
+      .from(extCategoryReviewRates)
+      .orderBy(asc(extCategoryReviewRates.categoryName));
+
+    return rows.map(r => ({
+      id: r.id,
+      categoryKey: r.categoryKey,
+      categoryName: r.categoryName,
+      reviewRate: N(r.reviewRate),
+      confidence: r.confidence,
+      sampleCount: r.sampleCount,
+      notes: r.notes,
+    }));
+  }),
+
+  // 카테고리 리뷰율 수정 (사용자 커스텀)
+  updateCategoryReviewRate: protectedProcedure
+    .input(z.object({
+      categoryKey: z.string().min(1),
+      reviewRate: z.number().min(0.001).max(0.5),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [existing] = await db.select({ id: extCategoryReviewRates.id })
+        .from(extCategoryReviewRates)
+        .where(eq(extCategoryReviewRates.categoryKey, input.categoryKey))
+        .limit(1);
+
+      if (existing) {
+        await db.update(extCategoryReviewRates)
+          .set({
+            reviewRate: input.reviewRate.toFixed(4),
+            notes: input.notes || null,
+          })
+          .where(eq(extCategoryReviewRates.id, existing.id));
+        return { success: true, updated: true };
+      }
+
+      await db.insert(extCategoryReviewRates).values({
+        categoryKey: input.categoryKey,
+        categoryName: input.categoryKey,
+        reviewRate: input.reviewRate.toFixed(4),
+        notes: input.notes || null,
+      });
+      return { success: true, updated: false };
+    }),
+
+  // 단일 상품 판매량 추정 실행
+  estimateSingleProduct: protectedProcedure
+    .input(z.object({
+      trackingId: z.number().int(),
+      categoryKey: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      // 추적 상품 확인
+      const [tracking] = await db.select()
+        .from(extProductTrackings)
+        .where(and(
+          eq(extProductTrackings.id, input.trackingId),
+          eq(extProductTrackings.userId, userId),
+        ))
+        .limit(1);
+
+      if (!tracking) throw new TRPCError({ code: "NOT_FOUND", message: "추적 상품을 찾을 수 없습니다" });
+
+      // 최근 30일 스냅샷 조회
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const todayStr = now.toISOString().slice(0, 10);
+      const date30ago = new Date(now);
+      date30ago.setDate(date30ago.getDate() - 30);
+      const date30agoStr = date30ago.toISOString().slice(0, 10);
+
+      const snapshots = await db.select({
+        snapshotDate: extProductDailySnapshots.snapshotDate,
+        price: extProductDailySnapshots.price,
+        reviewCount: extProductDailySnapshots.reviewCount,
+        rankPosition: extProductDailySnapshots.rankPosition,
+        rating: extProductDailySnapshots.rating,
+        dataJson: extProductDailySnapshots.dataJson,
+      })
+        .from(extProductDailySnapshots)
+        .where(and(
+          eq(extProductDailySnapshots.trackingId, input.trackingId),
+          gte(extProductDailySnapshots.snapshotDate, date30agoStr),
+        ))
+        .orderBy(desc(extProductDailySnapshots.snapshotDate));
+
+      if (snapshots.length < 2) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "최소 2일 이상의 스냅샷 데이터가 필요합니다"
+        });
+      }
+
+      // 윈도우 메트릭 계산
+      const snapshotRows: SnapshotRow[] = snapshots.map(s => ({
+        snapshotDate: s.snapshotDate,
+        price: N(s.price),
+        reviewCount: N(s.reviewCount),
+        rankPosition: N(s.rankPosition),
+        rating: N(s.rating),
+        dataJson: s.dataJson || undefined,
+      }));
+
+      const metrics = buildWindowMetrics(snapshotRows, todayStr);
+      if (!metrics) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "메트릭 계산 실패" });
+      }
+
+      // 카테고리 리뷰율 조회
+      const categoryKey = input.categoryKey || matchCategoryKey(tracking.productName || '');
+      let reviewRate = DEFAULT_CATEGORY_REVIEW_RATES[categoryKey] || 0.02;
+
+      const [dbRate] = await db.select({ reviewRate: extCategoryReviewRates.reviewRate })
+        .from(extCategoryReviewRates)
+        .where(eq(extCategoryReviewRates.categoryKey, categoryKey))
+        .limit(1);
+      if (dbRate) reviewRate = N(dbRate.reviewRate);
+
+      // 판매량 추정 실행
+      const estimateInput: EstimateInput = {
+        trackingId: input.trackingId,
+        ...metrics,
+        categoryKey,
+        reviewRate,
+      };
+
+      const result = calculateSalesEstimate(estimateInput);
+
+      // 결과 저장 (upsert)
+      const [existingEst] = await db.select({ id: extProductSalesEstimates.id })
+        .from(extProductSalesEstimates)
+        .where(and(
+          eq(extProductSalesEstimates.trackingId, input.trackingId),
+          eq(extProductSalesEstimates.estimateDate, todayStr),
+        ))
+        .limit(1);
+
+      const estData = {
+        userId,
+        trackingId: input.trackingId,
+        estimateDate: todayStr,
+        reviewDelta7d: result.reviewDelta7d,
+        reviewDelta30d: result.reviewDelta30d,
+        avgRank: result.avgRank.toFixed(2),
+        soldOutDays: result.soldOutDays,
+        priceChangeRate: result.priceChangeRate.toFixed(4),
+        currentPrice: result.currentPrice,
+        currentReviewCount: result.currentReviewCount,
+        currentRating: result.currentRating.toFixed(1),
+        categoryKey: result.categoryKey,
+        reviewRate: result.reviewRate.toFixed(4),
+        estimatedDailySales: result.estimatedDailySales.toFixed(2),
+        estimatedMonthlySales: result.estimatedMonthlySales.toFixed(2),
+        estimatedMonthlyRevenue: String(result.estimatedMonthlyRevenue),
+        baseDailySales: result.baseDailySales.toFixed(2),
+        rankBoost: result.rankBoost.toFixed(3),
+        soldOutBoost: result.soldOutBoost.toFixed(3),
+        priceBoost: result.priceBoost.toFixed(3),
+        salesPowerScore: result.salesPowerScore.toFixed(2),
+        salesGrade: result.salesGrade,
+        trendDirection: result.trendDirection,
+        surgeFlag: result.surgeFlag,
+      };
+
+      if (existingEst) {
+        await db.update(extProductSalesEstimates).set(estData)
+          .where(eq(extProductSalesEstimates.id, existingEst.id));
+      } else {
+        await db.insert(extProductSalesEstimates).values(estData);
+      }
+
+      return {
+        success: true,
+        estimate: result,
+        gradeLabel: getSalesGradeLabel(result.salesGrade),
+      };
+    }),
+
+  // 전체 추적 상품 배치 판매량 추정
+  runSalesEstimateBatch: protectedProcedure
+    .input(z.object({
+      targetDate: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const todayStr = input.targetDate || now.toISOString().slice(0, 10);
+      const date30ago = new Date(todayStr);
+      date30ago.setDate(date30ago.getDate() - 30);
+      const date30agoStr = date30ago.toISOString().slice(0, 10);
+
+      // 활성 추적 상품 전체 조회
+      const trackings = await db.select({
+        id: extProductTrackings.id,
+        productName: extProductTrackings.productName,
+        coupangProductId: extProductTrackings.coupangProductId,
+      })
+        .from(extProductTrackings)
+        .where(and(
+          eq(extProductTrackings.userId, userId),
+          eq(extProductTrackings.isActive, true),
+        ));
+
+      // 카테고리 리뷰율 맵 미리 로딩
+      const dbRates = await db.select()
+        .from(extCategoryReviewRates);
+      const rateMap: Record<string, number> = {};
+      for (const r of dbRates) {
+        rateMap[r.categoryKey] = N(r.reviewRate);
+      }
+
+      let processed = 0;
+      let skipped = 0;
+      let errors = 0;
+      const results: Array<{ trackingId: number; productName: string; grade: string; monthly: number }> = [];
+
+      for (const tracking of trackings) {
+        try {
+          const snapshots = await db.select({
+            snapshotDate: extProductDailySnapshots.snapshotDate,
+            price: extProductDailySnapshots.price,
+            reviewCount: extProductDailySnapshots.reviewCount,
+            rankPosition: extProductDailySnapshots.rankPosition,
+            rating: extProductDailySnapshots.rating,
+            dataJson: extProductDailySnapshots.dataJson,
+          })
+            .from(extProductDailySnapshots)
+            .where(and(
+              eq(extProductDailySnapshots.trackingId, tracking.id),
+              gte(extProductDailySnapshots.snapshotDate, date30agoStr),
+            ))
+            .orderBy(desc(extProductDailySnapshots.snapshotDate));
+
+          if (snapshots.length < 2) {
+            skipped++;
+            continue;
+          }
+
+          const snapshotRows: SnapshotRow[] = snapshots.map(s => ({
+            snapshotDate: s.snapshotDate,
+            price: N(s.price),
+            reviewCount: N(s.reviewCount),
+            rankPosition: N(s.rankPosition),
+            rating: N(s.rating),
+            dataJson: s.dataJson || undefined,
+          }));
+
+          const metrics = buildWindowMetrics(snapshotRows, todayStr);
+          if (!metrics) { skipped++; continue; }
+
+          const categoryKey = matchCategoryKey(tracking.productName || '');
+          const reviewRate = rateMap[categoryKey] || DEFAULT_CATEGORY_REVIEW_RATES[categoryKey] || 0.02;
+
+          const estInput: EstimateInput = {
+            trackingId: tracking.id,
+            ...metrics,
+            categoryKey,
+            reviewRate,
+          };
+
+          const result = calculateSalesEstimate(estInput);
+
+          // Upsert
+          const [existingEst] = await db.select({ id: extProductSalesEstimates.id })
+            .from(extProductSalesEstimates)
+            .where(and(
+              eq(extProductSalesEstimates.trackingId, tracking.id),
+              eq(extProductSalesEstimates.estimateDate, todayStr),
+            ))
+            .limit(1);
+
+          const estData = {
+            userId,
+            trackingId: tracking.id,
+            estimateDate: todayStr,
+            reviewDelta7d: result.reviewDelta7d,
+            reviewDelta30d: result.reviewDelta30d,
+            avgRank: result.avgRank.toFixed(2),
+            soldOutDays: result.soldOutDays,
+            priceChangeRate: result.priceChangeRate.toFixed(4),
+            currentPrice: result.currentPrice,
+            currentReviewCount: result.currentReviewCount,
+            currentRating: result.currentRating.toFixed(1),
+            categoryKey: result.categoryKey,
+            reviewRate: result.reviewRate.toFixed(4),
+            estimatedDailySales: result.estimatedDailySales.toFixed(2),
+            estimatedMonthlySales: result.estimatedMonthlySales.toFixed(2),
+            estimatedMonthlyRevenue: String(result.estimatedMonthlyRevenue),
+            baseDailySales: result.baseDailySales.toFixed(2),
+            rankBoost: result.rankBoost.toFixed(3),
+            soldOutBoost: result.soldOutBoost.toFixed(3),
+            priceBoost: result.priceBoost.toFixed(3),
+            salesPowerScore: result.salesPowerScore.toFixed(2),
+            salesGrade: result.salesGrade,
+            trendDirection: result.trendDirection,
+            surgeFlag: result.surgeFlag,
+          };
+
+          if (existingEst) {
+            await db.update(extProductSalesEstimates).set(estData)
+              .where(eq(extProductSalesEstimates.id, existingEst.id));
+          } else {
+            await db.insert(extProductSalesEstimates).values(estData);
+          }
+
+          processed++;
+          results.push({
+            trackingId: tracking.id,
+            productName: tracking.productName,
+            grade: result.salesGrade,
+            monthly: result.estimatedMonthlySales,
+          });
+        } catch (err) {
+          errors++;
+          console.error(`[salesEstimateBatch] tracking ${tracking.id}:`, err);
+        }
+      }
+
+      return {
+        success: true,
+        targetDate: todayStr,
+        total: trackings.length,
+        processed,
+        skipped,
+        errors,
+        results: results.slice(0, 20),
+      };
+    }),
+
+  // 판매량 추정 결과 조회 (특정 상품)
+  getProductSalesEstimates: protectedProcedure
+    .input(z.object({
+      trackingId: z.number().int(),
+      days: z.number().int().min(1).max(90).default(30),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const dateLimit = new Date();
+      dateLimit.setHours(dateLimit.getHours() + 9);
+      dateLimit.setDate(dateLimit.getDate() - input.days);
+      const dateLimitStr = dateLimit.toISOString().slice(0, 10);
+
+      const rows = await db.select()
+        .from(extProductSalesEstimates)
+        .where(and(
+          eq(extProductSalesEstimates.userId, ctx.user!.id),
+          eq(extProductSalesEstimates.trackingId, input.trackingId),
+          gte(extProductSalesEstimates.estimateDate, dateLimitStr),
+        ))
+        .orderBy(desc(extProductSalesEstimates.estimateDate));
+
+      return rows.map(r => ({
+        id: r.id,
+        estimateDate: r.estimateDate,
+        reviewDelta7d: N(r.reviewDelta7d),
+        reviewDelta30d: N(r.reviewDelta30d),
+        avgRank: N(r.avgRank),
+        soldOutDays: N(r.soldOutDays),
+        priceChangeRate: N(r.priceChangeRate),
+        currentPrice: N(r.currentPrice),
+        currentReviewCount: N(r.currentReviewCount),
+        currentRating: N(r.currentRating),
+        categoryKey: r.categoryKey,
+        reviewRate: N(r.reviewRate),
+        estimatedDailySales: N(r.estimatedDailySales),
+        estimatedMonthlySales: N(r.estimatedMonthlySales),
+        estimatedMonthlyRevenue: N(r.estimatedMonthlyRevenue),
+        baseDailySales: N(r.baseDailySales),
+        rankBoost: N(r.rankBoost),
+        soldOutBoost: N(r.soldOutBoost),
+        priceBoost: N(r.priceBoost),
+        salesPowerScore: N(r.salesPowerScore),
+        salesGrade: r.salesGrade,
+        salesGradeLabel: getSalesGradeLabel(r.salesGrade || 'MEDIUM'),
+        trendDirection: r.trendDirection,
+        surgeFlag: r.surgeFlag,
+      }));
+    }),
+
+  // 판매량 추정 대시보드 (전체 상품 최신 추정 결과 요약)
+  salesEstimateDashboard: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    const userId = ctx.user!.id;
+
+    // 각 추적 상품의 최신 추정 결과 조회
+    const latestEstimates = await db.select({
+      trackingId: extProductSalesEstimates.trackingId,
+      estimateDate: sql<string>`MAX(estimate_date)`.as('max_date'),
+    })
+      .from(extProductSalesEstimates)
+      .where(eq(extProductSalesEstimates.userId, userId))
+      .groupBy(extProductSalesEstimates.trackingId);
+
+    if (!latestEstimates.length) {
+      return {
+        totalProducts: 0,
+        gradeDistribution: {} as Record<string, number>,
+        topSellers: [] as any[],
+        surgeProducts: [] as any[],
+        summary: {
+          totalEstimatedMonthlySales: 0,
+          totalEstimatedMonthlyRevenue: 0,
+          avgSalesPowerScore: 0,
+        },
+      };
+    }
+
+    // 전체 최신 추정 결과 조회
+    const allEstimates: any[] = [];
+    for (const le of latestEstimates) {
+      const [row] = await db.select()
+        .from(extProductSalesEstimates)
+        .where(and(
+          eq(extProductSalesEstimates.trackingId, le.trackingId),
+          eq(extProductSalesEstimates.estimateDate, le.estimateDate),
+        ))
+        .limit(1);
+      if (row) {
+        const [tracking] = await db.select({
+          productName: extProductTrackings.productName,
+          coupangProductId: extProductTrackings.coupangProductId,
+          imageUrl: extProductTrackings.imageUrl,
+        })
+          .from(extProductTrackings)
+          .where(eq(extProductTrackings.id, le.trackingId))
+          .limit(1);
+
+        allEstimates.push({
+          ...row,
+          productName: tracking?.productName || '',
+          coupangProductId: tracking?.coupangProductId || '',
+          imageUrl: tracking?.imageUrl || '',
+        });
+      }
+    }
+
+    // 등급 분포
+    const gradeDistribution: Record<string, number> = {};
+    for (const est of allEstimates) {
+      const grade = est.salesGrade || 'MEDIUM';
+      gradeDistribution[grade] = (gradeDistribution[grade] || 0) + 1;
+    }
+
+    // TOP 10 판매 상품
+    const topSellers = [...allEstimates]
+      .sort((a, b) => N(b.estimatedMonthlySales) - N(a.estimatedMonthlySales))
+      .slice(0, 10)
+      .map(est => ({
+        trackingId: est.trackingId,
+        productName: est.productName,
+        coupangProductId: est.coupangProductId,
+        imageUrl: est.imageUrl,
+        estimatedMonthlySales: N(est.estimatedMonthlySales),
+        estimatedMonthlyRevenue: N(est.estimatedMonthlyRevenue),
+        salesPowerScore: N(est.salesPowerScore),
+        salesGrade: est.salesGrade,
+        salesGradeLabel: getSalesGradeLabel(est.salesGrade || 'MEDIUM'),
+        trendDirection: est.trendDirection,
+        surgeFlag: est.surgeFlag,
+        currentPrice: N(est.currentPrice),
+      }));
+
+    // 급등 상품
+    const surgeProducts = allEstimates
+      .filter(est => est.surgeFlag)
+      .map(est => ({
+        trackingId: est.trackingId,
+        productName: est.productName,
+        coupangProductId: est.coupangProductId,
+        reviewDelta7d: N(est.reviewDelta7d),
+        estimatedDailySales: N(est.estimatedDailySales),
+        salesGrade: est.salesGrade,
+      }));
+
+    // 종합 요약
+    const totalEstimatedMonthlySales = allEstimates.reduce((sum, est) => sum + N(est.estimatedMonthlySales), 0);
+    const totalEstimatedMonthlyRevenue = allEstimates.reduce((sum, est) => sum + N(est.estimatedMonthlyRevenue), 0);
+    const avgSalesPowerScore = allEstimates.length > 0
+      ? Math.round(allEstimates.reduce((sum, est) => sum + N(est.salesPowerScore), 0) / allEstimates.length * 100) / 100
+      : 0;
+
+    return {
+      totalProducts: allEstimates.length,
+      gradeDistribution,
+      topSellers,
+      surgeProducts,
+      summary: {
+        totalEstimatedMonthlySales: Math.round(totalEstimatedMonthlySales),
+        totalEstimatedMonthlyRevenue: Math.round(totalEstimatedMonthlyRevenue),
+        avgSalesPowerScore,
+      },
+    };
+  }),
+
+
+  // ===================================================================
+  //  하이브리드 데이터 수집 시스템 (Hybrid Data Collection)
+  //  실시간 사용자검색 수집 + 저빈도 배치 보강
+  // ===================================================================
+
+  // ===== 검색 이벤트 저장 (content.js → background.js → 서버) =====
+  saveSearchEvent: protectedProcedure
+    .input(z.object({
+      keyword: z.string().min(1).max(255),
+      source: z.enum(["user_search", "batch", "manual", "auto_collect"]).default("user_search"),
+      pageUrl: z.string().optional(),
+      totalItems: z.number().int().default(0),
+      items: z.array(z.any()).optional(),
+      avgPrice: z.number().int().default(0),
+      avgRating: z.number().default(0),
+      avgReview: z.number().int().default(0),
+      totalReviewSum: z.number().int().default(0),
+      adCount: z.number().int().default(0),
+      rocketCount: z.number().int().default(0),
+      highReviewCount: z.number().int().default(0),
+      priceParseRate: z.number().int().default(0),
+      ratingParseRate: z.number().int().default(0),
+      reviewParseRate: z.number().int().default(0),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      const userId = ctx.user!.id;
+      const itemsJson = input.items ? JSON.stringify(input.items.slice(0, 36)) : null;
+
+      // 1. 검색 이벤트 저장
+      const [result] = await db.insert(extSearchEvents).values({
+        userId,
+        keyword: input.keyword,
+        source: input.source,
+        pageUrl: input.pageUrl || null,
+        totalItems: input.totalItems,
+        itemsJson,
+        avgPrice: input.avgPrice,
+        avgRating: input.avgRating.toFixed(1),
+        avgReview: input.avgReview,
+        totalReviewSum: input.totalReviewSum,
+        adCount: input.adCount,
+        rocketCount: input.rocketCount,
+        highReviewCount: input.highReviewCount,
+        priceParseRate: input.priceParseRate,
+        ratingParseRate: input.ratingParseRate,
+        reviewParseRate: input.reviewParseRate,
+      });
+
+      // 2. watch_keyword 자동 등록/업데이트 (upsert)
+      const [existing] = await db.select({ id: extWatchKeywords.id, totalSearchCount: extWatchKeywords.totalSearchCount })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.keyword, input.keyword),
+        ))
+        .limit(1);
+
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const nowStr = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      if (existing) {
+        await db.update(extWatchKeywords).set({
+          totalSearchCount: N(existing.totalSearchCount) + 1,
+          lastSearchedAt: nowStr,
+          lastUserViewAt: nowStr,
+          latestTotalItems: input.totalItems,
+          latestAvgPrice: input.avgPrice,
+          latestAvgRating: input.avgRating.toFixed(1),
+          latestAvgReview: input.avgReview,
+          latestTotalReviewSum: input.totalReviewSum,
+          latestAdCount: input.adCount,
+          latestRocketCount: input.rocketCount,
+          isActive: true,
+        }).where(eq(extWatchKeywords.id, existing.id));
+
+        recomputeCompositeScore(userId, existing.id).catch(() => {});
+      } else {
+        await db.insert(extWatchKeywords).values({
+          userId,
+          keyword: input.keyword,
+          priority: 50,
+          isActive: true,
+          collectIntervalHours: 24,
+          totalSearchCount: 1,
+          lastSearchedAt: nowStr,
+          lastUserViewAt: nowStr,
+          latestTotalItems: input.totalItems,
+          latestAvgPrice: input.avgPrice,
+          latestAvgRating: input.avgRating.toFixed(1),
+          latestAvgReview: input.avgReview,
+          latestTotalReviewSum: input.totalReviewSum,
+          latestAdCount: input.adCount,
+          latestRocketCount: input.rocketCount,
+        });
+      }
+
+      // 3. 일일 상태 비동기 업데이트
+      const todayStr = now.toISOString().slice(0, 10);
+      computeDailyAggregation(userId, input.keyword, todayStr).then(async (agg) => {
+        if (!agg) return;
+        const [existingStatus] = await db.select({ id: extKeywordDailyStatus.id })
+          .from(extKeywordDailyStatus)
+          .where(and(
+            eq(extKeywordDailyStatus.userId, userId),
+            eq(extKeywordDailyStatus.keyword, input.keyword),
+            eq(extKeywordDailyStatus.statDate, todayStr),
+          ))
+          .limit(1);
+
+        const statusData = {
+          totalItems: agg.totalItems,
+          avgPrice: agg.avgPrice,
+          minPrice: agg.minPrice,
+          maxPrice: agg.maxPrice,
+          avgRating: agg.avgRating.toFixed(1),
+          avgReview: agg.avgReview,
+          totalReviewSum: agg.totalReviewSum,
+          medianReview: agg.medianReview,
+          adCount: agg.adCount,
+          adRatio: agg.adRatio.toFixed(2),
+          rocketCount: agg.rocketCount,
+          rocketRatio: agg.rocketRatio.toFixed(2),
+          highReviewCount: agg.highReviewCount,
+          newProductCount: agg.newProductCount,
+          reviewGrowth: agg.reviewGrowth,
+          priceChange: agg.priceChange,
+          itemCountChange: agg.itemCountChange,
+          estimatedDailySales: agg.estimatedDailySales,
+          salesScore: agg.salesScore,
+          demandScore: agg.demandScore,
+          competitionScore: agg.competitionScore,
+          competitionLevel: agg.competitionLevel,
+          dataQualityScore: agg.dataQualityScore,
+          priceParseRate: agg.priceParseRate,
+          ratingParseRate: agg.ratingParseRate,
+          reviewParseRate: agg.reviewParseRate,
+        };
+
+        if (existingStatus) {
+          await db.update(extKeywordDailyStatus).set(statusData)
+            .where(eq(extKeywordDailyStatus.id, existingStatus.id));
+        } else {
+          await db.insert(extKeywordDailyStatus).values({
+            userId, keyword: input.keyword, statDate: todayStr, source: input.source, ...statusData,
+          });
+        }
+      }).catch((err) => console.error("[saveSearchEvent] daily status error:", err));
+
+      return { success: true, eventId: result.insertId };
+    }),
+
+  // ===== 감시 키워드 목록 조회 =====
+  listWatchKeywords: protectedProcedure
+    .input(z.object({
+      activeOnly: z.boolean().default(true),
+      sortBy: z.enum(["priority", "lastSearched", "reviewGrowth", "compositeScore"]).default("compositeScore"),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const conditions: any[] = [eq(extWatchKeywords.userId, ctx.user!.id)];
+      if (input.activeOnly) conditions.push(eq(extWatchKeywords.isActive, true));
+
+      const orderMap: any = {
+        priority: desc(extWatchKeywords.priority),
+        lastSearched: desc(extWatchKeywords.lastSearchedAt),
+        reviewGrowth: desc(extWatchKeywords.reviewGrowth7d),
+        compositeScore: desc(extWatchKeywords.compositeScore),
+      };
+
+      const rows = await db.select()
+        .from(extWatchKeywords)
+        .where(and(...conditions))
+        .orderBy(orderMap[input.sortBy])
+        .limit(input.limit)
+        .offset(input.offset);
+
+      return rows.map(r => ({
+        id: r.id,
+        keyword: r.keyword,
+        priority: N(r.priority),
+        isActive: r.isActive,
+        collectIntervalHours: N(r.collectIntervalHours),
+        totalSearchCount: N(r.totalSearchCount),
+        lastSearchedAt: r.lastSearchedAt,
+        lastCollectedAt: r.lastCollectedAt,
+        latestTotalItems: N(r.latestTotalItems),
+        latestAvgPrice: N(r.latestAvgPrice),
+        latestAvgRating: N(r.latestAvgRating),
+        latestAvgReview: N(r.latestAvgReview),
+        latestTotalReviewSum: N(r.latestTotalReviewSum),
+        reviewGrowth1d: N(r.reviewGrowth1d),
+        reviewGrowth7d: N(r.reviewGrowth7d),
+        priceChange1d: N(r.priceChange1d),
+        compositeScore: N(r.compositeScore),
+        createdAt: r.createdAt,
+      }));
+    }),
+
+  // ===== 감시 키워드 우선순위/설정 변경 =====
+  updateWatchKeyword: protectedProcedure
+    .input(z.object({
+      id: z.number().int(),
+      priority: z.number().int().min(0).max(100).optional(),
+      isActive: z.boolean().optional(),
+      collectIntervalHours: z.number().int().min(1).max(168).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const update: any = {};
+      if (input.priority !== undefined) update.priority = input.priority;
+      if (input.isActive !== undefined) update.isActive = input.isActive;
+      if (input.collectIntervalHours !== undefined) update.collectIntervalHours = input.collectIntervalHours;
+
+      await db.update(extWatchKeywords).set(update)
+        .where(and(eq(extWatchKeywords.id, input.id), eq(extWatchKeywords.userId, ctx.user!.id)));
+
+      return { success: true };
+    }),
+
+  // ===== 감시 키워드 삭제 =====
+  deleteWatchKeyword: protectedProcedure
+    .input(z.object({ id: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      await db.delete(extWatchKeywords)
+        .where(and(eq(extWatchKeywords.id, input.id), eq(extWatchKeywords.userId, ctx.user!.id)));
+
+      return { success: true };
+    }),
+
+  // ===== 키워드 일별 상태 이력 조회 =====
+  getKeywordDailyStatusHistory: protectedProcedure
+    .input(z.object({
+      keyword: z.string().min(1),
+      days: z.number().int().min(1).max(90).default(30),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const startDate = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1000);
+      const startDateStr = startDate.toISOString().slice(0, 10);
+
+      const rows = await db.select()
+        .from(extKeywordDailyStatus)
+        .where(and(
+          eq(extKeywordDailyStatus.userId, ctx.user!.id),
+          eq(extKeywordDailyStatus.keyword, input.keyword),
+          gte(extKeywordDailyStatus.statDate, startDateStr),
+        ))
+        .orderBy(asc(extKeywordDailyStatus.statDate));
+
+      return rows.map(r => ({
+        statDate: r.statDate,
+        totalItems: N(r.totalItems),
+        avgPrice: N(r.avgPrice),
+        minPrice: N(r.minPrice),
+        maxPrice: N(r.maxPrice),
+        avgRating: N(r.avgRating),
+        avgReview: N(r.avgReview),
+        totalReviewSum: N(r.totalReviewSum),
+        reviewGrowth: N(r.reviewGrowth),
+        priceChange: N(r.priceChange),
+        estimatedDailySales: N(r.estimatedDailySales),
+        salesScore: N(r.salesScore),
+        demandScore: N(r.demandScore),
+        competitionScore: N(r.competitionScore),
+        competitionLevel: r.competitionLevel,
+        dataQualityScore: N(r.dataQualityScore),
+        adCount: N(r.adCount),
+        rocketCount: N(r.rocketCount),
+        source: r.source,
+      }));
+    }),
+
+  // ===== 일일 배치 실행 (서버 트리거) =====
+  runDailyBatchCollection: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
+      keywords: z.array(z.string()).optional(),
+    }).optional())
+    .mutation(async ({ ctx, input }) => {
+      const opts = input || {};
+      return await runDailyBatch(ctx.user!.id, opts.limit, opts.offset, opts.keywords);
+    }),
+
+  // ===== 배치 수집 대상 키워드 조회 =====
+  getBatchKeywordSelection: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))
+    .query(async ({ ctx, input }) => {
+      return await selectBatchKeywords(ctx.user!.id, input.limit);
+    }),
+
+  // ===== 검색 이벤트 히스토리 =====
+  listSearchEvents: protectedProcedure
+    .input(z.object({
+      keyword: z.string().optional(),
+      days: z.number().int().min(1).max(90).default(7),
+      limit: z.number().int().min(1).max(100).default(50),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const startDate = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1000);
+      const startDateStr = startDate.toISOString().slice(0, 19).replace('T', ' ');
+
+      const conditions: any[] = [
+        eq(extSearchEvents.userId, ctx.user!.id),
+        gte(extSearchEvents.searchedAt, startDateStr),
+      ];
+      if (input.keyword) conditions.push(eq(extSearchEvents.keyword, input.keyword));
+
+      const rows = await db.select({
+        id: extSearchEvents.id,
+        keyword: extSearchEvents.keyword,
+        searchedAt: extSearchEvents.searchedAt,
+        source: extSearchEvents.source,
+        totalItems: extSearchEvents.totalItems,
+        avgPrice: extSearchEvents.avgPrice,
+        avgRating: extSearchEvents.avgRating,
+        avgReview: extSearchEvents.avgReview,
+        totalReviewSum: extSearchEvents.totalReviewSum,
+        adCount: extSearchEvents.adCount,
+        rocketCount: extSearchEvents.rocketCount,
+        priceParseRate: extSearchEvents.priceParseRate,
+        ratingParseRate: extSearchEvents.ratingParseRate,
+        reviewParseRate: extSearchEvents.reviewParseRate,
+      })
+        .from(extSearchEvents)
+        .where(and(...conditions))
+        .orderBy(desc(extSearchEvents.searchedAt))
+        .limit(input.limit);
+
+      return rows.map(r => ({
+        id: r.id,
+        keyword: r.keyword,
+        searchedAt: r.searchedAt,
+        source: r.source,
+        totalItems: N(r.totalItems),
+        avgPrice: N(r.avgPrice),
+        avgRating: N(r.avgRating),
+        avgReview: N(r.avgReview),
+        totalReviewSum: N(r.totalReviewSum),
+        adCount: N(r.adCount),
+        rocketCount: N(r.rocketCount),
+        priceParseRate: N(r.priceParseRate),
+        ratingParseRate: N(r.ratingParseRate),
+        reviewParseRate: N(r.reviewParseRate),
+      }));
+    }),
+
+  // ===== 하이브리드 수집 대시보드 =====
+  hybridCollectionDashboard: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      const [kwStats] = await db.select({
+        total: sql<number>`COUNT(*)`,
+        active: sql<number>`SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)`,
+        withGrowth: sql<number>`SUM(CASE WHEN review_growth_7d > 0 THEN 1 ELSE 0 END)`,
+        avgComposite: sql<number>`AVG(composite_score)`,
+      })
+        .from(extWatchKeywords)
+        .where(eq(extWatchKeywords.userId, userId));
+
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 19).replace('T', ' ');
+
+      const [eventStats] = await db.select({
+        totalEvents: sql<number>`COUNT(*)`,
+        uniqueKeywords: sql<number>`COUNT(DISTINCT keyword)`,
+        avgParseQuality: sql<number>`AVG((price_parse_rate + rating_parse_rate + review_parse_rate) / 3)`,
+      })
+        .from(extSearchEvents)
+        .where(and(eq(extSearchEvents.userId, userId), gte(extSearchEvents.searchedAt, sevenDaysAgoStr)));
+
+      const dailyCounts = await db.select({
+        date: sql<string>`DATE(searched_at)`.as('date'),
+        eventCount: sql<number>`COUNT(*)`,
+        keywordCount: sql<number>`COUNT(DISTINCT keyword)`,
+      })
+        .from(extSearchEvents)
+        .where(and(eq(extSearchEvents.userId, userId), gte(extSearchEvents.searchedAt, sevenDaysAgoStr)))
+        .groupBy(sql`DATE(searched_at)`)
+        .orderBy(sql`DATE(searched_at)`);
+
+      const topGrowthKeywords = await db.select({
+        keyword: extWatchKeywords.keyword,
+        reviewGrowth7d: extWatchKeywords.reviewGrowth7d,
+        reviewGrowth1d: extWatchKeywords.reviewGrowth1d,
+        latestAvgPrice: extWatchKeywords.latestAvgPrice,
+        compositeScore: extWatchKeywords.compositeScore,
+      })
+        .from(extWatchKeywords)
+        .where(and(eq(extWatchKeywords.userId, userId), eq(extWatchKeywords.isActive, true)))
+        .orderBy(desc(extWatchKeywords.reviewGrowth7d))
+        .limit(5);
+
+      const [parseQuality] = await db.select({
+        avgPrice: sql<number>`AVG(price_parse_rate)`,
+        avgRating: sql<number>`AVG(rating_parse_rate)`,
+        avgReview: sql<number>`AVG(review_parse_rate)`,
+      })
+        .from(extSearchEvents)
+        .where(and(eq(extSearchEvents.userId, userId), gte(extSearchEvents.searchedAt, sevenDaysAgoStr)));
+
+      return {
+        watchKeywords: {
+          total: N(kwStats?.total),
+          active: N(kwStats?.active),
+          withGrowth: N(kwStats?.withGrowth),
+          avgCompositeScore: Math.round(N(kwStats?.avgComposite)),
+        },
+        searchEvents: {
+          totalLast7d: N(eventStats?.totalEvents),
+          uniqueKeywordsLast7d: N(eventStats?.uniqueKeywords),
+          avgParseQuality: Math.round(N(eventStats?.avgParseQuality)),
+        },
+        dailyCounts: dailyCounts.map(d => ({ date: d.date, events: N(d.eventCount), keywords: N(d.keywordCount) })),
+        topGrowthKeywords: topGrowthKeywords.map(k => ({
+          keyword: k.keyword,
+          reviewGrowth7d: N(k.reviewGrowth7d),
+          reviewGrowth1d: N(k.reviewGrowth1d),
+          latestAvgPrice: N(k.latestAvgPrice),
+          compositeScore: N(k.compositeScore),
+        })),
+        parseQuality: {
+          avgPriceRate: Math.round(N(parseQuality?.avgPrice)),
+          avgRatingRate: Math.round(N(parseQuality?.avgRating)),
+          avgReviewRate: Math.round(N(parseQuality?.avgReview)),
+        },
+      };
+    }),
+
+  // ===== 파싱 품질 진단 =====
+  diagnoseParseQuality: protectedProcedure
+    .input(z.object({ keyword: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [latestEvent] = await db.select()
+        .from(extSearchEvents)
+        .where(and(eq(extSearchEvents.userId, ctx.user!.id), eq(extSearchEvents.keyword, input.keyword)))
+        .orderBy(desc(extSearchEvents.searchedAt))
+        .limit(1);
+
+      if (!latestEvent || !latestEvent.itemsJson) {
+        return { keyword: input.keyword, hasData: false, diagnosis: null };
+      }
+
+      let items: any[] = [];
+      try { items = JSON.parse(latestEvent.itemsJson); } catch { items = []; }
+
+      return { keyword: input.keyword, hasData: true, searchedAt: latestEvent.searchedAt, diagnosis: diagnoseParsingQuality(items) };
+    }),
+
+  // ===================================================================
+  //  v6.4: 자동 순회 수집기 (Auto-Collect) API
+  // ===================================================================
+
+  // ===== 키워드 수집 완료 마킹 =====
+  markKeywordCollected: protectedProcedure
+    .input(z.object({ keyword: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const nowStr = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      await db.update(extWatchKeywords)
+        .set({
+          lastCollectedAt: nowStr,
+        })
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.keyword, input.keyword),
+        ));
+
+      return { success: true, keyword: input.keyword, collectedAt: nowStr };
+    }),
+
+  // ===== 키워드 수집 실패 기록 =====
+  markKeywordFailed: protectedProcedure
+    .input(z.object({
+      keyword: z.string().min(1),
+      errorCode: z.string().optional(),
+      errorMessage: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 실패 횟수가 많으면 우선순위 낮춤
+      const userId = ctx.user!.id;
+      const [kw] = await db.select({ id: extWatchKeywords.id, priority: extWatchKeywords.priority })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.keyword, input.keyword),
+        ))
+        .limit(1);
+
+      if (kw) {
+        const newPriority = Math.max(0, N(kw.priority) - 5);
+        await db.update(extWatchKeywords)
+          .set({ priority: newPriority })
+          .where(eq(extWatchKeywords.id, kw.id));
+      }
+
+      console.warn(`[autoCollect] 수집 실패: "${input.keyword}" — ${input.errorCode}: ${input.errorMessage}`);
+      return { success: true };
+    }),
+
+  // ===== 자동 수집 통계 =====
+  autoCollectStats: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const todayStr = now.toISOString().slice(0, 10);
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 19).replace('T', ' ');
+
+      // 오늘 수집된 키워드 수
+      const [todayStats] = await db.select({
+        collectedToday: sql<number>`COUNT(DISTINCT CASE WHEN DATE(last_collected_at) = ${todayStr} THEN keyword END)`,
+      })
+        .from(extWatchKeywords)
+        .where(eq(extWatchKeywords.userId, userId));
+
+      // 전체 활성 키워드 중 미수집
+      const [queueStats] = await db.select({
+        totalActive: sql<number>`COUNT(*)`,
+        neverCollected: sql<number>`SUM(CASE WHEN last_collected_at IS NULL THEN 1 ELSE 0 END)`,
+        stale: sql<number>`SUM(CASE WHEN last_collected_at < ${sevenDaysAgoStr} THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      // 7일간 검색 이벤트 소스 분포
+      const sourceDist = await db.select({
+        source: extSearchEvents.source,
+        count: sql<number>`COUNT(*)`,
+      })
+        .from(extSearchEvents)
+        .where(and(
+          eq(extSearchEvents.userId, userId),
+          gte(extSearchEvents.searchedAt, sevenDaysAgoStr),
+        ))
+        .groupBy(extSearchEvents.source);
+
+      return {
+        collectedToday: N(todayStats?.collectedToday),
+        totalActive: N(queueStats?.totalActive),
+        neverCollected: N(queueStats?.neverCollected),
+        staleKeywords: N(queueStats?.stale),
+        sourceDist: sourceDist.map(s => ({ source: s.source, count: N(s.count) })),
       };
     }),
 });

@@ -1,27 +1,24 @@
 /* ============================================================
-   Coupang Sourcing Helper — Product Detail Content Script v5.5.7
+   Coupang Sourcing Helper — Product Detail Content Script v6.5.0
    쿠팡 상품 상세 페이지에서 가격, 평점, 리뷰수, 구매수,
    판매자, 옵션 등 상세 데이터 파싱
 
+   v6.5.0 변경사항:
+   - START_PARSE_DETAIL requestId 기반 자동 수집 핸들러 추가
+   - 리뷰 샘플 5개 추출 (reviewSamples)
+   - 옵션 요약 (optionSummary) + 품절 감지
+   - brandName, manufacturer, origin 메타 추출
+   - confidence 점수
+   - JSON-LD / 구조화 데이터 보조 추출
+   - deliveryType (ROCKET/ROCKET_GLOBAL/FREE/일반)
+
    v5.5.5 변경사항:
    - 가격: meta[product:price:amount] + JSON-LD 우선 전략 추가 (가장 신뢰)
-   - 가격: 적립금/포인트/캐시/쿠폰/코팩/와우할인 영역 제외 강화
-   - 가격: "N원 이상 구매" 패턴 제외
-   - 가격: 빈도 기반 가격 선택 (가장 자주 등장하는 가격 우선)
-   - 리뷰: "N개 상품평" 텍스트 패턴을 1순위로 승격
-   - 리뷰: .count 범용 셀렉터 제거 (다른 카운트와 혼동 방지)
-   - 디버그: 가격 파싱 결과 콘솔 로그 추가
-
-   v5.5.3 변경사항:
-   - 쿠팡 React SPA에 대응하여 텍스트 패턴 기반 파싱으로 전면 재작성
-   - 가격: 할인가 우선, "N% N,NNN원" 패턴, 적립금/단위가격 제외
-   - 평점: aria-label, star width, 숫자 텍스트 다중 전략
-   - 리뷰수: "N개 상품평" 또는 "(N,NNN)" 패턴
-   - 구매수: "N명이 구매" 또는 "N만+ 구매" 패턴
+   - 적립금/포인트/캐시/쿠폰/코팩/와우할인 영역 제외 강화
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.6.0';
+  const VER = '6.5.0';
   console.log(`%c[SH Detail] v${VER} 상품 상세 파싱 스크립트 로드`, 'color:#6366f1;font-weight:bold;font-size:12px;');
   let debounceTimer = null;
   let lastSignature = '';
@@ -608,8 +605,152 @@
     };
   }
 
+  // ============================================================
+  //  v6.5: 확장 상세 데이터 추출
+  // ============================================================
+
+  function extractVendorItemId() {
+    const m = location.href.match(/[?&]vendorItemId=(\d+)/i) || location.href.match(/[?&]itemId=(\d+)/i);
+    return m ? m[1] : null;
+  }
+
+  function extractBrandName() {
+    for (const sel of ['.prod-brand-name', '[class*="brand-name"]', 'a[href*="brandName"]']) {
+      const el = document.querySelector(sel);
+      if (el) { const t = tx(el); if (t) return t; }
+    }
+    return null;
+  }
+
+  function extractDeliveryType() {
+    const bodyText = tx(document.body);
+    if (/로켓직구/.test(bodyText)) return 'ROCKET_GLOBAL';
+    if (/로켓와우/.test(bodyText)) return 'ROCKET_WOW';
+    if (/로켓배송/.test(bodyText)) return 'ROCKET';
+    if (/무료배송/.test(bodyText)) return 'FREE';
+    return 'STANDARD';
+  }
+
+  function extractMetaInfo() {
+    let manufacturer = null;
+    let origin = null;
+    const rows = document.querySelectorAll('.prod-specs tr, .prod-delivery-return-policy-table tr, .prod-attr-item, .prod-info-table tr');
+    for (const row of rows) {
+      const t = tx(row);
+      if (!manufacturer && /제조사|제조자/.test(t)) manufacturer = t.replace(/제조사|제조자/g, '').replace(/[:|]/g, '').trim();
+      if (!origin && /원산지/.test(t)) origin = t.replace(/원산지/g, '').replace(/[:|]/g, '').trim();
+    }
+    return { manufacturer, origin };
+  }
+
+  function extractReviewSamples(limit = 5) {
+    const articles = document.querySelectorAll(
+      'article.sdp-review__article__list, .sdp-review__article__list, [class*="review__article__list"], [class*="reviewArticle"]'
+    );
+    const results = [];
+    for (const article of [...articles].slice(0, limit)) {
+      const ratingEl = article.querySelector('.js_reviewArticleRatingValue, [class*="star-orange"], [class*="RatingValue"]');
+      const contentEl = article.querySelector('.sdp-review__article__list__review__content, .review-content, [class*="review__content"]');
+      const dateEl = article.querySelector('.sdp-review__article__list__info__product-info__reg-date, [class*="reg-date"]');
+
+      const ratingText = tx(ratingEl);
+      const ratingMatch = ratingText.match(/(\d+\.?\d*)/);
+      const ratingVal = ratingMatch ? parseFloat(ratingMatch[1]) : null;
+      const content = tx(contentEl);
+      const dateText = tx(dateEl) || null;
+      if (!content) continue;
+      results.push({ rating: ratingVal, text: content.substring(0, 500), dateText });
+    }
+    return results;
+  }
+
+  function extractOptionSummary() {
+    const optionNodes = document.querySelectorAll('.prod-option-item, .title-item, .dropdown-item, [class*="option-item"]');
+    const results = [];
+    for (const node of optionNodes) {
+      const raw = tx(node);
+      if (!raw) continue;
+      const soldOut = /품절/i.test(raw);
+      const priceMatch = raw.match(/([+-]?\s*[\d,]+)\s*원/);
+      const priceDelta = priceMatch ? nm(priceMatch[1]) : null;
+      const optionName = raw.replace(/([+-]?\s*[\d,]+)\s*원/g, '').replace(/품절/g, '').trim();
+      if (!optionName) continue;
+      results.push({ optionName, priceDelta, soldOut });
+    }
+    return results.slice(0, 50);
+  }
+
+  function extractJsonLd() {
+    try {
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const s of scripts) {
+        const data = JSON.parse(s.textContent);
+        if (data['@type'] === 'Product' || data.name) {
+          return {
+            name: data.name,
+            rating: data.aggregateRating?.ratingValue ? parseFloat(data.aggregateRating.ratingValue) : null,
+            reviewCount: data.aggregateRating?.reviewCount ? parseInt(data.aggregateRating.reviewCount, 10) : null,
+            price: data.offers?.price ? parseInt(data.offers.price, 10) : null,
+            brand: data.brand?.name || null,
+          };
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function buildDetailConfidence(result) {
+    let c = 0;
+    if (result.coupangProductId) c += 20;
+    if (result.vendorItemId) c += 10;
+    if (result.title) c += 20;
+    if (result.price > 0) c += 10;
+    if (result.rating > 0) c += 10;
+    if (result.reviewCount > 0) c += 10;
+    if (result.sellerName) c += 5;
+    if (result.deliveryType && result.deliveryType !== 'STANDARD') c += 5;
+    if (result.optionSummary?.length) c += 5;
+    if (result.reviewSamples?.length) c += 5;
+    return c;
+  }
+
+  function parseDetailPageEnhanced() {
+    const base = parseDetailPage();
+    if (!base) return null;
+
+    const vendorItemId = extractVendorItemId();
+    const brandName = extractBrandName();
+    const deliveryType = extractDeliveryType();
+    const { manufacturer, origin } = extractMetaInfo();
+    const reviewSamples = extractReviewSamples(5);
+    const optionSummary = extractOptionSummary();
+    const jsonLd = extractJsonLd();
+
+    // JSON-LD 보조 보정 (DOM 값이 없을 때)
+    if (jsonLd) {
+      if (base.rating === 0 && jsonLd.rating > 0 && jsonLd.rating <= 5) base.rating = jsonLd.rating;
+      if (base.reviewCount === 0 && jsonLd.reviewCount > 0) base.reviewCount = jsonLd.reviewCount;
+      if (base.price === 0 && jsonLd.price > 0) base.price = jsonLd.price;
+    }
+
+    const enhanced = {
+      ...base,
+      vendorItemId,
+      brandName,
+      deliveryType,
+      manufacturer,
+      origin,
+      reviewSamples,
+      optionSummary,
+      soldOut: /품절|일시품절|sold out/i.test(tx(document.body)),
+      collectedAt: new Date().toISOString(),
+    };
+    enhanced.confidence = buildDetailConfidence(enhanced);
+    return enhanced;
+  }
+
   function publishDetail() {
-    const detail = parseDetailPage();
+    const detail = parseDetailPageEnhanced();
     if (!detail || !detail.coupangProductId) return;
 
     const signature = JSON.stringify({
@@ -622,7 +763,7 @@
     if (signature === lastSignature) return;
     lastSignature = signature;
 
-    console.log(`%c[SH Detail v${VER}] ✅ 상세 데이터 전송`, 'color:#16a34a;font-weight:bold;');
+    console.log(`%c[SH Detail v${VER}] ✅ 상세 데이터 전송 (confidence: ${detail.confidence})`, 'color:#16a34a;font-weight:bold;');
 
     chrome.runtime.sendMessage({
       type: 'PRODUCT_DETAIL_PARSED',
@@ -652,4 +793,77 @@
   setTimeout(schedulePublish, 1500);
   setTimeout(schedulePublish, 3000);
   setTimeout(schedulePublish, 5000);
+
+  // ============================================================
+  //  v6.5: 자동 순회 수집기 — START_PARSE_DETAIL 핸들러
+  //  background.js가 상세 페이지로 이동 후 파싱 요청
+  // ============================================================
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type !== 'START_PARSE_DETAIL') return false;
+
+    const requestId = message.requestId;
+    console.log(`%c[SH-AC Detail] 파싱 요청 수신 (requestId=${requestId})`, 'color:#8b5cf6;font-weight:bold;');
+
+    (async function autoCollectDetailParse() {
+      try {
+        // 상세 페이지 렌더링 대기 (최대 15초)
+        const maxWait = 15000;
+        const start = Date.now();
+        let found = false;
+        while (Date.now() - start < maxWait) {
+          if (document.querySelector('h1.prod-buy-header__title, .prod-buy-header__title, [class*="prod-buy-header"]')) {
+            found = true; break;
+          }
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!found) {
+          chrome.runtime.sendMessage({
+            type: 'DETAIL_PARSE_FAILED', requestId,
+            productId: getProductId(), productUrl: location.href,
+            error: { code: 'NO_DETAIL_CONTENT', message: '상세 페이지 콘텐츠를 찾지 못했습니다.' },
+          });
+          sendResponse({ ok: false });
+          return;
+        }
+
+        // lazy render 안정화
+        await new Promise(r => setTimeout(r, 2000));
+
+        const result = parseDetailPageEnhanced();
+        if (!result || !result.coupangProductId) {
+          chrome.runtime.sendMessage({
+            type: 'DETAIL_PARSE_FAILED', requestId,
+            productId: getProductId(), productUrl: location.href,
+            error: { code: 'EMPTY_DETAIL', message: '유효한 상세 데이터가 없습니다.' },
+          });
+          sendResponse({ ok: false });
+          return;
+        }
+
+        console.log(`%c[SH-AC Detail] ✅ 상세 파싱 완료 (confidence: ${result.confidence})`, 'color:#16a34a;font-weight:bold;');
+
+        // 기존 PRODUCT_DETAIL_PARSED도 전송 (하위호환)
+        chrome.runtime.sendMessage({ type: 'PRODUCT_DETAIL_PARSED', detail: result }).catch(() => {});
+
+        // 자동 수집 전용 응답
+        chrome.runtime.sendMessage({
+          type: 'DETAIL_PARSE_SUCCESS', requestId,
+          productId: result.coupangProductId, productUrl: location.href,
+          result,
+        });
+
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.error('[SH-AC Detail] 파싱 오류:', err);
+        chrome.runtime.sendMessage({
+          type: 'DETAIL_PARSE_FAILED', requestId,
+          productId: getProductId(), productUrl: location.href,
+          error: { code: 'UNKNOWN', message: err?.message || String(err) },
+        });
+        sendResponse({ ok: false });
+      }
+    })();
+
+    return true; // async response
+  });
 })();

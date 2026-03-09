@@ -1,7 +1,8 @@
 /* ============================================================
-   Coupang Sourcing Helper — Server API Client v5.1
+   Coupang Sourcing Helper — Server API Client v6.5
    lumiriz.kr 서버와 통신하는 API 클라이언트
-   + AI 소싱 코치 분석 엔드포인트
+   + AI 소싱 코치 + 하이브리드 수집 + 자동 순회 수집
+   + 상세 페이지 확장 파싱 데이터 저장
    ============================================================ */
 
 const API_BASE = 'https://lumiriz.kr/api/trpc';
@@ -155,6 +156,94 @@ class ApiClient {
   // ===== AI 사전매칭 v5.1 (상품명 → 1688 검색어 자동 생성) =====
   async preMatch(data) {
     return this._call('sourcingCoach.preMatch', data, 'mutation');
+  }
+
+  // ===== 판매량 추정 시스템 v6.0 =====
+  async getCategoryReviewRates() {
+    return this._call('extension.getCategoryReviewRates', undefined, 'query');
+  }
+
+  async updateCategoryReviewRate(data) {
+    return this._call('extension.updateCategoryReviewRate', data, 'mutation');
+  }
+
+  async estimateSingleProduct(data) {
+    return this._call('extension.estimateSingleProduct', data, 'mutation');
+  }
+
+  async runSalesEstimateBatch(data = {}) {
+    return this._call('extension.runSalesEstimateBatch', data, 'mutation');
+  }
+
+  async getProductSalesEstimates(opts) {
+    return this._call('extension.getProductSalesEstimates', opts, 'query');
+  }
+
+  async salesEstimateDashboard() {
+    return this._call('extension.salesEstimateDashboard', undefined, 'query');
+  }
+
+  // ===== 하이브리드 데이터 수집 시스템 v6.2 =====
+  async saveSearchEvent(data) {
+    return this._call('extension.saveSearchEvent', data, 'mutation');
+  }
+
+  async listWatchKeywords(opts = {}) {
+    return this._call('extension.listWatchKeywords', opts, 'query');
+  }
+
+  async updateWatchKeyword(data) {
+    return this._call('extension.updateWatchKeyword', data, 'mutation');
+  }
+
+  async deleteWatchKeyword(id) {
+    return this._call('extension.deleteWatchKeyword', { id }, 'mutation');
+  }
+
+  async getKeywordDailyStatusHistory(opts) {
+    return this._call('extension.getKeywordDailyStatusHistory', opts, 'query');
+  }
+
+  async runDailyBatchCollection(opts = {}) {
+    return this._call('extension.runDailyBatchCollection', opts, 'mutation');
+  }
+
+  async getBatchKeywordSelection(opts = {}) {
+    return this._call('extension.getBatchKeywordSelection', opts, 'query');
+  }
+
+  async listSearchEvents(opts = {}) {
+    return this._call('extension.listSearchEvents', opts, 'query');
+  }
+
+  async hybridCollectionDashboard() {
+    return this._call('extension.hybridCollectionDashboard', undefined, 'query');
+  }
+
+  async diagnoseParseQuality(keyword) {
+    return this._call('extension.diagnoseParseQuality', { keyword }, 'query');
+  }
+
+  // ===== v6.4: 자동 순회 수집기 (Auto-Collect) =====
+  async markKeywordCollected(data) {
+    return this._call('extension.markKeywordCollected', data, 'mutation');
+  }
+
+  async markKeywordFailed(data) {
+    return this._call('extension.markKeywordFailed', data, 'mutation');
+  }
+
+  async getAutoCollectStats() {
+    return this._call('extension.autoCollectStats', undefined, 'query');
+  }
+
+  // ===== v6.5: 상세 페이지 확장 파싱 데이터 =====
+  async saveDetailSnapshot(data) {
+    return this._call('extension.saveDetailSnapshot', data, 'mutation');
+  }
+
+  async getDetailHistory(opts) {
+    return this._call('extension.getDetailHistory', opts, 'query');
   }
 
   // ===== 내부 통신 =====

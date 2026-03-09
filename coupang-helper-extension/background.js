@@ -1,7 +1,14 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v5.3
+   Coupang Sourcing Helper — Background Service Worker v6.6
+   v6.6: 검색수요 분석 + 자동배치 토글 (쿠팡 탭 조건) + 분할 배치
+         + 키워드 선택 배치 + 배치 중지 기능
+   v6.5: 상세페이지 정밀파싱 연동 — saveDetailSnapshot 서버 저장,
+         content-detail.js v6.5 확장 필드 (vendorItemId, brandName,
+         manufacturer, origin, deliveryType, confidence, reviewSamples,
+         optionSummary, soldOut) 자동 수집 지원
+   v6.4: 자동 순회 수집기 — 50~90초 딜레이, 상세페이지 상위3개 보강
+         background는 수집 오케스트레이터 + 메시지 중계 + 데이터 저장
    v5.3: content.js가 자체 URL 감지 (history 오버라이드 없음)
-         background는 메시지 중계 + 데이터 저장에만 집중
    ============================================================ */
 
 importScripts('api-client.js');
@@ -11,6 +18,10 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   // 순위 추적 알람 (매 6시간마다)
   chrome.alarms.create('rankTracking', { periodInMinutes: 360 });
+  // 판매량 추정 배치 알람 (매 12시간마다)
+  chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
+  // 하이브리드 일일 배치 알람 (매 24시간마다)
+  chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -19,7 +30,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v5.3.0 — reloaded coupang tabs`);
+    console.log(`[SH] Extension ${details.reason}d — v6.5.0 — reloaded coupang tabs`);
   }
 });
 
@@ -36,6 +47,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'rankTracking') {
     await autoTrackRankings();
+  }
+  if (alarm.name === 'salesEstimateBatch') {
+    await autoRunSalesEstimate();
+  }
+  if (alarm.name === 'dailyBatchCollection') {
+    await autoRunDailyBatch();
   }
 });
 
@@ -516,6 +533,243 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       return true;
     }
+
+    // ===== v6.0: 판매량 추정 시스템 (Sales Estimation) =====
+    case 'SALES_GET_CATEGORY_RATES': {
+      apiClient.getCategoryReviewRates().then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'SALES_UPDATE_CATEGORY_RATE': {
+      apiClient.updateCategoryReviewRate(message.data).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'SALES_ESTIMATE_SINGLE': {
+      apiClient.estimateSingleProduct(message.data).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'SALES_ESTIMATE_BATCH': {
+      apiClient.runSalesEstimateBatch(message.data || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'SALES_GET_PRODUCT_ESTIMATES': {
+      apiClient.getProductSalesEstimates(message.opts || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'SALES_DASHBOARD': {
+      apiClient.salesEstimateDashboard().then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    // ===== v6.2: 하이브리드 데이터 수집 시스템 (Hybrid Data Collection) =====
+    case 'SAVE_SEARCH_EVENT': {
+      (async () => {
+        try {
+          const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+          if (!serverLoggedIn || !message.keyword) {
+            sendResponse({ ok: false, error: 'Not logged in or no keyword' });
+            return;
+          }
+          const resp = await apiClient.saveSearchEvent({
+            keyword: message.keyword,
+            source: message.source || 'user_search',
+            pageUrl: message.pageUrl || '',
+            totalItems: message.totalItems || 0,
+            items: (message.items || []).slice(0, 36),
+            avgPrice: message.avgPrice || 0,
+            avgRating: message.avgRating || 0,
+            avgReview: message.avgReview || 0,
+            totalReviewSum: message.totalReviewSum || 0,
+            adCount: message.adCount || 0,
+            rocketCount: message.rocketCount || 0,
+            highReviewCount: message.highReviewCount || 0,
+            priceParseRate: message.priceParseRate || 0,
+            ratingParseRate: message.ratingParseRate || 0,
+            reviewParseRate: message.reviewParseRate || 0,
+          });
+          console.log(`[SH] 검색 이벤트 저장: ${message.keyword} (${message.totalItems}개)`);
+          sendResponse({ ok: true, data: resp?.result?.data });
+        } catch (e) {
+          console.error('[SH] 검색 이벤트 저장 실패:', e.message);
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
+    case 'HYBRID_LIST_WATCH_KEYWORDS': {
+      apiClient.listWatchKeywords(message.opts || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_UPDATE_WATCH_KEYWORD': {
+      apiClient.updateWatchKeyword(message.data).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_DELETE_WATCH_KEYWORD': {
+      apiClient.deleteWatchKeyword(message.id).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_KEYWORD_DAILY_STATUS': {
+      apiClient.getKeywordDailyStatusHistory(message.opts || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_RUN_DAILY_BATCH': {
+      // 분할 배치 및 선택 키워드 지원
+      const batchOpts = {
+        limit: message.limit || undefined,
+        offset: message.offset || undefined,
+        keywords: message.keywords || undefined,  // 유저가 선택한 키워드 목록
+      };
+      apiClient.runDailyBatchCollection(batchOpts).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_BATCH_SELECTION': {
+      apiClient.getBatchKeywordSelection(message.opts || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_LIST_SEARCH_EVENTS': {
+      apiClient.listSearchEvents(message.opts || {}).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_DASHBOARD': {
+      apiClient.hybridCollectionDashboard().then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'HYBRID_DIAGNOSE_PARSE': {
+      apiClient.diagnoseParseQuality(message.keyword).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    // ===== v6.4: 자동 순회 수집기 (Auto-Collect) =====
+    case 'START_AUTO_COLLECT': {
+      startAutoCollect(message.payload || {}).then((result) => {
+        sendResponse(result);
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'STOP_AUTO_COLLECT': {
+      stopAutoCollect();
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'PAUSE_AUTO_COLLECT': {
+      pauseAutoCollect();
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'RESUME_AUTO_COLLECT': {
+      startAutoCollect().then((result) => {
+        sendResponse(result);
+      });
+      return true;
+    }
+
+    case 'GET_COLLECTOR_STATE': {
+      sendResponse({ ok: true, data: getCollectorState() });
+      return true;
+    }
+
+    // content.js → background: 자동 수집 파싱 완료
+    case 'SEARCH_PARSE_SUCCESS': {
+      handleAutoCollectSuccess(message).then(() => {
+        sendResponse({ ok: true });
+      }).catch(() => {
+        sendResponse({ ok: false });
+      });
+      return true;
+    }
+
+    // content.js → background: 자동 수집 파싱 실패
+    case 'SEARCH_PARSE_FAILED': {
+      handleAutoCollectFailed(
+        message.requestId,
+        message.keyword || '',
+        message.error?.code || 'UNKNOWN',
+        message.error?.message || ''
+      ).then(() => {
+        sendResponse({ ok: true });
+      }).catch(() => {
+        sendResponse({ ok: false });
+      });
+      return true;
+    }
   }
 
   return false;
@@ -590,23 +844,55 @@ async function syncProductDetail(detail) {
   const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
   if (!serverLoggedIn) return;
   try {
-    await apiClient.saveProductDetail({
-      coupangProductId: detail.coupangProductId,
-      title: detail.title,
-      price: detail.price,
-      originalPrice: detail.originalPrice || 0,
-      discountRate: detail.discountRate || 0,
-      rating: detail.rating,
-      reviewCount: detail.reviewCount,
-      purchaseCount: detail.purchaseCount || undefined,
-      sellerName: detail.sellerName || undefined,
-      isRocket: detail.isRocket || false,
-      isFreeShipping: detail.isFreeShipping || false,
-      categoryPath: detail.categoryPath || undefined,
-      optionCount: detail.optionCount || 0,
-      imageUrl: detail.imageUrl || undefined,
-      detailJson: detail.detailJson || undefined,
-    });
+    // v6.5: 확장 필드가 있으면 saveDetailSnapshot 사용, 없으면 기존 saveProductDetail
+    if (detail.confidence !== undefined || detail.vendorItemId || detail.brandName || detail.reviewSamples) {
+      await apiClient.saveDetailSnapshot({
+        coupangProductId: detail.coupangProductId,
+        vendorItemId: detail.vendorItemId || null,
+        title: detail.title || null,
+        price: detail.price || 0,
+        originalPrice: detail.originalPrice || 0,
+        discountRate: detail.discountRate || 0,
+        rating: detail.rating || 0,
+        reviewCount: detail.reviewCount || 0,
+        purchaseCount: detail.purchaseCount || null,
+        sellerName: detail.sellerName || null,
+        brandName: detail.brandName || null,
+        manufacturer: detail.manufacturer || null,
+        origin: detail.origin || null,
+        deliveryType: detail.deliveryType || 'STANDARD',
+        isRocket: detail.isRocket || false,
+        isFreeShipping: detail.isFreeShipping || false,
+        soldOut: detail.soldOut || false,
+        categoryPath: detail.categoryPath || null,
+        optionCount: detail.optionCount || 0,
+        imageUrl: detail.imageUrl || null,
+        confidence: detail.confidence || 0,
+        reviewSamples: detail.reviewSamples || [],
+        optionSummary: detail.optionSummary || [],
+        badgeText: detail.badgeText || null,
+        source: 'user_browse',
+        detailJson: detail.detailJson || {},
+      });
+    } else {
+      await apiClient.saveProductDetail({
+        coupangProductId: detail.coupangProductId,
+        title: detail.title,
+        price: detail.price,
+        originalPrice: detail.originalPrice || 0,
+        discountRate: detail.discountRate || 0,
+        rating: detail.rating,
+        reviewCount: detail.reviewCount,
+        purchaseCount: detail.purchaseCount || undefined,
+        sellerName: detail.sellerName || undefined,
+        isRocket: detail.isRocket || false,
+        isFreeShipping: detail.isFreeShipping || false,
+        categoryPath: detail.categoryPath || undefined,
+        optionCount: detail.optionCount || 0,
+        imageUrl: detail.imageUrl || undefined,
+        detailJson: detail.detailJson || undefined,
+      });
+    }
   } catch (e) { /* 실패 무시 */ }
 }
 
@@ -933,3 +1219,628 @@ async function syncWingDataToServer(data) {
     });
   } catch (e) { /* 실패 무시 */ }
 }
+
+// ============================================================
+//  판매량 추정 자동 배치 (알람에서 호출)
+// ============================================================
+
+async function autoRunSalesEstimate() {
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) return;
+
+  try {
+    const resp = await apiClient.runSalesEstimateBatch({});
+    const data = resp?.result?.data;
+    if (data && data.processed > 0) {
+      console.log(`[SH] 판매량 추정 배치 완료: ${data.processed}개 처리, ${data.skipped}개 스킵, ${data.errors}개 오류`);
+      
+      // 급등 상품이 있으면 알림
+      const surgeItems = (data.results || []).filter(r => r.grade === 'VERY_HIGH');
+      if (surgeItems.length > 0) {
+        chrome.notifications.create(`sales-surge-${Date.now()}`, {
+          type: 'basic',
+          iconUrl: 'icons/icon48.png',
+          title: '🔥 판매 급등 상품 감지!',
+          message: `${surgeItems.length}개 상품의 판매량이 급증하고 있습니다. (${surgeItems[0]?.productName?.substring(0, 30) || ''}...)`,
+          priority: 2,
+        });
+      }
+
+      await chrome.storage.local.set({ lastSalesEstimateRun: new Date().toISOString() });
+    }
+  } catch (e) {
+    console.error('[SH] 판매량 추정 배치 실패:', e.message);
+  }
+}
+
+// ============================================================
+//  하이브리드 일일 배치 (알람에서 호출)
+// ============================================================
+
+async function autoRunDailyBatch() {
+  // 1) 서버 로그인 체크
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    console.log('[SH] 자동배치 스킵: 서버 미로그인');
+    return;
+  }
+
+  // 2) 배치 토글 체크 — 사용자가 OFF하면 자동 실행 안 함
+  const { batchEnabled } = await chrome.storage.local.get('batchEnabled');
+  if (!batchEnabled) {
+    console.log('[SH] 자동배치 스킵: 배치 토글 OFF');
+    return;
+  }
+
+  // 3) 쿠팡 탭이 열려있는지 확인 — 쿠팡 검색창을 열었을 때만 실행
+  const coupangTabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+  if (!coupangTabs || coupangTabs.length === 0) {
+    console.log('[SH] 자동배치 스킵: 쿠팡 탭 미열림');
+    return;
+  }
+
+  try {
+    // 배치 크기 및 오프셋 설정 (분할 배치 지원)
+    const { batchSize, batchOffset } = await chrome.storage.local.get(['batchSize', 'batchOffset']);
+    const size = parseInt(batchSize) || 10;
+    const offset = parseInt(batchOffset) || 0;
+
+    const resp = await apiClient.runDailyBatchCollection({ limit: size, offset: offset });
+    const data = resp?.result?.data;
+    if (data && data.processed > 0) {
+      console.log(`[SH] 일일 배치 완료: ${data.processed}개 처리, ${data.updated}개 업데이트, ${data.errors}개 오류`);
+
+      // 다음 분할 배치를 위한 오프셋 업데이트
+      if (data.hasMore) {
+        await chrome.storage.local.set({ batchOffset: offset + size });
+        console.log(`[SH] 다음 배치 오프셋: ${offset + size} (잔여 키워드 있음)`);
+      } else {
+        await chrome.storage.local.set({ batchOffset: 0 });
+        console.log('[SH] 모든 키워드 배치 완료, 오프셋 리셋');
+      }
+
+      // 리뷰 급증 키워드 알림
+      const growthItems = (data.results || []).filter(r => r.reviewGrowth >= 50);
+      if (growthItems.length > 0) {
+        chrome.notifications.create(`review-growth-${Date.now()}`, {
+          type: 'basic',
+          iconUrl: 'icons/icon48.png',
+          title: '📈 리뷰 급증 키워드 감지!',
+          message: `${growthItems.length}개 키워드에서 리뷰가 급증중: "${growthItems[0]?.keyword}" (+${growthItems[0]?.reviewGrowth})`,
+          priority: 2,
+        });
+      }
+
+      await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString() });
+    }
+  } catch (e) {
+    console.error('[SH] 일일 배치 실패:', e.message);
+  }
+}
+
+
+// ============================================================
+//  v6.4: 브라우저 기반 자동 순회 수집기 (Auto-Collect Orchestrator)
+//  "사용자 브라우저에서 천천히 도는 제한형 수집 큐"
+//
+//  상태머신:
+//    IDLE → RUNNING → WAITING_PAGE → PARSING → WAITING_NEXT → (loop)
+//    어디서든 → PAUSED, STOPPED
+//
+//  동작 흐름:
+//    1. 사이드패널에서 "자동 수집 시작"
+//    2. 서버에서 watch_keywords 큐 가져옴 (우선순위순)
+//    3. 쿠팡 탭 찾기/생성
+//    4. 키워드별로 검색 URL로 이동 → DOM 파싱 → 저장 → 다음
+//    5. 키워드 간 랜덤 20~90초 대기
+//
+//  안전장치:
+//    - 1회 실행 시 최대 50개
+//    - 20~90초 랜덤 딜레이
+//    - 페이지 로드 후 5~15초 추가 대기
+//    - 타임아웃 30초 (파싱 응답 없으면 실패 처리)
+//    - 실패 시 1회만 재시도
+//    - 중복 수집 방지 (오늘 이미 수집한 키워드 스킵)
+// ============================================================
+
+const collector = {
+  status: 'IDLE', // IDLE | RUNNING | WAITING_PAGE | PARSING | WAITING_NEXT | COLLECTING_DETAIL | PAUSED | STOPPED
+  running: false,
+  paused: false,
+  queue: [],
+  current: null,          // { requestId, keyword, retryCount, startedAt }
+  currentTabId: null,
+  successCount: 0,
+  failCount: 0,
+  skipCount: 0,
+  totalQueued: 0,
+  lastError: null,
+  startedAt: null,
+  _timeoutId: null,       // 파싱 타임아웃
+  _delayTimeoutId: null,  // 딜레이 타이머
+};
+
+// ---- 유틸 ----
+// 기본 딜레이: 50~90초 (약 1분 간격, 약간 랜덤)
+function randomDelay(min = 50000, max = 90000) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function collectorSleep(ms) {
+  return new Promise((resolve) => {
+    collector._delayTimeoutId = setTimeout(resolve, ms);
+  });
+}
+
+function generateRequestId() {
+  return `ac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getCollectorState() {
+  return {
+    status: collector.status,
+    running: collector.running,
+    paused: collector.paused,
+    queueLength: collector.queue.length,
+    currentKeyword: collector.current?.keyword || null,
+    currentRequestId: collector.current?.requestId || null,
+    currentTabId: collector.currentTabId || null,
+    successCount: collector.successCount,
+    failCount: collector.failCount,
+    skipCount: collector.skipCount,
+    totalQueued: collector.totalQueued,
+    lastError: collector.lastError,
+    startedAt: collector.startedAt,
+    collectDetail: collector.collectDetail || false,
+    progress: collector.totalQueued > 0
+      ? Math.round(((collector.successCount + collector.failCount + collector.skipCount) / collector.totalQueued) * 100)
+      : 0,
+  };
+}
+
+// ---- 자동 수집 시작 ----
+async function startAutoCollect(options = {}) {
+  if (collector.running && !collector.paused) {
+    console.warn('[SH-AC] 이미 실행 중');
+    return { ok: false, error: 'Already running' };
+  }
+
+  // 일시정지에서 재개
+  if (collector.paused) {
+    collector.paused = false;
+    collector.status = 'RUNNING';
+    console.log('[SH-AC] 수집 재개');
+    runNextKeyword();
+    return { ok: true, resumed: true };
+  }
+
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    return { ok: false, error: '서버 로그인 필요' };
+  }
+
+  const limit = Math.min(options.limit || 30, 200); // 최대 200개 (하루 3시간이면 약 180개)
+  const mode = options.mode || 'WATCH_KEYWORDS';  // WATCH_KEYWORDS | RECENT_KEYWORDS
+  const collectDetail = options.collectDetail !== false; // 상위 3개 상세 수집 (기본 true)
+
+  console.log(`[SH-AC] 자동 수집 시작 (limit=${limit}, mode=${mode})`);
+
+  // 큐 로드: 서버에서 우선순위 기반 키워드 가져오기
+  try {
+    const resp = await apiClient.getBatchKeywordSelection({ limit });
+    const keywords = resp?.result?.data || [];
+    if (!keywords.length) {
+      console.log('[SH-AC] 수집할 키워드가 없습니다.');
+      return { ok: false, error: '수집할 키워드가 없습니다 (watch_keywords 등록 필요)' };
+    }
+
+    collector.queue = keywords.map(k => ({
+      keyword: k.keyword,
+      priority: k.priority || 50,
+      selectionReason: k.selectionReason || '',
+      retryCount: 0,
+    }));
+    collector.collectDetail = collectDetail;
+    collector.totalQueued = collector.queue.length;
+    collector.running = true;
+    collector.paused = false;
+    collector.status = 'RUNNING';
+    collector.successCount = 0;
+    collector.failCount = 0;
+    collector.skipCount = 0;
+    collector.lastError = null;
+    collector.startedAt = new Date().toISOString();
+
+    console.log(`[SH-AC] 큐 로드 완료: ${collector.queue.length}개 키워드`);
+    collector.queue.forEach((k, i) => {
+      console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority}, 사유:${k.selectionReason})`);
+    });
+
+    await runNextKeyword();
+    return { ok: true, queueLength: collector.queue.length };
+  } catch (e) {
+    console.error('[SH-AC] 큐 로드 실패:', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// ---- 수집 중단 ----
+function stopAutoCollect() {
+  console.log('[SH-AC] 수집 중단');
+  collector.running = false;
+  collector.paused = false;
+  collector.status = 'STOPPED';
+  collector.current = null;
+  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
+  if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
+}
+
+// ---- 일시정지 ----
+function pauseAutoCollect() {
+  if (!collector.running) return;
+  console.log('[SH-AC] 수집 일시정지');
+  collector.paused = true;
+  collector.status = 'PAUSED';
+  if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
+}
+
+// ---- 쿠팡 탭 확보 ----
+async function ensureCoupangTab() {
+  // 기존 탭 확인
+  if (collector.currentTabId) {
+    try {
+      const tab = await chrome.tabs.get(collector.currentTabId);
+      if (tab?.id && tab.url?.includes('coupang.com')) return tab.id;
+    } catch (_) { /* 탭이 닫혔을 수 있음 */ }
+  }
+
+  // 열려있는 쿠팡 탭 찾기
+  const tabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+  if (tabs.length > 0) {
+    collector.currentTabId = tabs[0].id;
+    return tabs[0].id;
+  }
+
+  // 새 탭 생성 (비활성)
+  const tab = await chrome.tabs.create({
+    url: 'https://www.coupang.com/',
+    active: false,
+  });
+  collector.currentTabId = tab.id;
+  // 페이지 로드 대기
+  await collectorSleep(3000);
+  return tab.id;
+}
+
+// ---- 다음 키워드 실행 ----
+async function runNextKeyword() {
+  if (!collector.running || collector.paused) return;
+
+  const next = collector.queue.shift();
+  if (!next) {
+    // 큐 완료
+    collector.running = false;
+    collector.status = 'IDLE';
+    collector.current = null;
+    console.log(`[SH-AC] ✅ 자동 수집 완료: 성공 ${collector.successCount}, 실패 ${collector.failCount}, 스킵 ${collector.skipCount}`);
+
+    // 완료 알림
+    chrome.notifications.create(`auto-collect-done-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: '📊 자동 수집 완료',
+      message: `${collector.successCount}개 키워드 수집 성공 (실패 ${collector.failCount}, 스킵 ${collector.skipCount})`,
+      priority: 1,
+    });
+
+    // 수집 후 일일 배치 실행 (집계/분석)
+    try { await apiClient.runDailyBatchCollection(); } catch (_) {}
+    return;
+  }
+
+  const requestId = generateRequestId();
+  collector.current = {
+    requestId,
+    keyword: next.keyword,
+    retryCount: next.retryCount || 0,
+    startedAt: Date.now(),
+  };
+
+  console.log(`[SH-AC] 🔍 키워드 수집 시작: "${next.keyword}" (${collector.successCount + collector.failCount + collector.skipCount + 1}/${collector.totalQueued})`);
+
+  try {
+    const tabId = await ensureCoupangTab();
+    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(next.keyword)}`;
+
+    collector.status = 'WAITING_PAGE';
+
+    // 탭 이동
+    await chrome.tabs.update(tabId, { url });
+
+    // 파싱 타임아웃 설정 (30초)
+    collector._timeoutId = setTimeout(() => {
+      if (collector.current?.requestId === requestId) {
+        console.warn(`[SH-AC] ⏰ 파싱 타임아웃: "${next.keyword}"`);
+        handleAutoCollectFailed(requestId, next.keyword, 'TIMEOUT', '파싱 응답 없음 (30초 초과)');
+      }
+    }, 30000);
+
+  } catch (e) {
+    console.error(`[SH-AC] 탭 이동 실패: "${next.keyword}"`, e.message);
+    handleAutoCollectFailed(requestId, next.keyword, 'TAB_ERROR', e.message);
+  }
+}
+
+// ---- tabs.onUpdated: 페이지 로드 완료 시 파싱 트리거 ----
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!collector.running || !collector.current) return;
+  if (tabId !== collector.currentTabId) return;
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url?.includes('/np/search')) return;
+
+  // 페이지 로드 후 추가 대기 (2~5초) — DOM 렌더링 안정화
+  const extraDelay = Math.floor(Math.random() * 3000) + 2000;
+  console.log(`[SH-AC] 페이지 로드 완료, ${Math.round(extraDelay/1000)}초 후 파싱 요청...`);
+
+  collector.status = 'PARSING';
+
+  setTimeout(() => {
+    if (!collector.running || !collector.current) return;
+
+    chrome.tabs.sendMessage(tabId, {
+      type: 'START_PARSE_SEARCH',
+      requestId: collector.current.requestId,
+      keyword: collector.current.keyword,
+      pageUrl: tab.url,
+      isAutoCollect: true,
+    }).catch(err => {
+      console.error('[SH-AC] content.js 메시지 전송 실패:', err.message);
+      // content script가 아직 로드되지 않았을 수 있음 — 재시도
+      setTimeout(() => {
+        if (!collector.running || !collector.current) return;
+        chrome.tabs.sendMessage(tabId, {
+          type: 'START_PARSE_SEARCH',
+          requestId: collector.current.requestId,
+          keyword: collector.current.keyword,
+          pageUrl: tab.url,
+          isAutoCollect: true,
+        }).catch(() => {
+          handleAutoCollectFailed(
+            collector.current?.requestId,
+            collector.current?.keyword || '',
+            'CONTENT_SCRIPT_ERROR',
+            'content.js에 메시지 전송 불가'
+          );
+        });
+      }, 3000);
+    });
+  }, extraDelay);
+});
+
+// ---- 자동 수집 성공 처리 ----
+async function handleAutoCollectSuccess(message) {
+  if (!collector.current) return;
+  if (message.requestId !== collector.current.requestId) return;
+
+  // 타임아웃 해제
+  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
+
+  const keyword = collector.current.keyword;
+  console.log(`[SH-AC] ✅ "${keyword}" 수집 성공 (${message.itemCount || 0}개 상품)`);
+
+  collector.successCount++;
+  collector.current = null;
+
+  // 서버에 수집 완료 마킹
+  try {
+    await apiClient.markKeywordCollected({ keyword });
+  } catch (_) {}
+
+  // 검색 이벤트도 저장 (기존 하이브리드 수집과 통합)
+  if (message.searchEventData) {
+    try {
+      await apiClient.saveSearchEvent({
+        ...message.searchEventData,
+        source: 'auto_collect',
+      });
+    } catch (_) {}
+  }
+
+  // 상세 페이지 상위 3개 보강 수집
+  if (collector.collectDetail && message.result?.items?.length) {
+    const topItems = message.result.items
+      .filter(i => i.productId && !i.isAd)
+      .slice(0, 3);
+
+    if (topItems.length > 0) {
+      console.log(`[SH-AC] 📋 상위 ${topItems.length}개 상세 수집 시작...`);
+      collector.status = 'COLLECTING_DETAIL';
+      for (const item of topItems) {
+        if (!collector.running) break;
+        try {
+          await collectDetailForItem(item, keyword);
+          // 상세 페이지 간 20~40초 대기
+          await collectorSleep(randomDelay(20000, 40000));
+        } catch (e) {
+          console.warn(`[SH-AC] 상세 수집 실패: ${item.productId}`, e.message);
+        }
+      }
+    }
+  }
+
+  // 다음 키워드로 — 랜덤 50~90초 딜레이
+  const delay = randomDelay();
+  console.log(`[SH-AC] 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
+  collector.status = 'WAITING_NEXT';
+
+  await collectorSleep(delay);
+  await runNextKeyword();
+}
+
+// ---- 자동 수집 실패 처리 ----
+async function handleAutoCollectFailed(requestId, keyword, errorCode, errorMessage) {
+  if (!collector.current || collector.current.requestId !== requestId) return;
+
+  // 타임아웃 해제
+  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
+
+  console.warn(`[SH-AC] ❌ "${keyword}" 수집 실패: ${errorCode} — ${errorMessage}`);
+
+  collector.lastError = `${keyword}: ${errorCode}`;
+
+  // 1회 재시도
+  if (collector.current.retryCount < 1) {
+    collector.queue.push({
+      keyword,
+      priority: 0,
+      retryCount: collector.current.retryCount + 1,
+    });
+  } else {
+    collector.failCount++;
+    // 서버에 실패 기록
+    try {
+      await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage });
+    } catch (_) {}
+  }
+
+  collector.current = null;
+
+  // 실패 시 더 긴 대기 (2~5분)
+  const delay = randomDelay(120000, 300000);
+  collector.status = 'WAITING_NEXT';
+  await collectorSleep(delay);
+  await runNextKeyword();
+}
+
+// ---- 상세 페이지 수집 (상위 N개 보강) ----
+async function collectDetailForItem(item, keyword) {
+  const tabId = collector.currentTabId;
+  if (!tabId) return;
+
+  const detailUrl = item.url || item.productUrl || `https://www.coupang.com/vp/products/${item.productId}`;
+  const requestId = generateRequestId();
+
+  console.log(`[SH-AC] 📄 상세 수집: ${item.productId} (${item.title?.substring(0, 30)}...)`);
+
+  // 상세 페이지로 이동
+  await chrome.tabs.update(tabId, { url: detailUrl });
+
+  // 페이지 로드 완료 대기 (Promise 기반)
+  await new Promise((resolve) => {
+    const listener = (tid, changeInfo) => {
+      if (tid === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    // 20초 타임아웃
+    setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 20000);
+  });
+
+  // DOM 안정화 대기 (3~6초)
+  await collectorSleep(randomDelay(3000, 6000));
+
+  // content-detail.js에 파싱 요청
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'START_PARSE_DETAIL',
+      requestId,
+      productId: item.productId,
+      keyword,
+      isAutoCollect: true,
+    });
+  } catch (e) {
+    console.warn('[SH-AC] content-detail.js 메시지 전송 실패:', e.message);
+    // content script 로드 대기 후 재시도
+    await collectorSleep(3000);
+    try {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'START_PARSE_DETAIL',
+        requestId,
+        productId: item.productId,
+        keyword,
+        isAutoCollect: true,
+      });
+    } catch (e2) {
+      console.warn('[SH-AC] content-detail.js 재시도 실패:', e2.message);
+      return;
+    }
+  }
+
+  // 응답 대기 (20초) + 서버 저장
+  await new Promise((resolve) => {
+    const handler = (msg) => {
+      if (msg.type === 'DETAIL_PARSE_SUCCESS' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        console.log(`[SH-AC] ✅ 상세 수집 성공: ${item.productId} (confidence: ${msg.result?.confidence || 0})`);
+
+        // v6.5: 서버에 확장 상세 스냅샷 저장
+        if (msg.result) {
+          saveDetailSnapshotToServer(msg.result, keyword).catch(e =>
+            console.warn('[SH-AC] 상세 스냅샷 서버 저장 실패:', e.message)
+          );
+        }
+
+        resolve();
+      } else if (msg.type === 'DETAIL_PARSE_FAILED' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        console.warn(`[SH-AC] ❌ 상세 수집 실패: ${item.productId} — ${msg.error?.message || 'unknown'}`);
+        resolve();
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    setTimeout(() => { chrome.runtime.onMessage.removeListener(handler); resolve(); }, 20000);
+  });
+}
+
+// ---- v6.5: 상세 스냅샷 서버 저장 ----
+async function saveDetailSnapshotToServer(result, keyword) {
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) return;
+
+  try {
+    await apiClient.saveDetailSnapshot({
+      coupangProductId: result.coupangProductId,
+      vendorItemId: result.vendorItemId || null,
+      title: result.title || null,
+      price: result.price || 0,
+      originalPrice: result.originalPrice || 0,
+      discountRate: result.discountRate || 0,
+      rating: result.rating || 0,
+      reviewCount: result.reviewCount || 0,
+      purchaseCount: result.purchaseCount || null,
+      sellerName: result.sellerName || null,
+      brandName: result.brandName || null,
+      manufacturer: result.manufacturer || null,
+      origin: result.origin || null,
+      deliveryType: result.deliveryType || 'STANDARD',
+      isRocket: result.isRocket || false,
+      isFreeShipping: result.isFreeShipping || false,
+      soldOut: result.soldOut || false,
+      categoryPath: result.categoryPath || null,
+      optionCount: result.optionCount || 0,
+      imageUrl: result.imageUrl || null,
+      confidence: result.confidence || 0,
+      reviewSamples: result.reviewSamples || [],
+      optionSummary: result.optionSummary || [],
+      badgeText: result.badgeText || null,
+      keyword: keyword || null,
+      source: 'auto_collect',
+      detailJson: result.detailJson || {},
+    });
+    console.log(`[SH-AC] 💾 상세 스냅샷 서버 저장 완료: ${result.coupangProductId}`);
+  } catch (e) {
+    console.warn('[SH-AC] 상세 스냅샷 서버 저장 오류:', e.message);
+  }
+}
+
+// ---- 탭이 닫혔을 때 수집 중단 ----
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === collector.currentTabId && collector.running) {
+    console.warn('[SH-AC] 쿠팡 탭이 닫혔습니다. 수집 일시정지.');
+    collector.currentTabId = null;
+    // 자동으로 새 탭을 만들어 계속할 수도 있지만, 안전하게 일시정지
+    pauseAutoCollect();
+  }
+});

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "5.7.0",
-  "description": "쿠팡 AI 소싱 코치 — 내상품자동추적 · 경쟁자분석 · 검색수요추정 · AI분석 · 파생상품제안 · 소싱점수 · 마진추정 · 1688 한국어직접전달 · 순위추적 · WING",
+  "version": "6.6.0",
+  "description": "쿠팡+알리 AI 소싱 코치 — 검색수요분석v6.6 · 자동배치토글(쿠팡탭조건) · 분할배치 · 키워드선택배치 · 자동순회수집 · 상세페이지정밀파싱 · 브라우저기반키워드큐 · 정밀DOM파싱 · 파싱품질진단 · 키워드감시 · 리뷰증감추적 · 판매량추정 · 내상품자동추적 · 경쟁자분석 · AI분석 · 1688 한국어직접전달 · 순위추적 · WING · AliExpress 트렌드분석",
   "permissions": [
     "storage",
     "tabs",
@@ -16,7 +16,10 @@
     "https://www.coupang.com/*",
     "https://wing.coupang.com/*",
     "https://m-wing.coupang.com/*",
-    "https://lumiriz.kr/*"
+    "https://lumiriz.kr/*",
+    "https://www.aliexpress.com/*",
+    "https://ko.aliexpress.com/*",
+    "https://*.aliexpress.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -52,6 +55,33 @@
       ],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.aliexpress.com/wholesale*",
+        "https://www.aliexpress.com/w/wholesale*",
+        "https://ko.aliexpress.com/wholesale*",
+        "https://ko.aliexpress.com/w/wholesale*",
+        "https://www.aliexpress.com/af/*"
+      ],
+      "js": [
+        "content-ali.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://www.aliexpress.com/item/*",
+        "https://ko.aliexpress.com/item/*",
+        "https://www.aliexpress.com/i/*",
+        "https://ko.aliexpress.com/i/*"
+      ],
+      "js": [
+        "content-ali-detail.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "web_accessible_resources": [
