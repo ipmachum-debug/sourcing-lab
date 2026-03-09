@@ -1657,7 +1657,7 @@ async function runNextKeyword() {
 
     // 서버에 검색 이벤트 저장
     try {
-      await apiClient.saveSearchEvent({
+      const saveResp = await apiClient.saveSearchEvent({
         keyword,
         source: 'auto_collect_v7',
         pageUrl: url,
@@ -1674,9 +1674,12 @@ async function runNextKeyword() {
         ratingParseRate: result.stats.ratingRate,
         reviewParseRate: result.stats.reviewRate,
       });
-    } catch (_) {}
+      console.log(`[SH-AC] 💾 서버 저장 완료: "${keyword}" (eventId: ${saveResp?.result?.data?.eventId || 'N/A'})`);
+    } catch (saveErr) {
+      console.error(`[SH-AC] ❌ 서버 저장 실패: "${keyword}"`, saveErr.message || saveErr);
+    }
 
-    try { await apiClient.markKeywordCollected({ keyword }); } catch (_) {}
+    try { await apiClient.markKeywordCollected({ keyword }); } catch (e) { console.warn('[SH-AC] markKeywordCollected 실패:', e.message); }
 
     // 7. 상세 페이지 상위 3개 보강
     if (collector.collectDetail && result.items.length) {

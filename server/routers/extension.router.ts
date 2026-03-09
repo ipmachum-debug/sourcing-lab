@@ -3435,7 +3435,7 @@ export const extensionRouter = router({
   saveSearchEvent: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1).max(255),
-      source: z.enum(["user_search", "batch", "manual", "auto_collect"]).default("user_search"),
+      source: z.enum(["user_search", "batch", "manual", "auto_collect", "auto_collect_v7"]).default("user_search"),
       pageUrl: z.string().optional(),
       totalItems: z.number().int().default(0),
       items: z.array(z.any()).optional(),

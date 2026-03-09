@@ -214,10 +214,15 @@
         <div class="demand-batch-size-row">
           <label>배치 크기:</label>
           <select id="batchSizeSelect">
+            <option value="1" selected>1개씩</option>
+            <option value="2">2개씩</option>
+            <option value="3">3개씩</option>
             <option value="5">5개씩</option>
-            <option value="10" selected>10개씩</option>
+            <option value="10">10개씩</option>
             <option value="20">20개씩</option>
+            <option value="30">30개씩</option>
             <option value="50">50개씩</option>
+            <option value="100">전체</option>
           </select>
           <button class="btn-sm btn-primary-sm" id="runBatchNowBtn">▶ 배치 실행</button>
           <button class="btn-sm" id="stopBatchBtn" style="display:none;background:#dc2626;color:#fff">⏹ 중지</button>
@@ -236,7 +241,7 @@
         </div>
         <p class="desc" style="font-size:10px;color:#64748b;margin:4px 0">
           Background에서 HTML을 직접 가져와 파싱합니다 (V1/V2 자동 전환, 배송 6종, aria-label 평점).<br/>
-          <small>순차 1개씩 · 28~90초 랜덤 간격 · 실패 시 2~5분 대기 후 1회 재시도</small>
+          <small>순차 1개씩 · 50~89초 랜덤 간격 · 실패 시 2~5분 대기 후 1회 재시도</small>
         </p>
         <div class="demand-batch-size-row" style="margin-top:6px">
           <label style="font-size:10px">키워드 수:</label>
