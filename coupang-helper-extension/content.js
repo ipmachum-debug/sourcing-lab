@@ -504,7 +504,21 @@
     } catch { return ''; }
   }
   function tx(el) { return (el?.textContent || '').replace(/\s+/g, ' ').trim(); }
-  function nm(s) { return parseInt((s || '').replace(/[^0-9]/g, ''), 10) || 0; }
+  function nm(s) {
+    if (!s) return 0;
+    s = s.trim();
+    // "N,NNN원" or "N,NNN" pattern → extract last price-like number
+    const priceMatch = s.match(/(\d{1,3}(?:,\d{3})+)\s*원?$/);
+    if (priceMatch) return parseInt(priceMatch[1].replace(/,/g, ''), 10) || 0;
+    // "NNN원" pattern
+    const simpleMatch = s.match(/(\d+)\s*원?$/);
+    if (simpleMatch) return parseInt(simpleMatch[1], 10) || 0;
+    // Pure number with commas "N,NNN"
+    const commaMatch = s.match(/(\d{1,3}(?:,\d{3})+)/);
+    if (commaMatch) return parseInt(commaMatch[1].replace(/,/g, ''), 10) || 0;
+    // Fallback: strip non-digits (legacy behavior)
+    return parseInt(s.replace(/[^0-9]/g, ''), 10) || 0;
+  }
   function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
   // ============================================================
@@ -598,7 +612,7 @@
       // V2 전용 가격 선택자 (셀러라이프 방식)
       if (isV2) {
         const v2PriceEl = box.querySelector('[class*="Price_priceValue"]');
-        if (v2PriceEl) price = nm(tx(v2PriceEl));
+        if (v2PriceEl) { const p = nm(tx(v2PriceEl)); if (p >= 100 && p < 1e8) price = p; }
         if (!price) {
           // PriceArea 내 값 탐색
           const priceArea = box.querySelector('[class*="PriceArea_priceArea"]');
@@ -607,7 +621,7 @@
               const t = tx(d);
               if (t && t.endsWith('원') && !t.includes('%') && (t.includes(',') || /\d{3,}원/.test(t))) {
                 const p = nm(t);
-                if (p > 100) { price = p; break; }
+                if (p >= 100 && p < 1e8) { price = p; break; }
               }
             }
           }
@@ -623,7 +637,7 @@
       );
       if (spPriceEl) {
         const pv = nm(tx(spPriceEl));
-        if (pv >= 100) price = pv;
+        if (pv >= 100 && pv < 1e8) price = pv;
       }
       // 원래 가격 (정가/취소선)
       const spOrigEl = box.querySelector(
@@ -757,6 +771,10 @@
           }
         }
       }
+
+      // ★ 가격 최종 검증 — 비정상 가격 제거
+      if (price >= 1e8) price = 0;
+      if (originalPrice >= 1e8) originalPrice = 0;
 
       // ══════════════════════════════════════════
       // ▶ 평점 추출 (v7.0 — V2 aria-label 우선 + V1 16단계 전략)
