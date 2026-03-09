@@ -1321,32 +1321,101 @@ $('#clearHistoryBtn').addEventListener('click', async () => {
 });
 
 // ============================================================
-//  마진 계산기
+//  마진 계산기 v7.2 — 셀러라이프 spGrowthCalcUtils 방식 전면 반영
+//  배송비 6단계 사이즈·무게 기반 / 카테고리별 수수료 / ROAS / 월 수익
 // ============================================================
 
+// 카테고리 수수료 select ↔ 직접입력 토글
+$('#calcCategory').addEventListener('change', () => {
+  const v = $('#calcCategory').value;
+  if (v === '0') {
+    $('#customCommissionRow').style.display = '';
+  } else {
+    $('#customCommissionRow').style.display = 'none';
+    if ($('#calcCommission')) $('#calcCommission').value = v;
+  }
+});
+
+// 배송비 select ↔ 직접입력 토글
+$('#calcDeliveryTier').addEventListener('change', () => {
+  const v = $('#calcDeliveryTier').value;
+  if (v === '0') {
+    $('#customDeliveryRow').style.display = '';
+  } else {
+    $('#customDeliveryRow').style.display = 'none';
+  }
+});
+
 $('#calcBtn').addEventListener('click', () => {
+  const salePrice = parseFloat($('#calcSalePrice').value) || 0;
   const cnyCost = parseFloat($('#calcCnyCost').value) || 0;
   const exchangeRate = parseFloat($('#calcExchangeRate').value) || 190;
+  const setQty = Math.max(1, parseInt($('#calcSetQty').value) || 1);
+  const monthlySales = parseInt($('#calcMonthlySales').value) || 0;
   const shipping = parseFloat($('#calcShipping').value) || 0;
   const taxRate = parseFloat($('#calcTaxRate').value) || 0;
-  const salePrice = parseFloat($('#calcSalePrice').value) || 0;
-  const commissionRate = parseFloat($('#calcCommission').value) || 0;
+  const adRate = parseFloat($('#calcAdRate').value) || 0;
 
+  // 수수료율: 카테고리 select 또는 직접입력
+  let commissionRate;
+  const catVal = $('#calcCategory').value;
+  if (catVal === '0') {
+    commissionRate = parseFloat($('#calcCommission').value) || 10.8;
+  } else {
+    commissionRate = parseFloat(catVal) || 10.8;
+  }
+
+  // 배송비: 셀러라이프 6단계 또는 직접입력
+  let deliveryFee;
+  const tierVal = $('#calcDeliveryTier').value;
+  if (tierVal === '0') {
+    deliveryFee = parseFloat($('#calcCustomDelivery').value) || 0;
+  } else {
+    deliveryFee = parseFloat(tierVal) || 2200;
+  }
+
+  // --- 셀러라이프 공식 ---
+  // profit = price - (cost * setQty) - delivery - tax; margin% = profit/price
   const costKrw = Math.round(cnyCost * exchangeRate);
-  const tax = Math.round(costKrw * (taxRate / 100));
-  const totalCost = costKrw + shipping + tax;
-  const commission = Math.round(salePrice * (commissionRate / 100));
-  const profit = salePrice - totalCost - commission;
+  const totalItemCost = costKrw * setQty;                     // 세트 수량 반영
+  const tax = Math.round(totalItemCost * (taxRate / 100));     // 관세
+  const sourcingCost = totalItemCost + shipping + tax;         // 총 원가 (소싱비)
+  const commission = Math.round(salePrice * (commissionRate / 100)); // 쿠팡 수수료
+  const adCost = Math.round(salePrice * (adRate / 100));       // 광고비
+  const profit = salePrice - sourcingCost - deliveryFee - commission - adCost;
   const margin = salePrice > 0 ? ((profit / salePrice) * 100).toFixed(1) : 0;
+  // 셀러라이프: 최소 ROAS = 11000 / margin%
+  const marginNum = parseFloat(margin) || 0;
+  const minRoas = marginNum > 0 ? Math.round(11000 / marginNum) : 0;
+  const monthlyProfit = monthlySales > 0 ? profit * monthlySales : 0;
 
+  // UI 결과 표시
   $('#calcResult').style.display = '';
-  $('#resultCostKrw').textContent = formatPrice(costKrw);
+  $('#resultCostKrw').textContent = formatPrice(totalItemCost) + (setQty > 1 ? ` (${formatPrice(costKrw)}\u00d7${setQty})` : '');
   $('#resultShipping').textContent = formatPrice(shipping);
   $('#resultTax').textContent = formatPrice(tax);
-  $('#resultTotalCost').textContent = formatPrice(totalCost);
+  $('#resultTotalCost').textContent = formatPrice(sourcingCost);
+  $('#resultCoupangDelivery').textContent = formatPrice(deliveryFee);
+  $('#resultCommRate').textContent = commissionRate;
   $('#resultCommission').textContent = formatPrice(commission);
+  $('#resultAdRateLabel').textContent = adRate;
+  $('#resultAdCost').textContent = formatPrice(adCost);
   $('#resultProfit').textContent = formatPrice(profit);
   $('#resultMargin').textContent = margin + '%';
+
+  // ROAS / 월수익 표시
+  if (marginNum > 0) {
+    $('#roasRow').style.display = '';
+    $('#resultMinRoas').textContent = minRoas + '%';
+  } else {
+    $('#roasRow').style.display = 'none';
+  }
+  if (monthlySales > 0) {
+    $('#monthlyRow').style.display = '';
+    $('#resultMonthlyProfit').textContent = formatPrice(monthlyProfit) + ` (${monthlySales}\uac1c)`;
+  } else {
+    $('#monthlyRow').style.display = 'none';
+  }
 
   const cls = profit > 0 ? 'profit-positive' : 'profit-negative';
   $('#profitRow').className = `calc-result-row profit-row ${cls}`;
@@ -2732,7 +2801,7 @@ function updateAutoCollectUI(state) {
     'RUNNING': { text: '수집중', cls: 'level-medium' },
     'NAVIGATING': { text: '이동중', cls: 'level-medium' },
     'PARSING': { text: '파싱중', cls: 'level-medium' },
-    'WAITING_NEXT': { text: '대기중', cls: 'level-easy' },
+    'WAITING_NEXT': { text: '재시도 대기', cls: 'level-easy' },
     'COLLECTING_DETAIL': { text: '상세수집', cls: 'level-medium' },
     'PAUSED': { text: '일시정지', cls: 'level-hard' },
     'STOPPED': { text: '중단됨', cls: 'level-hard' },
@@ -2777,9 +2846,28 @@ function updateAutoCollectUI(state) {
       html += '대기: ' + state.queueLength + '개</div>';
       if (state.currentKeyword) {
         html += '<div>현재: "' + escHtml(state.currentKeyword) + '" (' + st.text + ')</div>';
+      } else if (state.status === 'WAITING_NEXT' && state.queueLength > 0) {
+        html += '<div style="color:#6366f1">⏳ 다음 키워드 대기중... (' + state.queueLength + '개 남음)</div>';
       }
       if (state.lastError) {
-        html += '<div style="color:#dc2626">⚠️ ' + escHtml(state.lastError) + '</div>';
+        // v7.2.2: error code to user-friendly text
+        var errCodeMap = {
+          'ALL_STRATEGIES_FAILED': '수집 전략 실패 (공 재시도)',
+          'FETCH_EXCEPTION': '네트워크 오류 (공 재시도)',
+          'PARSE_EXCEPTION': '파싱 오류 (공 재시도)',
+          'EMPTY_RESULT': '결과 없음 (공 재시도)',
+          'ACCESS_BLOCKED': '쿠팡 접근 차단 (장시간 대기)',
+          'NETWORK_ERROR': '네트워크 연결 오류',
+          'TIMEOUT': '요청 시간 초과',
+          'TAB_ERROR': '탭 오류 (재생성 중)',
+          'RUNTIME_ERROR': '런타임 오류',
+          'UNKNOWN': '알 수 없는 오류'
+        };
+        var errParts = state.lastError.split(': ');
+        var errKw = errParts[0] || '';
+        var errCode = errParts.slice(1).join(': ') || state.lastError;
+        var friendlyErr = errCodeMap[errCode] || errCode;
+        html += '<div style="color:#f59e0b;font-size:9px">⚠️ ' + escHtml(errKw) + ': ' + friendlyErr + '</div>';
       }
     } else if (state.status === 'IDLE' && (state.successCount > 0 || state.failCount > 0)) {
       html += '<div>✅ 수집 완료 — 성공: ' + state.successCount + ', 실패: ' + state.failCount + '</div>';

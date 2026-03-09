@@ -1,5 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.2
+   Coupang Sourcing Helper — Background Service Worker v7.2.2
+   v7.2.2: 자동 수집 UNKNOWN 에러 수정 + 딜레이 최적화 + 상태 관리 강화
+   v7.2.1: 마진 계산기 셀러라이프 방식 전면 반영 + API 통신 강화
    v7.2: 셀러라이프 수집방식 전면 반영 (대개편)
          - 다중 전략 수집 (Background fetch → DNR fetch → Tab → Hidden Tab 폴링)
          - 'Already running' 상태 관리 버그 수정
@@ -37,7 +39,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v7.2.0 — multi-strategy architecture (SellerLife)`);
+    console.log(`[SH] Extension ${details.reason}d — v7.2.2 — multi-strategy architecture (SellerLife)`);
   }
 });
 
@@ -1394,6 +1396,11 @@ function randomDelay(min = 50000, max = 89000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// v7.2.2: 에러 유형별 짧은 딜레이 (비차단 에러용)
+function shortDelay(min = 5000, max = 15000) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 function collectorSleep(ms) {
   return new Promise((resolve) => {
     collector._delayTimeoutId = setTimeout(resolve, ms);
@@ -1546,24 +1553,36 @@ function pauseAutoCollect() {
   if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
 }
 
-// ---- 쿠팡 탭 확보 (v7.2: 탭 재생성 강화) ----
+// ---- 쿠팡 탭 확보 (v7.2.2: 더 안정적인 탭 확보 + 에러 복구) ----
 async function ensureCoupangTab() {
   // 기존 탭 확인
   if (collector.currentTabId) {
     try {
       const tab = await chrome.tabs.get(collector.currentTabId);
-      if (tab?.id && tab.url?.includes('coupang.com')) return tab.id;
-    } catch (_) { collector.currentTabId = null; }
+      if (tab?.id && tab.url?.includes('coupang.com')) {
+        console.log(`[SH-AC] 기존 쿠팡 탭 사용: ${tab.id}`);
+        return tab.id;
+      }
+    } catch (_) {
+      console.log('[SH-AC] 기존 탭 없음, 새로 찾기...');
+      collector.currentTabId = null;
+    }
   }
 
   // 열려있는 쿠팡 탭 찾기
-  const tabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
-  if (tabs.length > 0) {
-    collector.currentTabId = tabs[0].id;
-    return tabs[0].id;
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+    if (tabs.length > 0) {
+      collector.currentTabId = tabs[0].id;
+      console.log(`[SH-AC] 열린 쿠팡 탭 발견: ${tabs[0].id}`);
+      return tabs[0].id;
+    }
+  } catch (e) {
+    console.warn('[SH-AC] 탭 검색 실패:', e.message);
   }
 
   // 새 탭 생성 (비활성)
+  console.log('[SH-AC] 새 쿠팡 탭 생성...');
   const tab = await chrome.tabs.create({
     url: 'https://www.coupang.com/',
     active: false,
@@ -1637,23 +1656,36 @@ async function runNextKeyword() {
   console.log(`[SH-AC] 🔍 [${progress}/${collector.totalQueued}] 키워드 수집: "${keyword}" (재시도: ${next.retryCount || 0})`);
 
   try {
-    // ★ v7.2: 다중 전략 HTML 수집 (셀러라이프 방식)
+    // ★ v7.2.2: 다중 전략 HTML 수집 (에러 진단 강화)
     collector.status = 'PARSING';
     let tabId = null;
-    try { tabId = await ensureCoupangTab(); } catch (_) {}
+    try {
+      tabId = await ensureCoupangTab();
+      console.log(`[SH-AC] 쿠팡 탭 확보: ${tabId}`);
+    } catch (tabErr) {
+      console.warn(`[SH-AC] ⚠️ 쿠팡 탭 확보 실패: ${tabErr.message}`);
+      // 탭 없이도 direct_fetch / dnr_fetch / hidden_tab 전략 가능
+    }
 
-    const collectResult = await HybridParser.collectSearchHTML(keyword, {
-      tabId,
-      page: 1,
-      listSize: 36,
-    });
+    let collectResult;
+    try {
+      collectResult = await HybridParser.collectSearchHTML(keyword, {
+        tabId,
+        page: 1,
+        listSize: 36,
+      });
+    } catch (fetchErr) {
+      console.error(`[SH-AC] ❌ "${keyword}" collectSearchHTML 예외:`, fetchErr.message, fetchErr.stack);
+      await handleCollectFail(keyword, next.retryCount, 'FETCH_EXCEPTION', `수집 예외: ${fetchErr.message}`);
+      return;
+    }
 
-    const html = collectResult.html;
-    const strategy = collectResult.strategy;
+    const html = collectResult?.html || '';
+    const strategy = collectResult?.strategy || 'NONE';
 
     if (!html || html.length < 500) {
-      console.warn(`[SH-AC] ❌ "${keyword}" HTML 수집 실패 (모든 전략)`);
-      await handleCollectFail(keyword, next.retryCount, 'ALL_STRATEGIES_FAILED', '모든 수집 전략 실패');
+      console.warn(`[SH-AC] ❌ "${keyword}" HTML 수집 실패 (모든 전략, ${html.length}바이트)`);
+      await handleCollectFail(keyword, next.retryCount, 'ALL_STRATEGIES_FAILED', `모든 수집 전략 실패 (HTML ${html.length}바이트)`);
       return;
     }
 
@@ -1665,7 +1697,14 @@ async function runNextKeyword() {
     }
 
     // 파싱
-    const result = HybridParser.parseSearchHTML(html, keyword);
+    let result;
+    try {
+      result = HybridParser.parseSearchHTML(html, keyword);
+    } catch (parseErr) {
+      console.error(`[SH-AC] ❌ "${keyword}" parseSearchHTML 예외:`, parseErr.message, parseErr.stack);
+      await handleCollectFail(keyword, next.retryCount, 'PARSE_EXCEPTION', `파싱 예외: ${parseErr.message}`);
+      return;
+    }
 
     if (!result.items.length) {
       console.warn(`[SH-AC] ❌ "${keyword}" 파싱 결과 0개 (전략: ${strategy}, DOM: ${result.domVersion})`);
@@ -1736,21 +1775,29 @@ async function runNextKeyword() {
     await runNextKeyword();
 
   } catch (e) {
-    console.error(`[SH-AC] "${keyword}" 수집 중 오류:`, e.message);
-    await handleCollectFail(keyword, next.retryCount, 'UNKNOWN', e.message);
+    // v7.2.2: 더 상세한 에러 진단
+    const errorCode = e.name === 'TypeError' ? 'NETWORK_ERROR'
+      : e.name === 'AbortError' ? 'TIMEOUT'
+      : e.message?.includes('tab') ? 'TAB_ERROR'
+      : e.message?.includes('permission') ? 'PERMISSION_ERROR'
+      : 'RUNTIME_ERROR';
+    console.error(`[SH-AC] "${keyword}" 수집 중 오류 [${errorCode}]:`, e.message, e.stack);
+    await handleCollectFail(keyword, next.retryCount, errorCode, e.message || '알 수 없는 오류');
   }
 }
 
-// ---- 수집 실패 처리 (v7.2: 강화된 재시도) ----
+// ---- 수집 실패 처리 (v7.2.2: 에러 유형별 최적 딜레이) ----
 async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
-  console.warn(`[SH-AC] ❌ "${keyword}" 실패 [${retryCount}/2]: ${errorCode} — ${errorMessage}`);
+  console.warn(`[SH-AC] ❌ "${keyword}" 실패 [${retryCount}/3]: ${errorCode} — ${errorMessage}`);
   collector.lastError = `${keyword}: ${errorCode}`;
   collector._consecutiveErrors++;
 
-  // v7.2: 2회 재시도 (기존 1회에서 증가)
-  if (retryCount < 2) {
-    collector.queue.push({ keyword, priority: 0, retryCount: retryCount + 1 });
-    console.log(`[SH-AC] 🔄 "${keyword}" 재시도 큐 추가 (${retryCount + 1}/2)`);
+  // v7.2.2: 3회 재시도 (더 적극적인 복구)
+  const maxRetry = 3;
+  if (retryCount < maxRetry) {
+    // 재시도 시 큐 앞쪽에 추가 (빠른 재시도)
+    collector.queue.unshift({ keyword, priority: 0, retryCount: retryCount + 1 });
+    console.log(`[SH-AC] 🔄 "${keyword}" 재시도 큐 추가 (${retryCount + 1}/${maxRetry})`);
   } else {
     collector.failCount++;
     try { await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage }); } catch (_) {}
@@ -1760,18 +1807,30 @@ async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
 
   if (!collector.running || collector._aborted) return;
 
-  // v7.2: 접근 차단 시 더 긴 대기 (5~10분)
+  // v7.2.2: 에러 유형별 최적화된 딜레이
   let delay;
   if (errorCode === 'ACCESS_BLOCKED') {
-    delay = randomDelay(300000, 600000); // 5~10분
-    console.log(`[SH-AC] ⛔ 접근 차단 — ${Math.round(delay/60000)}분 대기`);
+    delay = randomDelay(180000, 360000); // 3~6분 (차단)
+    console.log(`[SH-AC] ⛔ 접근 차단 — ${Math.round(delay/1000)}초 대기`);
     // 탭 재생성 (차단된 세션 갱신)
     if (collector.currentTabId) {
       try { chrome.tabs.remove(collector.currentTabId); } catch (_) {}
       collector.currentTabId = null;
     }
+  } else if (errorCode === 'ALL_STRATEGIES_FAILED' || errorCode === 'FETCH_EXCEPTION' || errorCode === 'NETWORK_ERROR') {
+    delay = shortDelay(8000, 20000); // 8~20초 (네트워크/수집 실패 → 빠른 재시도)
+    console.log(`[SH-AC] 🌐 수집 실패 — ${Math.round(delay/1000)}초 후 재시도`);
+  } else if (errorCode === 'EMPTY_RESULT' || errorCode === 'PARSE_EXCEPTION') {
+    delay = shortDelay(10000, 25000); // 10~25초 (파싱 문제 → 곧 재시도)
+    console.log(`[SH-AC] 📄 파싱 실패 — ${Math.round(delay/1000)}초 후 재시도`);
+  } else if (errorCode === 'TAB_ERROR') {
+    delay = shortDelay(5000, 12000); // 5~12초 (탭 문제 → 빠른 재시도)
+    console.log(`[SH-AC] 🔧 탭 오류 — ${Math.round(delay/1000)}초 후 재시도`);
+    // 탭 ID 리셋하여 다음에 새 탭 생성
+    collector.currentTabId = null;
   } else {
-    delay = randomDelay(120000, 300000); // 2~5분
+    delay = shortDelay(10000, 30000); // 10~30초 (기타)
+    console.log(`[SH-AC] ⚠️ 기타 오류 — ${Math.round(delay/1000)}초 후 재시도`);
   }
 
   collector.status = 'WAITING_NEXT';
