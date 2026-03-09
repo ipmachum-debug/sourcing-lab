@@ -3435,7 +3435,7 @@ export const extensionRouter = router({
   saveSearchEvent: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1).max(255),
-      source: z.enum(["user_search", "batch", "manual", "auto_collect", "auto_collect_v7"]).default("user_search"),
+      source: z.string().max(100).default("user_search"),
       pageUrl: z.string().optional(),
       totalItems: z.number().int().default(0),
       items: z.array(z.any()).optional(),
@@ -3577,6 +3577,64 @@ export const extensionRouter = router({
           });
         }
       }).catch((err) => console.error("[saveSearchEvent] daily status error:", err));
+
+      // 4. ★ 스냅샷 테이블 자동 동기화 (ext_keyword_daily_stats의 데이터 소스)
+      // → 반드시 daily_stats 계산보다 먼저 실행해야 함
+      if (input.items && input.items.length > 0) {
+        try {
+          const highReviewCount = input.items.filter((i: any) => (Number(i.reviewCount) || 0) >= 100).length;
+          const highReviewRatio = input.items.length ? Math.round((highReviewCount / input.items.length) * 100) : 0;
+
+          // 경쟁도 간이 계산
+          const avgReviewVal = input.avgReview || 0;
+          const adRatio = input.items.length ? Math.round((input.adCount / input.items.length) * 100) : 0;
+          let compScore = 0;
+          if (avgReviewVal > 1000) compScore += 40; else if (avgReviewVal > 500) compScore += 30; else if (avgReviewVal > 100) compScore += 20; else if (avgReviewVal > 30) compScore += 10;
+          if (highReviewRatio > 60) compScore += 25; else if (highReviewRatio > 30) compScore += 15; else if (highReviewRatio > 10) compScore += 5;
+          if (input.avgRating >= 4.5) compScore += 15; else if (input.avgRating >= 4.0) compScore += 10;
+          if (adRatio > 30) compScore += 20; else if (adRatio > 15) compScore += 10;
+          const compLevel = compScore >= 70 ? "hard" : compScore >= 45 ? "medium" : "easy";
+
+          const [existingSnap] = await db.select({ id: extSearchSnapshots.id })
+            .from(extSearchSnapshots)
+            .where(and(
+              eq(extSearchSnapshots.userId, userId),
+              eq(extSearchSnapshots.query, input.keyword),
+              sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
+            ))
+            .orderBy(desc(extSearchSnapshots.createdAt))
+            .limit(1);
+
+          const snapData = {
+            query: input.keyword,
+            totalItems: input.totalItems,
+            avgPrice: input.avgPrice,
+            avgRating: input.avgRating.toFixed(1),
+            avgReview: input.avgReview,
+            highReviewRatio,
+            adCount: input.adCount,
+            competitionScore: compScore,
+            competitionLevel: compLevel as "easy" | "medium" | "hard",
+            itemsJson: itemsJson,
+          };
+
+          if (existingSnap) {
+            await db.update(extSearchSnapshots).set(snapData).where(eq(extSearchSnapshots.id, existingSnap.id));
+          } else {
+            await db.insert(extSearchSnapshots).values({ userId, ...snapData });
+          }
+          console.log(`[saveSearchEvent] snapshot synced: "${input.keyword}" (${input.items.length}개, comp:${compScore}/${compLevel})`);
+        } catch (snapErr) {
+          console.error("[saveSearchEvent] snapshot sync error:", snapErr);
+        }
+      }
+
+      // 5. ★★★ 핵심: ext_keyword_daily_stats 테이블 자동 업데이트 (웹 대시보드에서 읽는 테이블)
+      // 스냅샷이 저장된 후 실행되므로 최신 데이터를 반영할 수 있음
+      // 이전에는 수동 "통계 계산" 버튼을 눌러야만 업데이트되었음 → 이제 자동
+      autoComputeKeywordDailyStat(userId, input.keyword, db).catch((err) => {
+        console.error("[saveSearchEvent] daily stats (dashboard) error:", err);
+      });
 
       return { success: true, eventId: result.insertId };
     }),
