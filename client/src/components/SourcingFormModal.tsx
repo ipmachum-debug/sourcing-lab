@@ -334,31 +334,33 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-1.5"><span>⚔️</span> 경쟁 & 차별화</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <Label className="text-[10px] text-muted-foreground">경쟁도</Label>
-                  <Select value={form.competitionLevel} onValueChange={v => set("competitionLevel", v)}>
-                    <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">낮음 (20점)</SelectItem>
-                      <SelectItem value="medium">보통 (12점)</SelectItem>
-                      <SelectItem value="high">높음 (6점)</SelectItem>
-                      <SelectItem value="very_high">매우높음 (2점)</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">경쟁도</Label>
+                    <Select value={form.competitionLevel} onValueChange={v => set("competitionLevel", v)}>
+                      <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">낮음 (20점)</SelectItem>
+                        <SelectItem value="medium">보통 (12점)</SelectItem>
+                        <SelectItem value="high">높음 (6점)</SelectItem>
+                        <SelectItem value="very_high">매우높음 (2점)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">차별화</Label>
+                    <Select value={form.differentiationLevel} onValueChange={v => set("differentiationLevel", v)}>
+                      <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="high">높음 (20점)</SelectItem>
+                        <SelectItem value="medium">보통 (12점)</SelectItem>
+                        <SelectItem value="low">낮음 (4점)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-[10px] text-muted-foreground">차별화</Label>
-                  <Select value={form.differentiationLevel} onValueChange={v => set("differentiationLevel", v)}>
-                    <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="high">높음 (20점)</SelectItem>
-                      <SelectItem value="medium">보통 (12점)</SelectItem>
-                      <SelectItem value="low">낮음 (4점)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
+                <div className="w-1/2 pr-1.5">
                   <Label className="text-[10px] text-muted-foreground">우선순위</Label>
                   <Select value={form.priority} onValueChange={v => set("priority", v)}>
                     <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
