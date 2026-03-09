@@ -2707,7 +2707,7 @@ document.querySelector('#runBatchNowBtn').addEventListener('click', async functi
   if (!confirm('실제 쿠팡 페이지를 방문하여 데이터를 수집합니다.\n\n' +
     '📋 대상: ' + targetKeywords.length + '개 키워드\n' +
     '⏱️ 예상 시간: 약 ' + estMin + '~' + estMax + '분\n' +
-    '   (키워드당 28~90초 딜레이 적용)\n\n' +
+    '   (키워드당 50~89초 딜레이 적용)\n\n' +
     '⚠️ 수집 중 쿠팡 탭이 자동으로 전환됩니다.\n\n계속하시겠습니까?')) return;
 
   batchRunning = true;
