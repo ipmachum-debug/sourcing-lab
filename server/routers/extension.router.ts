@@ -2057,64 +2057,79 @@ export const extensionRouter = router({
           });
         }
 
-        // === 파생 상품 제안 ===
+        // === 파생 상품 제안 (의미적 연관 키워드) ===
         if (items.length > 0) {
-          // 상위 상품 분석 → 공통 키워드 추출
-          const titleWords = new Map<string, number>();
-          for (const item of items.slice(0, 20)) {
-            const title = item.title || "";
-            // 2글자 이상의 한글 단어 추출
+          // 커머스 불용어 — 파생 키워드로 의미 없는 단어들
+          const DERIVED_NOISE = /^(세트|개입|세트입|묶음|패키지|특가|인기|추천|프리미엄|신상|무료배송|당일|국내|용품|제품|상품|전용|겸용|개당|매입|적립|포인트|도착|배송|발송|출고|택배|반품|교환|증정|사은품|할인|쿠폰|세일|최저가|초특가|핫딜|대용량|소용량|정품|수입|국산|미니|슬림|블랙|화이트|그레이|네이비|베이지|브라운|핑크|레드|블루|그린|골드|실버|리뉴얼|업그레이드|신제품|한정|품절|히트|대박|베스트|랭킹|호환|사이즈|색상|컬러|보장|가능|불가|포함|별도|단품|낱개|잡화|기타|공식|판매|인증|고급|럭셔리)$/;
+          // 수량/단위 패턴
+          const UNIT_PATTERN = /^\d+[개팩세트입매장병봉롤캔컵짝]+$|^\d+[+]\d+$|^\d+[PpRr]$/;
+          // 색상 패턴
+          const COLOR_PATTERN = /^(블랙|화이트|그레이|네이비|베이지|브라운|핑크|레드|블루|그린|옐로우|퍼플|오렌지|실버|골드|아이보리|카키|와인|차콜)$/;
+
+          // 검색 키워드의 핵심 단어 추출
+          const keywordTokens = keyword.match(/[가-힣]{2,}|[a-zA-Z]{2,}/g) || [];
+
+          // 1단계: 상위 상품 타이틀에서 의미있는 "상품 특성" 단어 추출
+          const wordContext = new Map<string, { count: number; titles: string[] }>();
+
+          for (const item of items.slice(0, 30)) {
+            const title = (item.title || "").replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "");
             const words = title.match(/[가-힣]{2,}/g) || [];
+            const seen = new Set<string>();
             for (const w of words) {
-              if (w === keyword || keyword.includes(w) || w.length < 2) continue;
-              // 불용어 제거
-              if (/세트|개입|세트입|묶음|패키지|특가|인기|추천|프리미엄|신상|무료배송|당일|국내|주방|용품/.test(w)) continue;
-              titleWords.set(w, (titleWords.get(w) || 0) + 1);
+              if (seen.has(w)) continue;
+              seen.add(w);
+              if (keywordTokens.some((kt: string) => kt === w || w.includes(kt) || kt.includes(w))) continue;
+              if (w.length < 2 || DERIVED_NOISE.test(w) || UNIT_PATTERN.test(w) || COLOR_PATTERN.test(w)) continue;
+              if (/^\d|\d$/.test(w) || /^[A-Z]{1,3}$/.test(w)) continue;
+              const existing = wordContext.get(w) || { count: 0, titles: [] };
+              existing.count++;
+              if (existing.titles.length < 3) existing.titles.push(title.slice(0, 40));
+              wordContext.set(w, existing);
             }
           }
 
-          // 2회 이상 등장하는 단어 = 관련 파생 상품 후보
-          const relatedWords = [...titleWords.entries()]
-            .filter(([_, count]) => count >= 2)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5);
+          // 2단계: 상품 특성 분류 — 대상/재질/용도/형태 등
+          const PRODUCT_ATTRS = /^(강아지|고양이|반려견|반려묘|애견|애묘|유아|아기|어린이|성인|여성|남성|실리콘|스테인리스|원목|나무|플라스틱|가죽|면|린넨|폴리|접이식|휴대용|무선|유선|충전식|자동|수동|방수|방한|보온|보냉|미끄럼방지|논슬립|항균|살균|친환경|대형|중형|소형|초소형|유기농|천연)$/;
+          const CATEGORY_WORDS = /^(브러쉬|브러시|빗|솔|클리너|청소기|정리함|수납함|보관함|바구니|가방|파우치|케이스|커버|매트|패드|쿠션|방석|이불|담요|텀블러|컵|접시|그릇|냄비|팬|도마|칼|가위|스푼|포크|젓가락|장갑|양말|모자|마스크|슬리퍼|필터|리필|충전기|거치대|스탠드|홀더|트레이|디스펜서|스프레이|세정제|세제|샴푸|린스|크림|오일|밤|젤|폼|워터|미스트|팩|마사지|롤러|밴드|테이프|스티커|라벨)$/;
 
-          for (const [word, count] of relatedWords) {
+          // 3단계: 의미적 파생 키워드 생성
+          const candidates: Array<{ word: string; count: number; type: string }> = [];
+
+          for (const [word, ctx] of wordContext.entries()) {
+            if (ctx.count < 2) continue;
+            if (PRODUCT_ATTRS.test(word)) {
+              candidates.push({ word, count: ctx.count, type: "attribute" });
+            } else if (CATEGORY_WORDS.test(word)) {
+              candidates.push({ word, count: ctx.count, type: "category" });
+            } else if (ctx.count >= 3 && word.length >= 2) {
+              candidates.push({ word, count: ctx.count, type: "related" });
+            }
+          }
+
+          // 속성어 우선, 등장 횟수 순 정렬
+          candidates.sort((a, b) => {
+            const tp: Record<string, number> = { attribute: 3, category: 2, related: 1 };
+            const diff = (tp[b.type] || 0) - (tp[a.type] || 0);
+            return diff !== 0 ? diff : b.count - a.count;
+          });
+
+          for (const c of candidates.slice(0, 6)) {
+            const typeLabel = c.type === "attribute" ? "대상/속성" : c.type === "category" ? "관련 품목" : "연관 키워드";
+            // 파생 키워드: "고양이 브러쉬", "실리콘 매트" 형태로 생성
+            const coreKeyword = keywordTokens.filter((t: string) => !c.word.includes(t)).join(" ");
+            const suggestion = coreKeyword ? `${c.word} ${coreKeyword}` : `${c.word} ${keyword}`;
             derivativeProducts.push({
               keyword,
-              suggestion: `${keyword} ${word}`,
-              alternativeKeyword: word,
-              confidence: Math.min(95, count * 15),
-              reason: `"${keyword}" 검색 상위 상품 ${count}개에서 "${word}" 발견 — 파생 키워드 검색 추천`,
-              occurrences: count,
+              suggestion,
+              alternativeKeyword: c.word,
+              confidence: Math.min(95, c.count * 12 + (c.type === "attribute" ? 20 : c.type === "category" ? 10 : 0)),
+              reason: `상위 상품 ${c.count}개에서 발견된 ${typeLabel} "${c.word}" — 별도 검색으로 틈새시장 확인 추천`,
+              occurrences: c.count,
+              type: c.type,
             });
           }
-
-          // 가격 세그먼트 기반 파생 — 가격대가 넓으면 특정 가격대 상품 추천
-          const prices = items.map((i: any) => i.price).filter((p: number) => p > 0);
-          if (prices.length > 5) {
-            const minP = Math.min(...prices);
-            const maxP = Math.max(...prices);
-            if (maxP > minP * 3) {
-              // 가격 대역이 넓으면 저가/고가 니치 제안
-              derivativeProducts.push({
-                keyword,
-                suggestion: `${keyword} (저가형 ${minP.toLocaleString()}~${Math.round(avgPrice * 0.6).toLocaleString()}원)`,
-                confidence: 70,
-                reason: `가격 범위가 ${minP.toLocaleString()}~${maxP.toLocaleString()}원으로 넓음 — 저가 틈새 진입 가능`,
-                type: "price_niche_low",
-              });
-              derivativeProducts.push({
-                keyword,
-                suggestion: `${keyword} (프리미엄 ${Math.round(avgPrice * 1.5).toLocaleString()}원+)`,
-                confidence: 65,
-                reason: `프리미엄 세그먼트에 리뷰 강자가 적을 수 있음`,
-                type: "price_niche_high",
-              });
-            }
-          }
         }
-
         // === 경쟁자 알림 ===
         // 리뷰 급증 감지 (일별 데이터 필요)
         if (daily.length >= 2) {

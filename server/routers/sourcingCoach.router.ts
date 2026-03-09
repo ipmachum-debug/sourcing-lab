@@ -108,12 +108,28 @@ const KO_TO_EN: Record<string, string> = {
 const NOISE_WORDS = new Set([
   '1개', '2개', '3개', '4개', '5개', '6개', '7개', '8개', '9개', '10개',
   '1+1', '2+1', '3+1', '1P', '2P', '3P', '1팩', '2팩', '1세트', '2세트',
-  '무료배송', '당일발송', '국내배송', '무료반품', '최저가', '특가', '세일',
-  '할인', '초특가', '핫딜', '타임딜', '쿠폰', '적립', '인기', '추천', '베스트',
+  // 배송/물류 관련
+  '무료배송', '당일발송', '국내배송', '무료반품', '당일배송', '익일배송',
+  '로켓배송', '로켓와우', '당일도착', '새벽배송', '도착', '도착보장', '배송',
+  '무료', '반품', '교환', '발송', '출고', '입고', '택배',
+  // 프로모션/가격 관련
+  '최저가', '특가', '세일', '할인', '초특가', '핫딜', '타임딜', '쿠폰',
+  '적립', '포인트', '캐시백', '리워드', '사은품', '증정', '덤', '서비스',
+  '인기', '추천', '베스트', '랭킹', '히트', '대박', '품절주의', '한정',
+  // 수량/단위 관련
+  '개당', '개입', '매입', '세트입', '묶음', '박스', '케이스', '다스',
+  '팩', '롤', '장', '매', '병', '봉', '포', '캔', '컵', '대', '짝',
+  // 품질/마케팅 수식어
   '고급', '프리미엄', '럭셔리', '대용량', '소용량', '미니', '슬림',
-  '정품', '국내정품', '수입정품', '공식', '공식판매',
+  '정품', '국내정품', '수입정품', '공식', '공식판매', '정식', '인증',
+  '신상', '신제품', '리뉴얼', '업그레이드', '개선', '최신',
+  '국산', '국내산', '수입', '해외', '직수입', '병행수입',
+  // 색상
   '블랙', '화이트', '그레이', '네이비', '베이지', '브라운', '핑크',
-  '레드', '블루', '그린', '옐로우', '퍼플', '오렌지',
+  '레드', '블루', '그린', '옐로우', '퍼플', '오렌지', '실버', '골드',
+  // 일반 불용어
+  '용품', '제품', '상품', '물건', '잡화', '기타', '전용', '겸용',
+  '세트', '패키지', '구성', '포함', '별도', '단품', '낱개',
 ]);
 
 // ---- 유명 브랜드 ----
@@ -956,9 +972,48 @@ function generateRuleBasedAnalysis(
     products: productAnalyses,
     topRecommendations: topRecs,
     searchSuggestions: {
-      relatedKeywords: [keyword, ...extractSmartKeywords(keyword).tokens].filter(Boolean),
-      avoidKeywords: [],
-      nicheSuggestion: '규칙 기반 분석입니다. AI 분석이 가능하면 더 정확한 니치 제안을 받을 수 있습니다.',
+      relatedKeywords: (() => {
+        // 상품 타이틀에서 의미있는 연관 키워드 추출
+        const NOISE = /^(세트|개입|묶음|패키지|특가|인기|추천|프리미엄|신상|무료배송|당일|국내|용품|제품|상품|전용|겸용|개당|매입|적립|도착|배송|발송|출고|택배|할인|쿠폰|세일|최저가|대용량|정품|수입|블랙|화이트|그레이|네이비|베이지|브라운|핑크|레드|블루|그린|골드|실버|호환|색상|컬러|포함|별도|판매|인증|고급|공식)$/;
+        const keyTokens = keyword.match(/[가-힣]{2,}/g) || [];
+        const wordCounts = new Map<string, number>();
+        for (const p of products.slice(0, 20)) {
+          const words = (p.productName || '').replace(/\[.*?\]/g, '').match(/[가-힣]{2,}/g) || [];
+          const seen = new Set<string>();
+          for (const w of words) {
+            if (seen.has(w) || w.length < 2 || NOISE.test(w)) continue;
+            if (keyTokens.some(kt => kt === w || w.includes(kt) || kt.includes(w))) continue;
+            seen.add(w);
+            wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+          }
+        }
+        // 3회+ 등장하는 의미있는 단어로 파생 키워드 조합
+        const meaningful = [...wordCounts.entries()]
+          .filter(([_, c]) => c >= 3)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([w]) => {
+            const core = keyTokens.filter(t => !w.includes(t)).join(' ');
+            return core ? `${w} ${core}` : `${w} ${keyword}`;
+          });
+        return meaningful.length > 0 ? meaningful : [keyword];
+      })(),
+      avoidKeywords: (() => {
+        // 고경쟁 키워드 경고
+        const avoid: string[] = [];
+        const highCompetition = products.filter(p => p.reviewCount >= 1000);
+        if (highCompetition.length > products.length * 0.5) {
+          avoid.push(`${keyword} (리뷰 1000+ 상품이 ${Math.round(highCompetition.length / products.length * 100)}% — 고경쟁)`);
+        }
+        return avoid;
+      })(),
+      nicheSuggestion: (() => {
+        const lowReview = products.filter(p => p.reviewCount < 50 && p.reviewCount > 0);
+        if (lowReview.length > 0) {
+          return `리뷰 50개 미만 상품이 ${lowReview.length}개 있습니다. 이 가격대(${Math.min(...lowReview.map(p=>p.price)).toLocaleString()}~${Math.max(...lowReview.map(p=>p.price)).toLocaleString()}원)에서 차별화된 상품으로 진입 가능합니다.`;
+        }
+        return '규칙 기반 분석입니다. AI 분석이 가능하면 더 정확한 니치 제안을 받을 수 있습니다.';
+      })(),
     },
   };
 }
