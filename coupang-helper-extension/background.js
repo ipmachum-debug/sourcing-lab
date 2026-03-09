@@ -1,17 +1,26 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v6.6
-   v6.6: 검색수요 분석 + 자동배치 토글 (쿠팡 탭 조건) + 분할 배치
-         + 키워드 선택 배치 + 배치 중지 기능
-   v6.5: 상세페이지 정밀파싱 연동 — saveDetailSnapshot 서버 저장,
-         content-detail.js v6.5 확장 필드 (vendorItemId, brandName,
-         manufacturer, origin, deliveryType, confidence, reviewSamples,
-         optionSummary, soldOut) 자동 수집 지원
-   v6.4: 자동 순회 수집기 — 50~90초 딜레이, 상세페이지 상위3개 보강
-         background는 수집 오케스트레이터 + 메시지 중계 + 데이터 저장
-   v5.3: content.js가 자체 URL 감지 (history 오버라이드 없음)
+   Coupang Sourcing Helper — Background Service Worker v7.0
+   v7.0: 하이브리드 수집 아키텍처 대개편
+         - Background fetch + DOMParser (셀러라이프 방식)
+         - V2 DOM 자동감지 (ProductUnit, aria-label 평점)
+         - 배송유형 6종 분류
+         - declarativeNetRequest 헤더 위조
+         - 배치 수집 완전 재작성 (순차 1개씩, 28~90초 간격)
+         - 모바일 리뷰 API 통합
+         - SSR JSON 파싱 폴백
+   v6.6: 검색수요 분석 + 자동배치 토글 + 분할 배치
+   v6.5: 상세페이지 정밀파싱 연동
+   v6.4: 자동 순회 수집기
+   v5.3: content.js가 자체 URL 감지
    ============================================================ */
 
 importScripts('api-client.js');
+importScripts('hybrid-parser.js');
+
+// ---- 유틸: 고유 요청 ID 생성 ----
+function generateRequestId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
 
 // ---- 설치/업데이트 시 열린 쿠팡 탭 자동 새로고침 ----
 chrome.runtime.onInstalled.addListener((details) => {
@@ -25,12 +34,15 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
+    // v7.0: declarativeNetRequest 헤더 위조 설정
+    HybridParser.setupCoupangHeaders().catch(() => {});
+
     chrome.tabs.query({ url: ['https://www.coupang.com/*', 'https://wing.coupang.com/*', 'https://m-wing.coupang.com/*'] }, (tabs) => {
       for (const tab of tabs) {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v6.5.0 — reloaded coupang tabs`);
+    console.log(`[SH] Extension ${details.reason}d — v7.0.0 — hybrid architecture`);
   }
 });
 
@@ -770,6 +782,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
     }
+
+    // ===== v7.0: 하이브리드 파싱 — Background에서 HTML 가져와서 파싱 =====
+    case 'HYBRID_PARSE_TAB': {
+      (async () => {
+        try {
+          const tabId = message.tabId || sender.tab?.id;
+          if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return; }
+          const html = await HybridParser.getRenderedHTML(tabId);
+          const result = HybridParser.parseSearchHTML(html, message.keyword || '');
+          sendResponse({ ok: true, data: result });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
+    // ===== v7.0: 모바일 리뷰 API 호출 =====
+    case 'FETCH_MOBILE_REVIEWS': {
+      HybridParser.fetchReviews(message.productId, message.maxPages).then(reviews => {
+        sendResponse({ ok: true, data: reviews });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
   }
 
   return false;
@@ -1320,35 +1358,24 @@ async function autoRunDailyBatch() {
 
 
 // ============================================================
-//  v6.4: 브라우저 기반 자동 순회 수집기 (Auto-Collect Orchestrator)
-//  "사용자 브라우저에서 천천히 도는 제한형 수집 큐"
+//  v7.0: 하이브리드 자동 수집기 (완전 재작성)
+//  "Background HTML fetch + DOMParser" 방식
 //
-//  상태머신:
-//    IDLE → RUNNING → WAITING_PAGE → PARSING → WAITING_NEXT → (loop)
-//    어디서든 → PAUSED, STOPPED
-//
-//  동작 흐름:
-//    1. 사이드패널에서 "자동 수집 시작"
-//    2. 서버에서 watch_keywords 큐 가져옴 (우선순위순)
-//    3. 쿠팡 탭 찾기/생성
-//    4. 키워드별로 검색 URL로 이동 → DOM 파싱 → 저장 → 다음
-//    5. 키워드 간 랜덤 20~90초 대기
-//
-//  안전장치:
-//    - 1회 실행 시 최대 50개
-//    - 20~90초 랜덤 딜레이
-//    - 페이지 로드 후 5~15초 추가 대기
-//    - 타임아웃 30초 (파싱 응답 없으면 실패 처리)
-//    - 실패 시 1회만 재시도
-//    - 중복 수집 방지 (오늘 이미 수집한 키워드 스킵)
+//  핵심 변경사항 (v6.4 대비):
+//  1. content.js 메시지 의존 완전 제거
+//  2. chrome.scripting.executeScript로 렌더링된 HTML 가져옴
+//  3. Background의 DOMParser로 V1/V2 자동 파싱
+//  4. 순차 처리 (1개씩), 28~90초 랜덤 딜레이
+//  5. 배치 크기 항상 1 (안전)
+//  6. 실패 시 더 긴 대기 (2~5분)
 // ============================================================
 
 const collector = {
-  status: 'IDLE', // IDLE | RUNNING | WAITING_PAGE | PARSING | WAITING_NEXT | COLLECTING_DETAIL | PAUSED | STOPPED
+  status: 'IDLE', // IDLE | RUNNING | NAVIGATING | PARSING | WAITING_NEXT | COLLECTING_DETAIL | PAUSED | STOPPED
   running: false,
   paused: false,
   queue: [],
-  current: null,          // { requestId, keyword, retryCount, startedAt }
+  current: null,          // { keyword, retryCount, startedAt }
   currentTabId: null,
   successCount: 0,
   failCount: 0,
@@ -1356,13 +1383,12 @@ const collector = {
   totalQueued: 0,
   lastError: null,
   startedAt: null,
-  _timeoutId: null,       // 파싱 타임아웃
   _delayTimeoutId: null,  // 딜레이 타이머
+  _aborted: false,        // 중단 플래그
 };
 
 // ---- 유틸 ----
-// 기본 딜레이: 50~90초 (약 1분 간격, 약간 랜덤)
-function randomDelay(min = 50000, max = 90000) {
+function randomDelay(min = 28000, max = 90000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
@@ -1372,10 +1398,6 @@ function collectorSleep(ms) {
   });
 }
 
-function generateRequestId() {
-  return `ac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
 function getCollectorState() {
   return {
     status: collector.status,
@@ -1383,7 +1405,6 @@ function getCollectorState() {
     paused: collector.paused,
     queueLength: collector.queue.length,
     currentKeyword: collector.current?.keyword || null,
-    currentRequestId: collector.current?.requestId || null,
     currentTabId: collector.currentTabId || null,
     successCount: collector.successCount,
     failCount: collector.failCount,
@@ -1408,6 +1429,7 @@ async function startAutoCollect(options = {}) {
   // 일시정지에서 재개
   if (collector.paused) {
     collector.paused = false;
+    collector._aborted = false;
     collector.status = 'RUNNING';
     console.log('[SH-AC] 수집 재개');
     runNextKeyword();
@@ -1419,13 +1441,15 @@ async function startAutoCollect(options = {}) {
     return { ok: false, error: '서버 로그인 필요' };
   }
 
-  const limit = Math.min(options.limit || 30, 200); // 최대 200개 (하루 3시간이면 약 180개)
-  const mode = options.mode || 'WATCH_KEYWORDS';  // WATCH_KEYWORDS | RECENT_KEYWORDS
-  const collectDetail = options.collectDetail !== false; // 상위 3개 상세 수집 (기본 true)
+  // v7.0: declarativeNetRequest 헤더 위조 적용
+  await HybridParser.setupCoupangHeaders().catch(() => {});
 
-  console.log(`[SH-AC] 자동 수집 시작 (limit=${limit}, mode=${mode})`);
+  const limit = Math.min(options.limit || 30, 200);
+  const collectDetail = options.collectDetail !== false;
 
-  // 큐 로드: 서버에서 우선순위 기반 키워드 가져오기
+  console.log(`[SH-AC] v7.0 하이브리드 수집 시작 (limit=${limit})`);
+
+  // 큐 로드
   try {
     const resp = await apiClient.getBatchKeywordSelection({ limit });
     const keywords = resp?.result?.data || [];
@@ -1444,6 +1468,7 @@ async function startAutoCollect(options = {}) {
     collector.totalQueued = collector.queue.length;
     collector.running = true;
     collector.paused = false;
+    collector._aborted = false;
     collector.status = 'RUNNING';
     collector.successCount = 0;
     collector.failCount = 0;
@@ -1453,7 +1478,7 @@ async function startAutoCollect(options = {}) {
 
     console.log(`[SH-AC] 큐 로드 완료: ${collector.queue.length}개 키워드`);
     collector.queue.forEach((k, i) => {
-      console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority}, 사유:${k.selectionReason})`);
+      console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority})`);
     });
 
     await runNextKeyword();
@@ -1469,9 +1494,9 @@ function stopAutoCollect() {
   console.log('[SH-AC] 수집 중단');
   collector.running = false;
   collector.paused = false;
+  collector._aborted = true;
   collector.status = 'STOPPED';
   collector.current = null;
-  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
   if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
 }
 
@@ -1480,6 +1505,7 @@ function pauseAutoCollect() {
   if (!collector.running) return;
   console.log('[SH-AC] 수집 일시정지');
   collector.paused = true;
+  collector._aborted = true;
   collector.status = 'PAUSED';
   if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
 }
@@ -1507,14 +1533,32 @@ async function ensureCoupangTab() {
     active: false,
   });
   collector.currentTabId = tab.id;
-  // 페이지 로드 대기
-  await collectorSleep(3000);
+  await collectorSleep(5000); // 초기 로드 대기
   return tab.id;
 }
 
-// ---- 다음 키워드 실행 ----
+// ---- 탭 네비게이션 완료 대기 ----
+function waitForTabLoad(tabId, maxWait = 30000) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const listener = (tid, changeInfo) => {
+      if (tid === tabId && changeInfo.status === 'complete') {
+        if (!resolved) { resolved = true; chrome.tabs.onUpdated.removeListener(listener); resolve(true); }
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      if (!resolved) { resolved = true; chrome.tabs.onUpdated.removeListener(listener); resolve(false); }
+    }, maxWait);
+  });
+}
+
+// ============================================================
+//  ★★★ 핵심: 다음 키워드 실행 (v7.0 완전 재작성) ★★★
+//  content.js 의존 제거 → Background에서 직접 HTML 가져와서 파싱
+// ============================================================
 async function runNextKeyword() {
-  if (!collector.running || collector.paused) return;
+  if (!collector.running || collector.paused || collector._aborted) return;
 
   const next = collector.queue.shift();
   if (!next) {
@@ -1524,7 +1568,6 @@ async function runNextKeyword() {
     collector.current = null;
     console.log(`[SH-AC] ✅ 자동 수집 완료: 성공 ${collector.successCount}, 실패 ${collector.failCount}, 스킵 ${collector.skipCount}`);
 
-    // 완료 알림
     chrome.notifications.create(`auto-collect-done-${Date.now()}`, {
       type: 'basic',
       iconUrl: 'icons/icon48.png',
@@ -1533,183 +1576,176 @@ async function runNextKeyword() {
       priority: 1,
     });
 
-    // 수집 후 일일 배치 실행 (집계/분석)
     try { await apiClient.runDailyBatchCollection(); } catch (_) {}
     return;
   }
 
-  const requestId = generateRequestId();
-  collector.current = {
-    requestId,
-    keyword: next.keyword,
-    retryCount: next.retryCount || 0,
-    startedAt: Date.now(),
-  };
+  collector.current = { keyword: next.keyword, retryCount: next.retryCount || 0, startedAt: Date.now() };
+  const keyword = next.keyword;
+  const progress = collector.successCount + collector.failCount + collector.skipCount + 1;
 
-  console.log(`[SH-AC] 🔍 키워드 수집 시작: "${next.keyword}" (${collector.successCount + collector.failCount + collector.skipCount + 1}/${collector.totalQueued})`);
+  console.log(`[SH-AC] 🔍 [${progress}/${collector.totalQueued}] 키워드 수집: "${keyword}"`);
 
   try {
+    // 1. 쿠팡 탭 확보
     const tabId = await ensureCoupangTab();
-    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(next.keyword)}`;
 
-    collector.status = 'WAITING_PAGE';
-
-    // 탭 이동
+    // 2. 검색 URL로 이동
+    collector.status = 'NAVIGATING';
+    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&page=1`;
     await chrome.tabs.update(tabId, { url });
 
-    // 파싱 타임아웃 설정 (30초)
-    collector._timeoutId = setTimeout(() => {
-      if (collector.current?.requestId === requestId) {
-        console.warn(`[SH-AC] ⏰ 파싱 타임아웃: "${next.keyword}"`);
-        handleAutoCollectFailed(requestId, next.keyword, 'TIMEOUT', '파싱 응답 없음 (30초 초과)');
-      }
-    }, 30000);
+    // 3. 페이지 로드 완료 대기 (최대 30초)
+    const loaded = await waitForTabLoad(tabId, 30000);
+    if (!loaded) {
+      console.warn(`[SH-AC] ⏰ 페이지 로드 타임아웃: "${keyword}"`);
+      await handleCollectFail(keyword, next.retryCount, 'TIMEOUT', '페이지 로드 30초 초과');
+      return;
+    }
 
-  } catch (e) {
-    console.error(`[SH-AC] 탭 이동 실패: "${next.keyword}"`, e.message);
-    handleAutoCollectFailed(requestId, next.keyword, 'TAB_ERROR', e.message);
-  }
-}
+    // 중단 체크
+    if (!collector.running || collector._aborted) return;
 
-// ---- tabs.onUpdated: 페이지 로드 완료 시 파싱 트리거 ----
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (!collector.running || !collector.current) return;
-  if (tabId !== collector.currentTabId) return;
-  if (changeInfo.status !== 'complete') return;
-  if (!tab.url?.includes('/np/search')) return;
+    // 4. DOM 렌더링 안정화 대기 (5~10초)
+    const renderDelay = Math.floor(Math.random() * 5000) + 5000;
+    console.log(`[SH-AC] 페이지 로드 완료, ${Math.round(renderDelay/1000)}초 렌더링 대기...`);
+    await collectorSleep(renderDelay);
 
-  // 페이지 로드 후 추가 대기 (2~5초) — DOM 렌더링 안정화
-  const extraDelay = Math.floor(Math.random() * 3000) + 2000;
-  console.log(`[SH-AC] 페이지 로드 완료, ${Math.round(extraDelay/1000)}초 후 파싱 요청...`);
+    if (!collector.running || collector._aborted) return;
 
-  collector.status = 'PARSING';
+    // ★★★ 5. Background에서 HTML 가져와서 파싱 (핵심!) ★★★
+    collector.status = 'PARSING';
+    console.log(`[SH-AC] 📄 HTML 가져오기 + 하이브리드 파싱 시작...`);
 
-  setTimeout(() => {
-    if (!collector.running || !collector.current) return;
+    const html = await HybridParser.getRenderedHTML(tabId);
+    if (!html || html.length < 1000) {
+      // 차단/비정상 페이지 확인
+      const isBlocked = /봇|robot|captcha|차단|접근.*불가|Access Denied/i.test(html);
+      await handleCollectFail(keyword, next.retryCount,
+        isBlocked ? 'ACCESS_BLOCKED' : 'EMPTY_HTML',
+        isBlocked ? '쿠팡 접근 차단' : 'HTML이 비어있음'
+      );
+      return;
+    }
 
-    chrome.tabs.sendMessage(tabId, {
-      type: 'START_PARSE_SEARCH',
-      requestId: collector.current.requestId,
-      keyword: collector.current.keyword,
-      pageUrl: tab.url,
-      isAutoCollect: true,
-    }).catch(err => {
-      console.error('[SH-AC] content.js 메시지 전송 실패:', err.message);
-      // content script가 아직 로드되지 않았을 수 있음 — 재시도
-      setTimeout(() => {
-        if (!collector.running || !collector.current) return;
-        chrome.tabs.sendMessage(tabId, {
-          type: 'START_PARSE_SEARCH',
-          requestId: collector.current.requestId,
-          keyword: collector.current.keyword,
-          pageUrl: tab.url,
-          isAutoCollect: true,
-        }).catch(() => {
-          handleAutoCollectFailed(
-            collector.current?.requestId,
-            collector.current?.keyword || '',
-            'CONTENT_SCRIPT_ERROR',
-            'content.js에 메시지 전송 불가'
-          );
-        });
-      }, 3000);
-    });
-  }, extraDelay);
-});
+    const result = HybridParser.parseSearchHTML(html, keyword);
 
-// ---- 자동 수집 성공 처리 ----
-async function handleAutoCollectSuccess(message) {
-  if (!collector.current) return;
-  if (message.requestId !== collector.current.requestId) return;
+    if (!result.items.length) {
+      console.warn(`[SH-AC] ❌ "${keyword}" 파싱 결과 0개`);
+      await handleCollectFail(keyword, next.retryCount, 'EMPTY_RESULT', '파싱된 상품 0개');
+      return;
+    }
 
-  // 타임아웃 해제
-  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
+    // 6. 성공 처리
+    console.log(`[SH-AC] ✅ "${keyword}" 수집 성공: ${result.items.length}개 (${result.domVersion}) | 평점${result.stats.ratingRate}% 리뷰${result.stats.reviewRate}%`);
 
-  const keyword = collector.current.keyword;
-  console.log(`[SH-AC] ✅ "${keyword}" 수집 성공 (${message.itemCount || 0}개 상품)`);
+    collector.successCount++;
+    collector.current = null;
 
-  collector.successCount++;
-  collector.current = null;
-
-  // 서버에 수집 완료 마킹
-  try {
-    await apiClient.markKeywordCollected({ keyword });
-  } catch (_) {}
-
-  // 검색 이벤트도 저장 (기존 하이브리드 수집과 통합)
-  if (message.searchEventData) {
+    // 서버에 검색 이벤트 저장
     try {
       await apiClient.saveSearchEvent({
-        ...message.searchEventData,
-        source: 'auto_collect',
+        keyword,
+        source: 'auto_collect_v7',
+        pageUrl: url,
+        totalItems: result.items.length,
+        items: result.items.slice(0, 36),
+        avgPrice: result.stats.avgPrice,
+        avgRating: result.stats.avgRating,
+        avgReview: result.stats.avgReview,
+        totalReviewSum: result.stats.totalReviewSum,
+        adCount: result.stats.adCount,
+        rocketCount: result.stats.rocketCount,
+        highReviewCount: result.stats.highReviewCount,
+        priceParseRate: result.stats.priceRate,
+        ratingParseRate: result.stats.ratingRate,
+        reviewParseRate: result.stats.reviewRate,
       });
     } catch (_) {}
-  }
 
-  // 상세 페이지 상위 3개 보강 수집
-  if (collector.collectDetail && message.result?.items?.length) {
-    const topItems = message.result.items
-      .filter(i => i.productId && !i.isAd)
-      .slice(0, 3);
+    try { await apiClient.markKeywordCollected({ keyword }); } catch (_) {}
 
-    if (topItems.length > 0) {
-      console.log(`[SH-AC] 📋 상위 ${topItems.length}개 상세 수집 시작...`);
-      collector.status = 'COLLECTING_DETAIL';
-      for (const item of topItems) {
-        if (!collector.running) break;
-        try {
-          await collectDetailForItem(item, keyword);
-          // 상세 페이지 간 20~40초 대기
-          await collectorSleep(randomDelay(20000, 40000));
-        } catch (e) {
-          console.warn(`[SH-AC] 상세 수집 실패: ${item.productId}`, e.message);
+    // 7. 상세 페이지 상위 3개 보강
+    if (collector.collectDetail && result.items.length) {
+      const topItems = result.items.filter(i => i.productId && !i.isAd).slice(0, 3);
+      if (topItems.length > 0) {
+        console.log(`[SH-AC] 📋 상위 ${topItems.length}개 상세 수집...`);
+        collector.status = 'COLLECTING_DETAIL';
+        for (const item of topItems) {
+          if (!collector.running || collector._aborted) break;
+          try {
+            await collectDetailForItem(item, keyword);
+            await collectorSleep(randomDelay(20000, 40000));
+          } catch (e) {
+            console.warn(`[SH-AC] 상세 수집 실패: ${item.productId}`, e.message);
+          }
         }
       }
     }
+
+    // 8. 다음 키워드 — 28~90초 랜덤 딜레이
+    if (!collector.running || collector._aborted) return;
+    const delay = randomDelay();
+    console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
+    collector.status = 'WAITING_NEXT';
+    await collectorSleep(delay);
+
+    await runNextKeyword();
+
+  } catch (e) {
+    console.error(`[SH-AC] "${keyword}" 수집 중 오류:`, e.message);
+    await handleCollectFail(keyword, next.retryCount, 'UNKNOWN', e.message);
   }
-
-  // 다음 키워드로 — 랜덤 50~90초 딜레이
-  const delay = randomDelay();
-  console.log(`[SH-AC] 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
-  collector.status = 'WAITING_NEXT';
-
-  await collectorSleep(delay);
-  await runNextKeyword();
 }
 
-// ---- 자동 수집 실패 처리 ----
-async function handleAutoCollectFailed(requestId, keyword, errorCode, errorMessage) {
-  if (!collector.current || collector.current.requestId !== requestId) return;
-
-  // 타임아웃 해제
-  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
-
-  console.warn(`[SH-AC] ❌ "${keyword}" 수집 실패: ${errorCode} — ${errorMessage}`);
-
+// ---- 수집 실패 처리 (v7.0 단순화) ----
+async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
+  console.warn(`[SH-AC] ❌ "${keyword}" 실패: ${errorCode} — ${errorMessage}`);
   collector.lastError = `${keyword}: ${errorCode}`;
 
   // 1회 재시도
-  if (collector.current.retryCount < 1) {
-    collector.queue.push({
-      keyword,
-      priority: 0,
-      retryCount: collector.current.retryCount + 1,
-    });
+  if (retryCount < 1) {
+    collector.queue.push({ keyword, priority: 0, retryCount: retryCount + 1 });
   } else {
     collector.failCount++;
-    // 서버에 실패 기록
-    try {
-      await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage });
-    } catch (_) {}
+    try { await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage }); } catch (_) {}
   }
 
   collector.current = null;
+
+  if (!collector.running || collector._aborted) return;
 
   // 실패 시 더 긴 대기 (2~5분)
   const delay = randomDelay(120000, 300000);
   collector.status = 'WAITING_NEXT';
   await collectorSleep(delay);
   await runNextKeyword();
+}
+
+// ---- 자동 수집 성공 처리 (content.js에서 호출되는 기존 방식 유지, 하위호환) ----
+async function handleAutoCollectSuccess(message) {
+  // v7.0에서는 background 직접 파싱이 주력이므로 이 함수는 하위호환용
+  if (!collector.current) return;
+  if (message.requestId && message.requestId !== collector.current?.requestId) return;
+
+  if (collector._timeoutId) { clearTimeout(collector._timeoutId); collector._timeoutId = null; }
+
+  const keyword = collector.current.keyword;
+  console.log(`[SH-AC] ✅ (content) "${keyword}" 수집 성공 (${message.itemCount || 0}개)`);
+  collector.successCount++;
+  collector.current = null;
+
+  try { await apiClient.markKeywordCollected({ keyword }); } catch (_) {}
+  if (message.searchEventData) {
+    try { await apiClient.saveSearchEvent({ ...message.searchEventData, source: 'auto_collect' }); } catch (_) {}
+  }
+}
+
+// ---- 자동 수집 실패 처리 (하위호환) ----
+async function handleAutoCollectFailed(requestId, keyword, errorCode, errorMessage) {
+  if (!collector.current) return;
+  console.warn(`[SH-AC] ❌ (content) "${keyword}" 실패: ${errorCode}`);
+  await handleCollectFail(keyword, collector.current.retryCount || 0, errorCode, errorMessage);
 }
 
 // ---- 상세 페이지 수집 (상위 N개 보강) ----

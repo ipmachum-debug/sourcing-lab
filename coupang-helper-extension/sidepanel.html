@@ -228,6 +228,42 @@
         </div>
       </div>
 
+      <!-- ★ v7.0: 하이브리드 자동 수집기 (Background fetch + DOMParser) ★ -->
+      <div class="analysis-card" id="autoCollectCard" style="display:none">
+        <div class="competition-header">
+          <span class="competition-label">🔍 자동 순회 수집 v7.0</span>
+          <span class="competition-badge" id="autoCollectStatusBadge">준비</span>
+        </div>
+        <p class="desc" style="font-size:10px;color:#64748b;margin:4px 0">
+          Background에서 HTML을 직접 가져와 파싱합니다 (V1/V2 자동 전환, 배송 6종, aria-label 평점).<br/>
+          <small>순차 1개씩 · 28~90초 랜덤 간격 · 실패 시 2~5분 대기 후 1회 재시도</small>
+        </p>
+        <div class="demand-batch-size-row" style="margin-top:6px">
+          <label style="font-size:10px">키워드 수:</label>
+          <select id="autoCollectLimitSelect" style="font-size:10px;padding:2px 4px">
+            <option value="10">10개</option>
+            <option value="20">20개</option>
+            <option value="30" selected>30개</option>
+            <option value="50">50개</option>
+            <option value="100">100개</option>
+          </select>
+          <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" checked /> 상세 Top3</label>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1">▶ 자동 수집 시작</button>
+          <button class="btn-sm" id="pauseAutoCollectBtn" style="display:none;background:#f59e0b;color:#fff">⏸ 일시정지</button>
+          <button class="btn-sm" id="stopAutoCollectBtn" style="display:none;background:#dc2626;color:#fff">⏹ 중단</button>
+        </div>
+        <!-- 수집 진행 상황 -->
+        <div id="autoCollectProgress" style="display:none;margin-top:8px">
+          <div class="demand-batch-progress" style="display:block">
+            <div class="demand-progress-fill" id="autoCollectProgressFill" style="width:0%"></div>
+            <span class="demand-progress-text" id="autoCollectProgressText">0/0</span>
+          </div>
+          <div id="autoCollectLog" style="margin-top:4px;font-size:9px;color:#64748b;max-height:80px;overflow-y:auto"></div>
+        </div>
+      </div>
+
       <!-- 키워드 목록 -->
       <div class="demand-kw-header" id="demandKwHeader" style="display:none">
         <div class="demand-kw-sort">

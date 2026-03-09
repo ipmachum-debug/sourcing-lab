@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v6.6.2
+   Coupang Sourcing Helper — Content Script v7.0.0
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -7,6 +7,12 @@
    2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
+
+   v7.0.0 하이브리드 아키텍처:
+   - V2 React DOM 자동감지 (#product-list > li[class^="ProductUnit_productUnit"])
+   - aria-label 평점 추출 (셀러라이프 방식)
+   - 배송유형 6종 분류 (data-badge-id 기반)
+   - V1/V2 자동 전환 + SSR JSON 폴백 (Background 파서 연동)
 
    v6.6.2 평점 파싱 강화:
    - 쿠팡 2026 DOM 변경 대응: 별점 텍스트 미표시 대응
@@ -43,7 +49,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.6.2';
+  const VER = '7.0.0';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -502,21 +508,36 @@
   function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
   // ============================================================
-  //  ★★★ 상품 파싱 v5.5.3 ★★★
+  //  ★★★ 상품 파싱 v7.0 (하이브리드) ★★★
   //
   //  핵심 전략:
+  //  0. V2 React DOM 감지 (셀러라이프 방식: #product-list > li[class^="ProductUnit_productUnit"])
   //  1. 각 상품 카드의 개별 DOM 요소를 하나씩 순회
   //  2. 각 요소의 텍스트를 분석하여 역할 파악
   //  3. "적립", "당", "배송비" 등이 포함된 가격 텍스트는 확실히 제외
   //  4. 별점은 star 관련 요소의 width 비율 또는 aria-label에서 추출
   //  5. 리뷰수는 "(\d+)" 패턴에서 추출, 단위가격 괄호 제외
+  //  6. 배송유형 6종 분류 (rocket, seller-rocket, global-rocket, normal, overseas, unknown)
   // ============================================================
   function parseProducts() {
     const items = [], seen = new Set(), q = getQ();
 
-    // ── 상품 카드 수집 ──────────────────────
-    // 방법 A: <li class*="search-product"> 기반
-    let productBoxes = [...document.querySelectorAll('li[class*="search-product"]')];
+    // ── V2 DOM 감지 (셀러라이프 coupangItemSummaryV2 방식) ──────
+    // 2025~2026 React 기반 DOM: #product-list > li[class^="ProductUnit_productUnit"]
+    let isV2 = false;
+    let productBoxes = [...document.querySelectorAll('#product-list > li[class^="ProductUnit_productUnit"]')];
+    if (productBoxes.length > 0) {
+      isV2 = true;
+      // V2 광고 카드 제외
+      productBoxes = productBoxes.filter(el => !el.querySelector('[class*="AdMark_adMark"]'));
+      console.log(`[SH] V2 DOM 감지: ${productBoxes.length}개 상품 카드 (React)`);
+    }
+
+    // ── V1 폴백: 상품 카드 수집 ──────────────────────
+    if (!productBoxes.length) {
+      // 방법 A: <li class*="search-product"> 기반
+      productBoxes = [...document.querySelectorAll('li[class*="search-product"]')];
+    }
 
     // 방법 B: fallback — productList 내 li
     if (!productBoxes.length) {
@@ -541,12 +562,14 @@
     for (const box of productBoxes) {
       if (items.length >= MAX) break;
 
-      // 상품 링크 찾기
-      const link = box.querySelector('a[href*="/vp/products/"]');
+      // 상품 링크 찾기 (V2: <a> 직접, V1: href 패턴)
+      const link = isV2
+        ? (box.querySelector('a[href*="/vp/products/"], a[href*="/products/"]') || box.querySelector('a'))
+        : box.querySelector('a[href*="/vp/products/"]');
       if (!link) continue;
 
       const linkHref = link.href || link.getAttribute('href') || '';
-      const m = linkHref.match(/\/vp\/products\/(\d+)/);
+      const m = linkHref.match(/\/products\/(\d+)/);
       if (!m) continue;
       const pid = m[1];
       if (seen.has(pid)) continue;
@@ -557,16 +580,41 @@
       const vidMatch = linkHref.match(/[?&]vendorItemId=(\d+)/i) || linkHref.match(/[?&]itemId=(\d+)/i);
       if (vidMatch) vendorItemId = vidMatch[1];
 
-      // ── 상품명 ──────────────────────────────
-      const nameEl = box.querySelector('div.name, [class*="name"], [class*="title"]');
+      // ── 상품명 (V2 우선 셀렉터 추가) ──────────────────────────────
+      let nameEl;
+      if (isV2) {
+        nameEl = box.querySelector('[class*="ProductUnit_productName"], [class*="ProductUnit_productInfo"] [class*="name"]');
+      }
+      if (!nameEl) nameEl = box.querySelector('div.name, [class*="name"], [class*="title"]');
       const title = (nameEl ? tx(nameEl) : '') || tx(link) || (box.querySelector('img')?.alt || '');
       if (!title || title.length < 3) continue;
 
       // ══════════════════════════════════════════
-      // ▶ 가격 추출 (v6.3.0 — 강화)
+      // ▶ 가격 추출 (v7.0 — V2 + V1 하이브리드)
       // ══════════════════════════════════════════
       let price = 0;
       let originalPrice = 0;
+
+      // V2 전용 가격 선택자 (셀러라이프 방식)
+      if (isV2) {
+        const v2PriceEl = box.querySelector('[class*="Price_priceValue"]');
+        if (v2PriceEl) price = nm(tx(v2PriceEl));
+        if (!price) {
+          // PriceArea 내 값 탐색
+          const priceArea = box.querySelector('[class*="PriceArea_priceArea"]');
+          if (priceArea) {
+            for (const d of priceArea.querySelectorAll('div, span, strong')) {
+              const t = tx(d);
+              if (t && t.endsWith('원') && !t.includes('%') && (t.includes(',') || /\d{3,}원/.test(t))) {
+                const p = nm(t);
+                if (p > 100) { price = p; break; }
+              }
+            }
+          }
+        }
+        const v2BaseEl = box.querySelector('[class*="Price_basePrice"], [class*="OriginalPrice"], del');
+        if (v2BaseEl) originalPrice = nm(tx(v2BaseEl));
+      }
 
       // 전략 0: 쿠팡 2026 search-product 전용 선택자
       const spPriceEl = box.querySelector(
@@ -711,13 +759,38 @@
       }
 
       // ══════════════════════════════════════════
-      // ▶ 평점 추출 (v6.3.0 — 16단계 전략 강화)
+      // ▶ 평점 추출 (v7.0 — V2 aria-label 우선 + V1 16단계 전략)
       // 쿠팡 2026 DOM: React hydration으로 클래스 랜덤화
       // → 복수의 선택자, 텍스트 패턴, style, data 속성, aria 등 다각도 탐색
       // 추정값(4.0/4.5)은 최후의 최후 수단으로만 사용
       // ══════════════════════════════════════════
       let rating = 0;
       let ratingIsEstimated = false; // 추정값 여부 플래그
+
+      // ★★★ V2 전략: aria-label 평점 추출 (셀러라이프 핵심 방식) ★★★
+      // V2 DOM에서는 aria-label="4.5" 속성으로 평점을 표시
+      if (isV2) {
+        const ariaEl = box.querySelector('[aria-label]');
+        if (ariaEl) {
+          const ariaVal = ariaEl.getAttribute('aria-label');
+          const rMatch = ariaVal?.match(/([\d.]+)/);
+          if (rMatch) {
+            const r = parseFloat(rMatch[1]);
+            if (r >= 1.0 && r <= 5.0) rating = r;
+          }
+        }
+        // V2 폴백: ProductRating 컨테이너 텍스트
+        if (!rating) {
+          const v2RatingEl = box.querySelector('[class*="ProductRating"], [class*="productRating"]');
+          if (v2RatingEl) {
+            const rMatch = tx(v2RatingEl).match(/([\d.]+)/);
+            if (rMatch) {
+              const r = parseFloat(rMatch[1]);
+              if (r >= 1.0 && r <= 5.0) rating = r;
+            }
+          }
+        }
+      }
 
       // 전략 0: 쿠팡 2026 search-product 전용 선택자 (가장 정확)
       // <div class="search-product__rating"> <em class="search-product__rating-score">4.5</em>
@@ -988,10 +1061,33 @@
       // (리뷰수 추출 후 재시도용 — 전략 8~12는 아래에서 실행)
 
       // ══════════════════════════════════════════
-      // ▶ 리뷰수 추출 (v6.3.0 — 강화)
+      // ▶ 리뷰수 추출 (v7.0 — V2 + V1 하이브리드)
       // ══════════════════════════════════════════
       let reviewCount = 0;
       let reviewParsed = false; // 리뷰수를 실제로 파싱했는지 여부
+
+      // ★★★ V2 전략: ProductRating 컨테이너에서 리뷰수 추출 (셀러라이프 방식) ★★★
+      if (isV2) {
+        const v2ReviewEl = box.querySelector('[class*="ProductRating_productRating"]');
+        if (v2ReviewEl) {
+          const rMatch = tx(v2ReviewEl).match(/\(?(\d[\d,]*)\)?/);
+          if (rMatch) {
+            const v = nm(rMatch[1]);
+            if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; }
+          }
+        }
+        // V2 폴백: 모든 괄호 숫자
+        if (!reviewCount) {
+          const allText = tx(box);
+          const matches = allText.match(/\((\d[\d,]*)\)/g);
+          if (matches) {
+            for (const m of matches) {
+              const v = nm(m);
+              if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; break; }
+            }
+          }
+        }
+      }
 
       // 전략 0: 쿠팡 2026 search-product 전용 선택자
       const revScoreEl = box.querySelector(
@@ -1412,13 +1508,20 @@
       const imageUrl = img?.src || img?.getAttribute('data-img-src') || img?.getAttribute('data-src') || '';
 
       // ══════════════════════════════════════════
-      // ▶ 광고 감지 (v5.5.3 — 강화)
+      // ▶ 광고 감지 (v7.0 — V2 + V1)
       // ══════════════════════════════════════════
       let isAd = false;
 
+      // V2 광고: AdMark 셀렉터 (셀러라이프 방식)
+      if (isV2) {
+        isAd = !!box.querySelector('[class*="AdMark_text"], [class*="AdMark_adMark"], [class*="ad-badge"]');
+      }
+
       // 1) li 클래스에 ad-badge 관련
-      const boxCls = box.className || '';
-      isAd = /search-product__ad-badge|ad[-_]?badge|AdBadge/i.test(boxCls);
+      if (!isAd) {
+        const boxCls = box.className || '';
+        isAd = /search-product__ad-badge|ad[-_]?badge|AdBadge/i.test(boxCls);
+      }
 
       // 2) 내부 ad-badge 엘리먼트
       if (!isAd) {
@@ -1447,27 +1550,25 @@
       // ══════════════════════════════════════════
       let rankNum = 0;
       if (!isAd) {
-        // 이미지 컨테이너 근처의 작은 숫자 배지
-        const imgContainer = box.querySelector('[class*="image"], [class*="thumbnail"], [class*="photo"]') || box;
-        for (const el of imgContainer.querySelectorAll('span, div, em, strong')) {
-          const t = tx(el).trim();
-          if (/^\d{1,2}$/.test(t)) {
-            const n = parseInt(t, 10);
-            if (n >= 1 && n <= 50) {
-              // 크기 확인 — 배지는 작은 요소
-              const rect = el.getBoundingClientRect?.();
-              if (rect && rect.width > 0 && rect.width < 60 && rect.height < 60) {
-                rankNum = n;
-                break;
-              }
-              // getBoundingClientRect 없으면 클래스명 힌트
-              if (/badge|rank|num|position/i.test(el.className || '')) {
-                rankNum = n;
-                break;
-              }
-              // 마지막 수단: 짧은 텍스트(2자 이하)면서 부모도 작은 경우
-              if (t.length <= 2 && !rankNum) {
-                rankNum = n;
+        if (isV2) {
+          const rankEl = box.querySelector('[class*="RankMark_rank"]');
+          if (rankEl) rankNum = parseInt(tx(rankEl).replace(/[^0-9]/g, '')) || 0;
+        }
+        if (!rankNum) {
+          const imgContainer = box.querySelector('[class*="image"], [class*="thumbnail"], [class*="photo"]') || box;
+          for (const el of imgContainer.querySelectorAll('span, div, em, strong')) {
+            const t = tx(el).trim();
+            if (/^\d{1,2}$/.test(t)) {
+              const n = parseInt(t, 10);
+              if (n >= 1 && n <= 50) {
+                const rect = el.getBoundingClientRect?.();
+                if (rect && rect.width > 0 && rect.width < 60 && rect.height < 60) {
+                  rankNum = n; break;
+                }
+                if (/badge|rank|num|position/i.test(el.className || '')) {
+                  rankNum = n; break;
+                }
+                if (t.length <= 2 && !rankNum) rankNum = n;
               }
             }
           }
@@ -1475,37 +1576,95 @@
       }
 
       // ══════════════════════════════════════════
-      // ▶ 로켓배송 감지
+      // ▶ 배송유형 6종 분류 (v7.0 — 셀러라이프 방식)
+      //   rocket, sellerRocket, globalRocket, normal, overseas, unknown
       // ══════════════════════════════════════════
+      let deliveryType = 'unknown';
+      let deliveryLabel = '미분류';
       let isRocket = false;
 
-      // 1) 클래스 기반
-      isRocket = !!box.querySelector('.badge-rocket, [class*="badge-rocket"], [class*="rocket-icon"], [class*="RocketBadge"], [class*="rocket_icon"], [class*="Rocket"]');
-
-      // 2) 이미지 alt/src에 rocket
-      if (!isRocket) {
-        for (const imgEl of box.querySelectorAll('img')) {
-          const alt = (imgEl.alt || '').toLowerCase();
-          const src = (imgEl.src || imgEl.getAttribute('data-img-src') || '').toLowerCase();
-          if (/rocket|로켓/i.test(alt) || /rocket/i.test(src)) { isRocket = true; break; }
+      // 전략 1: data-badge-id 속성 (가장 정확 — 셀러라이프 핵심)
+      const badgeEl = box.querySelector('[data-badge-id]');
+      if (badgeEl) {
+        const badgeId = badgeEl.getAttribute('data-badge-id');
+        if (badgeId === 'ROCKET' || badgeId === 'TOMORROW' || badgeId === 'ROCKET_FRESH') {
+          deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true;
+        } else if (badgeId === 'COUPANG_GLOBAL') {
+          deliveryType = 'globalRocketDelivery'; deliveryLabel = '로켓직구'; isRocket = true;
+        } else if (badgeId === 'ROCKET_MERCHANT') {
+          deliveryType = 'sellerRocketDelivery'; deliveryLabel = '판매자로켓'; isRocket = true;
         }
       }
 
-      // 3) 텍스트 기반
-      if (!isRocket) {
-        const boxText = tx(box);
-        isRocket = /로켓배송|로켓와우|로켓프레시|로켓직구/.test(boxText);
+      // 전략 2: 이미지 배지 URL 패턴 (셀러라이프 getProductDeliveryType)
+      if (deliveryType === 'unknown') {
+        for (const imgEl of box.querySelectorAll('img[src], img[data-src], img[data-img-src]')) {
+          const src = (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || imgEl.getAttribute('data-img-src') || '').toLowerCase();
+          if (src.includes('logo_rocket') || src.includes('badge_1998ab96bf7') || src.includes('rocket_install') || src.includes('rocket-install')) {
+            deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; break;
+          }
+          if (src.includes('rds') && (src.includes('rocketmerchant') || src.includes('badge_199559e56f7') || src.includes('badge_1998ac2b665'))) {
+            deliveryType = 'sellerRocketDelivery'; deliveryLabel = '판매자로켓'; isRocket = true; break;
+          }
+          if ((src.includes('rds') && src.includes('jikgu')) || src.includes('badge/badge')) {
+            deliveryType = 'globalRocketDelivery'; deliveryLabel = '로켓직구'; isRocket = true; break;
+          }
+        }
       }
 
-      // 4) "새벽 도착 보장" 또는 "내일(X) 도착 보장"
-      if (!isRocket) {
-        const boxText = tx(box);
-        isRocket = /새벽\s*도착\s*보장/.test(boxText) || /내일\([^)]+\)\s*(새벽\s*)?도착\s*보장/.test(boxText);
+      // 전략 3: 이미지 alt 텍스트
+      if (deliveryType === 'unknown') {
+        for (const imgEl of box.querySelectorAll('img')) {
+          const alt = (imgEl.alt || '').toLowerCase();
+          const src = (imgEl.src || '').toLowerCase();
+          if (/로켓배송/.test(alt)) {
+            if (src.includes('rds')) { deliveryType = 'sellerRocketDelivery'; deliveryLabel = '판매자로켓'; }
+            else { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; }
+            isRocket = true; break;
+          }
+          if (/로켓직구/.test(alt)) { deliveryType = 'globalRocketDelivery'; deliveryLabel = '로켓직구'; isRocket = true; break; }
+          if (/rocket/i.test(alt) || /rocket/i.test(src)) { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; break; }
+        }
       }
 
-      // 5) "오늘출발" — 로켓배송 표시일 가능성 높음
-      if (!isRocket) {
-        isRocket = /오늘\s*출발/.test(tx(box));
+      // 전략 4: 클래스 기반 (기존 V1 로직)
+      if (deliveryType === 'unknown') {
+        if (box.querySelector('.badge-rocket, [class*="badge-rocket"], [class*="rocket-icon"], [class*="RocketBadge"], [class*="Rocket"]')) {
+          deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true;
+        }
+      }
+
+      // 전략 5: 텍스트 기반
+      if (deliveryType === 'unknown') {
+        const boxText = tx(box);
+        if (/로켓배송|로켓와우|로켓프레시/.test(boxText)) { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; }
+        else if (/로켓직구/.test(boxText)) { deliveryType = 'globalRocketDelivery'; deliveryLabel = '로켓직구'; isRocket = true; }
+        else if (/새벽\s*도착\s*보장|내일\([^)]+\)\s*(새벽\s*)?도착\s*보장|오늘\s*출발/.test(boxText)) { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; }
+      }
+
+      // 전략 6: 도착예정일 기반 해외직구 판별 (셀러라이프 방식)
+      if (deliveryType === 'unknown') {
+        const deliverySpan = box.querySelector('[class*="DeliveryInfo"] span, .arrival-info em, [class*="delivery"] span');
+        if (deliverySpan) {
+          const text = tx(deliverySpan);
+          const dateMatch = text.match(/(\d{1,2})\/(\d{1,2})/);
+          if (dateMatch) {
+            const month = parseInt(dateMatch[1]);
+            const day = parseInt(dateMatch[2]);
+            const now = new Date();
+            let arrival = new Date(now.getFullYear(), month - 1, day);
+            if (arrival < now) arrival = new Date(now.getFullYear() + 1, month - 1, day);
+            const diff = arrival - now;
+            if (diff > 7 * 24 * 60 * 60 * 1000) {
+              deliveryType = 'internationalDelivery'; deliveryLabel = '해외직구';
+            } else {
+              deliveryType = 'normalDelivery'; deliveryLabel = '일반배송';
+            }
+          }
+          if (deliveryType === 'unknown' && (text.includes('내일') || text.includes('모레'))) {
+            deliveryType = 'normalDelivery'; deliveryLabel = '일반배송';
+          }
+        }
       }
 
       const href = (link.href || '').startsWith('http') ? link.href : 'https://www.coupang.com' + (link.getAttribute('href') || '');
@@ -1527,7 +1686,8 @@
         ratingIsEstimated, reviewParsed, confidence,
         url: href, imageUrl,
         position: items.length + 1, query: q,
-        isAd, isRocket, rankNum,
+        isAd, isRocket, deliveryType, deliveryLabel, rankNum,
+        domVersion: isV2 ? 'V2' : 'V1',
         _box: box,
       });
     }
@@ -1540,12 +1700,17 @@
       const adCnt = items.filter(i => i.isAd).length;
       const rkCnt = items.filter(i => i.isRocket).length;
       const rankCnt = items.filter(i => i.rankNum > 0).length;
-      console.log(`%c[SH] v${VER} 파싱 완료: ${items.length}개 | 가격${pCnt} 평점${rCnt} 리뷰${rvCnt} 광고${adCnt} 로켓${rkCnt} 순위${rankCnt}`, 'color:#6366f1;font-weight:bold;');
+      const domVer = isV2 ? 'V2' : 'V1';
+      // 배송유형 분포
+      const dtCounts = {};
+      items.forEach(i => { dtCounts[i.deliveryType] = (dtCounts[i.deliveryType] || 0) + 1; });
+      const dtStr = Object.entries(dtCounts).map(([k,v]) => `${k}:${v}`).join(' ');
+      console.log(`%c[SH] v${VER} 파싱 완료 (${domVer}): ${items.length}개 | 가격${pCnt} 평점${rCnt} 리뷰${rvCnt} 광고${adCnt} 로켓${rkCnt} 순위${rankCnt} | 배송: ${dtStr}`, 'color:#6366f1;font-weight:bold;');
       // 처음 5개 상품 상세 로그
       items.slice(0, 5).forEach((it, i) => {
         const rFlag = it.ratingIsEstimated ? '(추정)' : '';
         const rvFlag = it.reviewParsed ? '' : '(미파싱)';
-        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | 가격:${it.price.toLocaleString()}원 | ★${it.rating}${rFlag} | 리뷰:${it.reviewCount.toLocaleString()}${rvFlag} | ${it.isAd?'AD':'일반'} | ${it.isRocket?'🚀':'-'} | rank=${it.rankNum} | conf=${it.confidence}`);
+        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | 가격:${it.price.toLocaleString()}원 | ★${it.rating}${rFlag} | 리뷰:${it.reviewCount.toLocaleString()}${rvFlag} | ${it.isAd?'AD':'일반'} | ${it.deliveryLabel} | rank=${it.rankNum} | conf=${it.confidence}`);
       });
     }
     return items;
@@ -2055,7 +2220,10 @@
         let listFound = false;
 
         while (Date.now() - start < maxWait) {
-          const list = document.querySelector('li[class*="search-product"], .search-product');
+          const list = document.querySelector(
+            'li[class*="search-product"], .search-product, ' +
+            '#product-list > li[class^="ProductUnit_productUnit"]'
+          );
           if (list) { listFound = true; break; }
           await new Promise(r => setTimeout(r, 500));
         }
