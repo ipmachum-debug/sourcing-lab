@@ -1,6 +1,6 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.2.3
-   v7.2.3: 검색시 통계 자동 산출 + saveSearchEvent 데이터 동기화
+   Coupang Sourcing Helper — Background Service Worker v7.2.4
+   v7.2.4: 검색시 통계 자동 산출 + saveSearchEvent 데이터 동기화
    v7.2.2: 자동 수집 UNKNOWN 에러 수정 + 딜레이 최적화 + 상태 관리 강화
    v7.2.1: 마진 계산기 셀러라이프 방식 전면 반영 + API 통신 강화
    v7.2: 셀러라이프 수집방식 전면 반영 (대개편)

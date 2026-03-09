@@ -360,7 +360,7 @@ const HybridParser = {
       let price = 0, originalPrice = 0;
       // 전략 1: Price_priceValue 클래스
       const priceEl = card.querySelector('[class*="Price_priceValue"]');
-      if (priceEl) price = this._parseNumber(priceEl.textContent);
+      if (priceEl) { const p = this._parseNumber(priceEl.textContent); if (p >= 100 && p < 1e8) price = p; }
       // 전략 2: PriceArea 내 '원' 포함 텍스트
       if (!price) {
         const priceArea = card.querySelector('[class*="PriceArea"], [class*="priceArea"], [class*="price-area"]');
@@ -1029,7 +1029,19 @@ const HybridParser = {
   },
 
   _parseNumber(str) {
-    return parseInt((str || '').replace(/[^0-9]/g, ''), 10) || 0;
+    if (!str) return 0;
+    str = str.trim();
+    // "N,NNN원" or "N,NNN" pattern
+    const priceMatch = str.match(/(\d{1,3}(?:,\d{3})+)\s*원?$/);
+    if (priceMatch) return parseInt(priceMatch[1].replace(/,/g, ''), 10) || 0;
+    // "NNN원" pattern
+    const simpleMatch = str.match(/(\d+)\s*원?$/);
+    if (simpleMatch) return parseInt(simpleMatch[1], 10) || 0;
+    // Pure number with commas
+    const commaMatch = str.match(/(\d{1,3}(?:,\d{3})+)/);
+    if (commaMatch) return parseInt(commaMatch[1].replace(/,/g, ''), 10) || 0;
+    // Fallback: strip non-digits
+    return parseInt(str.replace(/[^0-9]/g, ''), 10) || 0;
   },
 
   _getChromeVersion() {
