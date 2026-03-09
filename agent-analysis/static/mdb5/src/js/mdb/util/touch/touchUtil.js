@@ -1,0 +1,1 @@
+export default class{_getCoordinates(t){const[e]=t.touches;return{x:e.clientX,y:e.clientY}}_getDirection(t){return{x:{direction:t.x<0?"left":"right",value:Math.abs(t.x)},y:{direction:t.y<0?"up":"down",value:Math.abs(t.y)}}}}

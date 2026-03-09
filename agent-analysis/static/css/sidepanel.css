@@ -1,0 +1,930 @@
+/*
+@font-face {
+  font-family: 'Pretendard-Regular';
+  src: url('../font/Pretendard-1.3.6/Pretendard-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+} */
+
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('../font/Pretendard-1.3.8/PretendardVariable.woff2') format('woff2');
+  font-style: normal;
+}
+
+html {
+  font-size: 16px;
+}
+body {
+  font-family: 'Pretendard Variable';
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.extension {
+  width: 100%;
+  border-radius: 8px;
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.extension > .logo {
+  padding: 20px 20px;
+}
+
+.extension .logo-img {
+  cursor: pointer;
+  object-fit: contain;
+  height: 29px;
+  width: auto;
+}
+
+.extension > ul.nav {
+  margin: 20px 0px;
+}
+
+.extension > ul > li > button {
+  margin: 0 2px;
+}
+
+.extension > ul > li:not(:last-child) {
+  border-right: 1px solid #e0e0e0;
+  flex: 1;
+}
+
+.extension > ul > li > button.nav-link {
+  margin-top: 10px;
+  padding: 0 12px;
+  height: 40px;
+  font-size: 14px;
+  font-weight: 500;
+  background: #f4f6fa;
+  color: #373f57;
+  width: 100%;
+}
+
+.extension > ul > li > button.nav-link.active {
+  border: none;
+  background: #2b3e4f;
+  color: #fff;
+}
+
+.extension > ul > li > button.settings-tab {
+  width: 40px;
+  height: 40px;
+  background-image: url('/static/img/setting-icon.svg');
+  background-size: 16px 18px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.extension > ul > li > button.settings-tab.active {
+  background-image: url('/static/img/setting-icon-active.svg');
+  background-size: 16px 18px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.extension > .tab-content {
+  /* height: 100%; */
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.extension > .tab-content > .tab-pane {
+  /* height: 100%; */
+  height: auto;
+  /* overflow: visible; */
+}
+
+.extension > .tab-content > .tab-pane ::placeholder {
+  font-size: 12px;
+  color: #373f57;
+}
+
+#sourcing0 {
+  height: 100%;
+  overflow: hidden;
+}
+
+#sourcing-frame {
+  width: 100%;
+  height: 100% !important;
+  border: none;
+  display: block;
+}
+
+.tab-pane > section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  position: relative;
+  padding: 0px 10px;
+  padding-bottom: 20px;
+}
+
+.tab-pane > section:not(:last-child) {
+  border-bottom: 4px solid #e1e7f3;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.section-calc {
+  padding: 0px !important;
+  /* max-height: calc(100vh - 360px);
+  overflow: hidden; */
+}
+
+.section-title-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.section-url-total {
+  position: absolute;
+  right: 10px;
+  top: 0;
+  color: #8d939f;
+  font-size: 14px;
+}
+
+.section-url-total .url-total-num {
+  color: #6633ce;
+}
+
+.title-keyword {
+  color: #009fee;
+}
+
+.title-image {
+  color: #3868eb;
+}
+
+.title-url {
+  color: #6633ce;
+}
+
+.title-calc {
+  padding: 10px;
+  color: #16927e;
+}
+
+.keyword-search-box {
+  display: flex;
+  gap: 3px;
+}
+
+.extension .tab-pane .keyword-search-box input {
+  color: #2b3e4f;
+  border: 1px solid #e1e7f3;
+  border-radius: 8px;
+  height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+  width: 100%;
+  padding: 0 10px;
+}
+
+.extension .tab-pane .keyword-search-box input::placeholder {
+  color: #8d939f;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.keyword-search-box .sellerlife-search-addon {
+  height: 44px;
+  width: 44px;
+  align-items: center;
+  background-color: #eaedf4;
+  background-image: url('/static/img/tab-section-search.svg');
+  background-size: 17px 17px;
+  background-repeat: no-repeat;
+  background-position: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.section-button {
+  height: 44px;
+  width: 100%;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 16px;
+}
+
+.section-button.section-image-button {
+  background-color: #3868eb;
+  color: #fff;
+}
+
+.section-button.section-image-button:hover {
+  background-color: #2152d1;
+  color: #fff;
+}
+
+.section-button.section-copy-button {
+  background-color: #2b3e4f;
+  color: #fff;
+}
+
+.section-button.section-copy-button:hover {
+  background-color: #373f57;
+  color: #fff;
+}
+
+.section-button.section-taobao-copy-button {
+  background-color: #6633ce;
+  color: #fff;
+}
+
+.section-button.section-taobao-copy-button:hover {
+  background-color: #523994;
+  color: #fff;
+}
+
+.sellerlife-search-addon {
+  cursor: pointer;
+}
+
+.search-icon {
+  border: 1px solid #2152d1;
+  border-radius: 4px;
+}
+
+.search-icon i {
+  color: #2152d1;
+}
+
+.search-icon:hover {
+  background-color: #2152d1;
+}
+
+.search-icon:hover > span i {
+  color: #fff;
+}
+
+#copy0 {
+  font-size: 0.8rem;
+}
+
+#copy0 .copy-url-body {
+  min-height: 100px;
+  max-height: 300px;
+  overflow-x: scroll;
+  height: auto;
+  border-radius: 8px;
+  border-color: #e1e7f3;
+}
+
+#copy0 .copy-url-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background-color: #f1f2f3;
+}
+
+#copy0 .copy-url-body::-webkit-scrollbar-thumb {
+  background-color: #9fa4ab;
+  border-radius: 8px;
+}
+
+#copy0 .copy-url-body .url-address {
+  margin: 0;
+  white-space: nowrap;
+  color: #2152d1;
+}
+
+#copy0 .button-box button.copy {
+  border: 1px solid #2152d1;
+  border-radius: 4px;
+  box-shadow: none;
+  color: #2152d1;
+}
+
+#copy0 .button-box button.copy:hover {
+  background-color: #2152d1;
+  color: #fff;
+}
+
+#copy0 .button-box button.success {
+  border: 1px solid #009e0e;
+  border-radius: 4px;
+  box-shadow: none;
+  color: #009e0e;
+}
+
+#copy0 .button-box button.success:hover {
+  background-color: #009e0e;
+  color: #fff;
+}
+
+#copy0 .button-box button.failed {
+  border: 1px solid #d03935;
+  border-radius: 4px;
+  box-shadow: none;
+  color: #d03935;
+
+  overflow: hidden;
+}
+
+#copy0 .button-box button.failed:hover {
+  background-color: #d03935;
+  color: #fff;
+}
+
+.button-box .w-1 button {
+  width: 100px;
+}
+
+.button-box .w-2 button {
+  width: 180px;
+}
+
+.animated-check {
+  height: 1.2em;
+  width: 1.2em;
+}
+
+.animated-check path {
+  fill: none;
+  stroke: #7ac142;
+  stroke-width: 4;
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: draw 1.5s linear forwards;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes draw {
+  40%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+
+  50%,
+  70%,
+  90% {
+    transform: translatex(-16%);
+  }
+  60%,
+  80%,
+  100% {
+    transform: translatex(0);
+  }
+}
+
+.dropAndVibrate {
+  animation: dropAndVibrate 1.5s ease forwards;
+  animation-delay: 0.3s;
+}
+
+@keyframes dropAndVibrate {
+  0% {
+    transform: translateY(-100%);
+  }
+  40% {
+    transform: translateY(0);
+  }
+
+  50%,
+  70%,
+  90% {
+    transform: translatex(-16%);
+  }
+  60%,
+  80%,
+  100% {
+    transform: translatex(0);
+  }
+}
+
+#img0 .btn {
+  border: 1px solid #2152d1;
+  border-radius: 4px;
+}
+
+#img0 .btn:hover {
+  background-color: #2152d1;
+  color: #fff;
+}
+
+#sidepanel-ad-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#sidepanel-ad-banner img {
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+
+.form-switch .form-check-input:checked[type='checkbox'] {
+  background-color: #f4f6fa;
+}
+
+.form-switch .form-check-input:checked[type='checkbox']:after {
+  /* background-color: #3868EB; */
+}
+
+.form-check-label {
+  font-size: 16px;
+  color: #2b3e4f;
+  font-weight: 500;
+}
+
+.form-text-muted {
+  display: block;
+  margin-top: 5px;
+  font-size: 14px;
+  color: #8d939f;
+  font-weight: 500;
+}
+
+/* site manage */
+.site-manage-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.site-manage-row .site-add-btn {
+  white-space: nowrap;
+  height: 44px;
+  border-radius: 8px;
+  padding: 0 14px;
+}
+
+.site-domain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.site-domain-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e1e7f3;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.site-domain-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2b3e4f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-remove-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #e1e7f3;
+  background: #f4f6fa;
+  color: #2b3e4f;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.site-remove-btn:hover {
+  background: #eaedf4;
+}
+
+.site-list-box {
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+/* 그로스 매매상 관련 */
+.calc-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 10;
+  border: 1px solid #77859c;
+  border-radius: 20px;
+  background: #fff;
+  margin: 0 10px 30px 10px;
+}
+
+/* 폼 컨테이너 영역 */
+.calc-card .form-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: start;
+  align-items: stretch;
+  gap: 12px;
+  padding: 10px 10px 20px 10px;
+  border-bottom: 1px solid #e4e8e8;
+}
+
+/* 초기화 버튼 */
+.calc-card .form-container .calc-reset {
+  all: unset;
+  display: block;
+  width: 100%;
+  text-align: right;
+  cursor: pointer;
+
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.calc-card .form-container .calc-reset:hover {
+  color: #3868eb;
+}
+
+/* 공통 폼 그룹 */
+.calc-card .form-container .form-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.calc-card .form-container .form-group.category-group {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.calc-card .form-container .form-group.category-group label {
+  margin-top: 16px;
+}
+
+.calc-card .form-container .form-group label {
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 108px;
+}
+
+.calc-card .form-container .form-group a {
+  font-size: 14px;
+  color: #d0d4dd;
+  text-decoration: none;
+}
+
+.calc-card .form-container .form-group a:hover {
+  color: #1e2229;
+}
+
+.calc-card .form-container .form-group:has(.grid-inputs) {
+  align-items: flex-start;
+}
+
+.calc-card .form-container .form-group:has(.grid-inputs) label {
+  padding-top: 12px;
+}
+
+.calc-card .form-container .form-group .p-label {
+  color: #3868eb;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+  margin-bottom: 0 !important;
+}
+
+/* 입력 필드 */
+.calc-card .form-container .form-group input {
+  border: 1px solid #e4e8e8;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: normal;
+  flex: 1;
+  width: 100%;
+  min-width: 185px;
+  height: 44px;
+  padding: 0 6px;
+  outline: none;
+}
+
+.calc-card .form-container .form-group input::placeholder {
+  color: #858a93;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 100%;
+  letter-spacing: -0.48px;
+}
+
+/* 카테고리 드롭다운 스타일 */
+.calc-card .form-container .form-group .dropdown-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  width: 100%;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block {
+  position: relative;
+  flex: 1;
+  width: 100%;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block:not(:first-child) {
+  display: none;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block.select + .custom-dropdown-block {
+  display: block;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block button {
+  border: 1px solid #e4e8e8;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  z-index: 15;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 0 10px 0 rgba(136, 136, 136, 0.25);
+  border: 1px solid #e4e8e8;
+  padding: 5px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.dropdown-icon {
+  margin-left: auto;
+  transition: transform 0.3s ease;
+}
+
+button.open .dropdown-icon {
+  transform: rotate(180deg);
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl.hidden {
+  display: none;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl .custom-dropdown-list {
+  margin: 0;
+  padding: 0;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl .custom-dropdown-list li {
+  color: #8d939f;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.48px;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-bottom: 1px solid #e4e8e8;
+  list-style: none;
+  user-select: none;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl .custom-dropdown-list li:last-child {
+  border-bottom: none;
+}
+
+.calc-card .form-container .form-group .dropdown-group .custom-dropdown-block .dropdownEl .custom-dropdown-list li:hover {
+  background-color: #f1f4fe;
+  color: #3868eb;
+}
+
+/* 그리드 입력창 */
+.calc-card .form-container .grid-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex: 1;
+}
+
+.calc-card .form-container .grid-inputs .input-with-unit {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.calc-card .form-container .grid-inputs .input-with-unit input {
+  width: 100%;
+  min-width: 65px;
+  padding-right: 56px;
+}
+
+.calc-card .form-container .grid-inputs .input-with-unit span {
+  position: absolute;
+  right: 8px;
+  color: #adb1bc;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 결과 출력 영역 */
+.calc-card .save-btn-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 30px;
+  flex-direction: column;
+  width: 100%;
+  padding: 10px;
+  background: #f4f6fa;
+  border-radius: 0 0 20px 20px;
+}
+
+.calc-card .save-btn-wrap .result-container {
+  width: 100%;
+}
+
+.calc-card .save-btn-wrap .result-container .result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #77859c;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  height: 44px;
+  width: 100%;
+}
+
+.calc-card .save-btn-wrap .result-container .result-row .val {
+  font-weight: 700;
+  color: #1e2229;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.calc-card .save-btn-wrap .result-container .result-row .val::after {
+  content: '원';
+  margin-left: 2px;
+  font-weight: 500;
+}
+
+.calc-card .save-btn-wrap .result-container .result-row .val.percent::after {
+  content: '%';
+}
+
+.calc-card .save-btn-wrap .result-container .result-row .val.blue {
+  color: #3868eb;
+}
+
+.calc-card .save-btn-wrap .result-container .result-row .val.red {
+  color: #ee0412;
+}
+
+.calc-card .save-btn-wrap .result-container .total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 600;
+  height: 44px;
+}
+
+.calc-card .save-btn-wrap .result-container .total-row .total-val {
+  color: #3868eb;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 34px;
+}
+
+.calc-card .save-btn-wrap .result-container .total-row .total-val::after {
+  content: '원';
+}
+
+/* 하단 설명 블록 */
+.calc-card .save-btn-wrap .calc-desc-block {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  flex-direction: column;
+}
+
+.calc-card .save-btn-wrap .calc-desc-block .calc-desc-btn {
+  color: #8d939f;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.calc-card .save-btn-wrap .calc-desc-block .calc-desc {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  color: #1e2229;
+  font-size: 14px;
+  font-weight: 500;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 0;
+  overflow: hidden;
+  transition: 0.3s;
+}
+
+.calc-card .save-btn-wrap .calc-desc-block .calc-desc.open {
+  height: auto;
+}
+
+.calc-card .save-btn-wrap .calc-desc-block .calc-desc li {
+  list-style: none;
+}
+
+.calc-card .save-btn-wrap .calc-desc-block .calc-desc li p {
+  color: #8d939f;
+  margin-bottom: 0 !important;
+}
+
+/* 저장 버튼 */
+.calc-card .save-btn-wrap .save-btn {
+  width: 100%;
+  padding: 18px;
+  border: none;
+  border-radius: 08px;
+  background-color: #3868eb;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.calc-card .save-btn-wrap .save-btn:hover {
+  background-color: #2a52c7;
+}
+
+/* Section 별 아코디언 기능 관련 */
+.accordion-section .section-title {
+  cursor: pointer;
+}
+
+.accordion-section .section-title .accordion-icon {
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  color: #8d939f;
+}
+
+.accordion-section.is-collapsed > :not(.section-title) {
+  display: none !important;
+}

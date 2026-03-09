@@ -1,0 +1,1 @@
+chrome.runtime.onMessage.addListener((function(e,n,s){"finder"===e.type?(window.postMessage({type:"finder",data:e.data},"*"),s({response:"콘텐트 스크립트에서 보낸 메시지 1"})):"finder-check"==e.type&&chrome.tabs.query({active:!0,lastFocusedWindow:!1},(function(e){e[0].url;s({check:!0,response:"콘텐트 스크립트에서 보낸 메시지 2"})}))}));

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" style="overflow: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 공식 익스텐션 상품분석</title>
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <script type="text/javascript" src="/static/chart/toastui-chart.min.js"></script>
+    <link rel="stylesheet" href="/static/chart/toastui-chart.min.css" />
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+    <link rel="stylesheet" href="/static/css/frame.css" />
+  </head>
+
+  <body>
+    <div class="frame">
+      <div class="frame-header">
+        <div class="logo">
+          <a href="https://sellochomes.co.kr" target="_blank"><img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" /></a>
+        </div>
+        <!-- <b>상품 분석</b>/ -->
+        <div class="arrow">
+          <button class="arrow-btn"><i class="fas fa-angle-down"></i></button>
+        </div>
+      </div>
+
+      <div class="frame-body">
+        <div class="tab1-skeleton">
+          <div class="left-box">
+            <div class="box-1"></div>
+            <div class="box-2"></div>
+          </div>
+          <div class="text-box">
+            <div class="box-1">
+              <div class="box-1-1"></div>
+              <div class="box-1-2"></div>
+            </div>
+            <div class="box-2"></div>
+            <div class="box-3"></div>
+            <div class="box-4"></div>
+          </div>
+        </div>
+        <div class="tab1-wrap d-none">
+          <div class="left-box">
+            <div class="img-box"></div>
+            <a href="" class="scouter-link" target="_blank" style="visibility: hidden">
+              <b>판매자 전체 상품 보기</b>
+            </a>
+          </div>
+          <div class="text-box">
+            <div class="top-info">
+              <div class="left-block">
+                <b class="main-t"> - </b>
+                <div class="flex">
+                  <b class="amount"> <span> - </span>원 </b>
+                  <p class="ship"></p>
+                </div>
+              </div>
+              <div class="right-block">
+                <button id="reviewDate" class="reviewDate">옵션·리뷰 분석</button>
+              </div>
+            </div>
+
+            <p class="seller">
+              <span class="channel-name"> - </span>
+              <img class="mallgrade-img" src="" /><span class="seller-lv mallgrade-name"> - </span>
+            </p>
+            <div class="category">
+              <p></p>
+              <a href="" target="_blank" class="btn d-none">카테고리 키워드 분석하기 </a>
+            </div>
+            <div class="rv-flex">
+              <p class="rivew rv-box"><i class="pencil"></i>리뷰<span> - </span></p>
+              <p class="score rv-box"><i class="star"></i>평점<span> - </span></p>
+              <p class="mark- rv-box"><i class="heart"></i>찜<span> - </span></p>
+              <p class="ud- rv-box"><i class="calendar"></i>상품등록일<span> - </span></p>
+            </div>
+
+            <!-- <div class="ttl-box">
+              <div>예상판매량 (7일) : <span class="delivery-cnt">-</span><span class="text">건</span></div>
+              <div>예상매출 (7일) : <span class="ex-revenue">-</span><span class="text">원</span></div>
+            </div> -->
+            <div class="purchasePhrase"></div>
+            <div class="tags">
+              <div
+                class="alert fade"
+                id="alert-success"
+                role="alert"
+                data-mdb-position="bottom-center"
+                data-mdb-stacking="false"
+                data-mdb-append-to-body="true"
+                data-mdb-hidden="true"
+                data-mdb-autohide="true"
+                data-mdb-delay="2000"
+              >
+                복사하였습니다.
+              </div>
+              <div class="tagIcon">
+                <p>태그</p>
+                <i class="copy-icon" data-mdb-toggle="tooltip" data-mdb-html="true" title="태그를 전체 복사합니다."></i>
+              </div>
+              <div class="tagbox"></div>
+            </div>
+            <div class="non-tags d-none">
+              <p>태그</p>
+              <span>태그없음</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+
+  <!-- Custom scripts -->
+</html>
+<script defer type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+<script defer type="module" src="/static/js/pDAS.js"></script>

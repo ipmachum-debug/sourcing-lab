@@ -1,0 +1,1 @@
+document.documentElement.setAttribute("extension-id",chrome.runtime.id),document.documentElement.setAttribute("extension-version",chrome.runtime.getManifest().version),chrome.runtime.onMessage.addListener((function(e,t,n){"img-dnd"===e.type&&(window.postMessage(e,"*"),n({response:"img-dnd accepted"}))}));

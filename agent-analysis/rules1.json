@@ -1,0 +1,177 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Origin", "operation": "set", "value": "https://datalab.naver.com" },
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://datalab.naver.com//keyword/trendSearch.naver"
+        }
+      ]
+    },
+    "condition": {
+      "regexFilter": "datalab.naver.com/(qcHash.naver|keyword/trendResult.naver)",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 2,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://section.blog.naver.com/Search/Post.naver?pageNo=1&rangeType=ALL&orderBy=sim"
+        }
+      ]
+    },
+    "condition": {
+      "regexFilter": "section.blog.naver.com/ajax/SearchList.naver",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 4,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=1&groupId=0"
+        }
+      ]
+    },
+    "condition": {
+      "regexFilter": "section.blog.naver.com/ajax/TodayHotTopicList.naver",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Origin", "operation": "set", "value": "https://smartstore.naver.com" },
+        { "header": "sec-ch-ua", "operation": "set", "value": "\"Not;A=Brand\";v=\"99\", \"Google Chrome\";v=\"139\", \"Chromium\";v=\"139\"" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "smartstore.naver.com/i/v1/contents/reviews/query-pages",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [{ "header": "Origin", "operation": "set", "value": "https://brand.naver.com" }]
+    },
+    "condition": {
+      "regexFilter": "brand.naver.com/n/v1/contents/reviews/query-pages",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 6,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [{ "header": "Origin", "operation": "set", "value": "https://www.lotteglogis.com" }]
+    },
+    "condition": {
+      "regexFilter": "lotteglogis.com/home/reservation/tracking/linkView"
+    }
+  },
+
+  {
+    "id": 10,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "priority", "operation": "set", "value": "u=1, i" },
+        { "header": "sec-ch-ua", "operation": "set", "value": "\"Chromium\";v=\"129\", \"Not;A=Brand\";v=\"8\", \"Google Chrome\";v=\"129\"" },
+        { "header": "sec-ch-ua-mobile", "operation": "set", "value": "?0" },
+        { "header": "sec-ch-ua-platform", "operation": "set", "value": "Windows" },
+        { "header": "sec-fetch-dest", "operation": "set", "value": "empty" },
+        { "header": "sec-fetch-mode", "operation": "set", "value": "cors" },
+        { "header": "sec-fetch-site", "operation": "set", "value": "same-origin" },
+        { "header": "user-agent", "operation": "set", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https://brand.naver.com/n/v2/channels/",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 11,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [{ "header": "referer", "operation": "set", "value": "https://brand.naver.com/?" }]
+    },
+    "condition": {
+      "regexFilter": "https://brand.naver.com/n/v1/contents/",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 12,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "user-agent", "operation": "set", "value": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https://m.coupang.com/nm/search",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 13,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "user-agent", "operation": "set", "value": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36" },
+        { "header": "referer", "operation": "set", "value": "https://brand.naver.com/*" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https://brand.naver.com/n/v1/simple-products",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  },
+  {
+    "id": 14,
+    "priority": 5,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "user-agent", "operation": "set", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36" },
+        { "header": "referer", "operation": "set", "value": "https://search.naver.com/search.naver" },
+        { "header": "accept", "operation": "set", "value": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" },
+        { "header": "accept-encoding", "operation": "set", "value": "gzip, deflate, br, zstd" },
+        { "header": "accept-language", "operation": "set", "value": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7,ja;q=0.6" },
+        { "header": "sec-ch-ua", "operation": "set", "value": "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https://search.shopping.naver.com/book/search",
+      "excludedResourceTypes": ["main_frame"]
+    }
+  }
+]

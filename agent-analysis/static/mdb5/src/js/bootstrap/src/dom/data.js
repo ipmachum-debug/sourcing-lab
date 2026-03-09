@@ -1,0 +1,1 @@
+const e=new Map;export default{set(t,s,a){e.has(t)||e.set(t,new Map);const n=e.get(t);(n.has(s)||0===n.size)&&n.set(s,a)},get:(t,s)=>e.has(t)&&e.get(t).get(s)||null,remove(t,s){if(!e.has(t))return;const a=e.get(t);a.delete(s),0===a.size&&e.delete(t)}};

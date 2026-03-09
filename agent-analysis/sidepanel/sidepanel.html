@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 익스텐션</title>
+    <!-- MDB icon -->
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <!-- Google Fonts Roboto -->
+
+    <!-- MDB ESSENTIAL -->
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+    <link rel="stylesheet" href="/static/css/sidepanel.css" />
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- Custom styles -->
+    <!-- MDB ESSENTIAL -->
+    <script type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+  </head>
+  <body>
+    <div class="extension">
+      <div class="logo">
+        <a href="https://sellochomes.co.kr/sellerlife/" target="_blank">
+          <img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" class="logo-img" />
+        </a>
+      </div>
+
+      <ul class="nav nav-tabs" id="myTab0" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link m-0 active" id="home-tab0" data-mdb-toggle="tab" data-mdb-target="#home0" type="button" role="tab" aria-controls="home" aria-selected="true">편의기능</button>
+        </li>
+        <!-- <li class="nav-item" role="presentation">
+          <button class="nav-link m-0" id="profile-tab0" data-mdb-toggle="tab" data-mdb-target="#profile0" type="button" role="tab" aria-controls="profile" aria-selected="false">
+            연관키워드 검색
+          </button>
+        </li> -->
+        <!-- <li class="nav-item" role="presentation">
+          <button class="nav-link" id="gudae-tab0" data-mdb-toggle="tab" data-mdb-target="#gudae0" type="button" role="tab" aria-controls="gudae" aria-selected="false">구대파인더</button>
+        </li> -->
+        <li class="nav-item" role="presentation">
+          <button class="nav-link m-0" id="sourcing-tab0" data-mdb-toggle="tab" data-mdb-target="#sourcing0" type="button" role="tab" aria-controls="sourcing" aria-selected="false">소싱라이프</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link m-0 settings-tab"
+            id="settings-tab0"
+            data-mdb-toggle="tab"
+            data-mdb-target="#settings0"
+            type="button"
+            role="tab"
+            aria-controls="settings"
+            aria-selected="false"
+          ></button>
+        </li>
+      </ul>
+      <div class="tab-content" id="myTabContent0">
+        <div class="tab-pane fade show active" id="home0" role="tabpanel" aria-labelledby="home-tab0" sellerlife-target="sellerlife-keywordsearch-tab">
+          <!-- 키워드 분석 -->
+          <section class="section-keyword">
+            <div class="section-title title-keyword"><img src="/static/img/tab-keyword.svg" alt="키워드 분석" class="section-title-icon" />키워드 분석</div>
+            <div class="keyword-search-box">
+              <input type="search" placeholder="키워드를 검색해주세요." aria-label="Search" aria-describedby="search-addon" />
+              <span class="sellerlife-search-addon" id="search-addon"> </span>
+            </div>
+          </section>
+          <!-- 이미지 수집 -->
+          <section class="section-image" id="img0">
+            <div class="section-title title-image"><img src="/static/img/tab-image.svg" alt="이미지 수집" class="section-title-icon" />이미지 수집</div>
+            <a href="javascript:;" class="section-button section-image-button">현재 탭 화면 이미지 추출하기</a>
+          </section>
+          <!-- URL 수집목록 -->
+          <section class="section-url" id="copy0">
+            <div class="section-title title-url">
+              <img src="/static/img/tab-url.svg" alt="URL 수집" class="section-title-icon" />
+              URL 수집 목록
+              <span class="section-url-total"
+                >총 수집 URL
+                <span class="url-total-num" style="color: #6633ce; font-size: 18px"> 0 </span>
+              </span>
+            </div>
+            <div class="copy-url-body border p-2" style="overflow: auto; height: 140px"></div>
+            <div class="button-box mt-2 d-flex justify-content-center align-items-center gap-1">
+              <div class="all-copy">
+                <button class="section-button section-copy-button">전체 복사</button>
+                <button class="section-button section-copy-success d-none">복사 성공</button>
+                <button class="section-button section-copy-failed d-none">복사 실패</button>
+              </div>
+              <div class="t-copy">
+                <button class="section-button section-taobao-copy-button">타오바오 + TMALL 복사</button>
+                <button class="section-button section-taobao-copy-success d-none">복사 성공</button>
+                <button class="section-button section-taobao-copy-failed d-none">복사 실패</button>
+              </div>
+            </div>
+          </section>
+          <!-- 그로스 계산기 -->
+          <section class="section-calc">
+            <div class="section-title title-calc"><img src="/static/img/tab-calculate.svg" alt="그로스 계산기" class="section-title-icon" />그로스 계산기</div>
+            <div class="calc-card">
+              <div class="form-container">
+                <button class="calc-reset">초기화</button>
+
+                <!-- <div class="form-group calc-data hidden">
+                  <label for="p-name">상품명</label>
+                  <input type="text" autocomplete="off" id="p-name" placeholder="" autocomplete="off" />
+                </div> -->
+
+                <div class="form-group calc-data">
+                  <label for="p-price">판매가</label>
+                  <input type="number" id="p-price" placeholder="" autocomplete="off" />
+                </div>
+
+                <div class="form-group category-group">
+                  <label>카테고리</label>
+                  <div class="dropdown-group">
+                    <div class="custom-dropdown-block" data-dropdown="1">
+                      <button class="dropdown-trigger" type="button">
+                        <span class="dropdown-label">대분류 선택</span>
+                        <i class="fa-solid fa-chevron-down dropdown-icon" aria-hidden="true"></i>
+                      </button>
+                      <div class="dropdownEl hidden">
+                        <ul class="custom-dropdown-list">
+                          <li data-value="1">패션의류/잡화</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div class="custom-dropdown-block" data-dropdown="2">
+                      <button class="dropdown-trigger" type="button">
+                        <span class="dropdown-label">중분류 선택</span>
+                        <i class="fa-solid fa-chevron-down dropdown-icon" aria-hidden="true"></i>
+                      </button>
+                      <div class="dropdownEl hidden">
+                        <ul class="custom-dropdown-list">
+                          <li data-value="1">패션의류/잡화</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div class="custom-dropdown-block" data-dropdown="3">
+                      <button class="dropdown-trigger" type="button">
+                        <span class="dropdown-label">소분류 선택</span>
+                        <i class="fa-solid fa-chevron-down dropdown-icon" aria-hidden="true"></i>
+                      </button>
+                      <div class="dropdownEl hidden">
+                        <ul class="custom-dropdown-list">
+                          <li data-value="1">패션의류/잡화</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-group calc-data" id="commission">
+                  <label
+                    >수수료(%)
+                    <a target="_blank" href="https://wing.coupang.com/tenants/seller-web/vendor-inventory/commission-info" class="fa-solid fa-circle-exclamation"></a>
+                  </label>
+                  <input type="text" autocomplete="off" placeholder="" autocomplete="off" value="10.8" />
+                </div>
+
+                <div class="form-group" id="prdSize">
+                  <label>상품 사이즈</label>
+                  <div class="grid-inputs">
+                    <div class="input-with-unit">
+                      <input type="number" value="" placeholder="0" autocomplete="off" />
+                      <span>가로(cm)</span>
+                    </div>
+                    <div class="input-with-unit">
+                      <input type="number" value="" placeholder="0" autocomplete="off" />
+                      <span>세로(cm)</span>
+                    </div>
+                    <div class="input-with-unit">
+                      <input type="number" value="" placeholder="0" autocomplete="off" />
+                      <span>높이(cm)</span>
+                    </div>
+                    <div class="input-with-unit">
+                      <input type="number" value="" placeholder="0.0" autocomplete="off" />
+                      <span>무게(kg)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-group calc-data" id="delFee">
+                  <div class="label-group">
+                    <label
+                      >입출고/배송비용
+                      <a target="_blank" href="https://wing.coupang.com/tenants/rfm/settlements/fee-details#warehousing-and-fulfillment-fee" class="fa-solid fa-circle-exclamation"></a>
+                    </label>
+                    <p class="p-label">(프로모션)</p>
+                  </div>
+                  <input type="number" value="1950" placeholder="0.0" autocomplete="off" />
+                </div>
+
+                <div class="form-group calc-data">
+                  <label>수입 원가</label>
+                  <input type="number" id="importCost" placeholder="개당 매입 가격을 입력해주세요" autocomplete="off" />
+                </div>
+
+                <div class="form-group calc-data set">
+                  <label>구성 수량</label>
+                  <input type="number" id="setCount" placeholder="세트 당 상품개수를 입력해주세요" autocomplete="off" value="1" />
+                </div>
+
+                <div class="form-group calc-data salesAmount">
+                  <label>월 판매량</label>
+                  <input type="number" id="monthlyAmount" placeholder="월간 목표 판매수량을 입력해주세요" autocomplete="off" value="1" />
+                </div>
+              </div>
+
+              <div class="save-btn-wrap">
+                <div class="result-container">
+                  <div class="result-row" data-row="marginRate"><span>최종 마진율</span><span class="val blue percent">0.0</span></div>
+                  <div class="result-row" data-row="profitPerUnit"><span>개당 수익</span><span class="val">0</span></div>
+                  <div class="result-row" data-row="costRate"><span>원가율</span><span class="val percent">0.0</span></div>
+                  <div class="result-row" data-row="expectedMonthlyRevenue"><span>총 예상 월매출</span><span class="val">0</span></div>
+                  <div class="result-row" data-row="minROAS"><span>ROAS</span><span class="val red percent">0.0</span></div>
+                  <div class="total-row" data-row="totalMonthlyMargin">
+                    <span>총 예상 월마진</span>
+                    <span class="total-val">0</span>
+                  </div>
+                </div>
+                <div class="calc-desc-block">
+                  <button class="calc-desc-btn">계산식 보기</button>
+                  <ul class="calc-desc">
+                    <li class="calc-list"><b>최종 마진율 :</b> 개당 수익 ÷ 판매가 x 100</li>
+                    <li class="calc-list">
+                      <b> 개당 수익 : </b>
+                      판매가 - 수입 원가 - 판매 수수료 - 입출고/배송비 - 실납부 부가세
+                      <br />
+                      <p>*실납부 부가세 = 매출 부가세 - 매입 부가세 - 공제 가능 세액*</p>
+                    </li>
+
+                    <li class="calc-list"><b>원가율 :</b> 수입 원가 ÷ 판매가 x 100</li>
+                    <li class="calc-list"><b>총 예상 월매출 :</b> 판매가 x 월 판매량</li>
+                    <li class="calc-list"><b>ROAS :</b> 최소 광고 대비 매출 비율</li>
+                    <li class="calc-list"><b>총 예상 월마진 :</b> 개당 수익 x 월 판매량</li>
+                  </ul>
+                </div>
+                <!-- <button type="button" class="save-btn hidden">저장</button> -->
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- <div class="tab-pane fade" id="profile0" role="tabpanel" aria-labelledby="profile-tab0" sellerlife-target="sellerlife-relkeywordsearch-tab">
+          <div class="input-group rounded">
+            <input type="search" class="form-control rounded" placeholder="키워드를 검색해주세요." aria-label="Search" aria-describedby="search-addon" />
+            <span class="input-group-text border-0 sellerlife-search-addon" id="search-addon">
+              <i class="fas fa-search"></i>
+            </span>
+          </div>
+        </div> -->
+        <!-- <div class="tab-pane fade" id="gudae0" role="tabpanel" aria-labelledby="gudae-tab0" sellerlife-target="sellerlife-gudae-tab">
+          <a href="https://sellochomes.co.kr/sellerlife/finder" target="_blank"><img src="/static/img/finder-extension.png" /></a>
+        </div> -->
+        <div class="tab-pane fade" id="sourcing0" role="tabpanel" aria-labelledby="sourcing-tab0" sellerlife-target="sellerlife-sourcing-tab">
+          <iframe id="sourcing-frame" src="https://sellochomes.co.kr/sourcinglife/shop/list-ext" style="width: 100%; height: 100%; border: none"></iframe>
+        </div>
+        <div class="tab-pane fade" id="settings0" role="tabpanel" aria-labelledby="settings-tab0" sellerlife-target="sellerlife-settings-tab">
+          <div class="settings-container p-3">
+            <h6 class="mb-3">기능 설정</h6>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="imageSearchToggle" checked />
+              <label class="form-check-label" for="imageSearchToggle"> 이미지 검색 기능 활성화 </label>
+              <small class="form-text-muted">페이지의 이미지에 마우스를 올리면 1688 검색 버튼이 표시됩니다.</small>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="translateOverlayToggle" checked />
+              <label class="form-check-label" for="translateOverlayToggle"> 번역 오버레이 기능 활성화 </label>
+              <small class="form-text-muted">텍스트를 드래그하면 번역 아이콘이 표시됩니다.</small>
+            </div>
+            <h6 class="mb-3">이미지 검색 최소 이미지 크기 (가로,세로)</h6>
+            <div class="mb-3">
+              <input type="number" class="form-control" id="minImageSizeInput" value="120" min="50" step="10" placeholder="120" />
+              <small class="form-text-muted">이 크기보다 작은 이미지는 감지하지 않습니다.</small>
+            </div>
+            <h6 class="mb-3">이미지 검색 버튼 표시 제외 사이트 관리</h6>
+            <div class="mb-3">
+              <div class="site-manage-row">
+                <input type="text" class="form-control" id="imageSearchSiteInput" placeholder="예: example.com" />
+                <button type="button" class="btn btn-primary site-add-btn" id="imageSearchSiteAddBtn">추가</button>
+              </div>
+              <small class="form-text-muted">여기에 추가된 도메인에서는 이미지 검색 버튼이 표시되지 않습니다.</small>
+              <div class="site-list-box mt-2">
+                <div id="imageSearchSiteList" class="site-domain-list"></div>
+              </div>
+            </div>
+            <div class="alert alert-info mt-3" role="alert">
+              <small><i class="fas fa-info-circle me-1"></i>페이지를 새로고침하지 않아도 설정은 자동으로 저장됩니다.</small>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="sidepanel-ad-banner"></div>
+    </div>
+  </body>
+  <!-- Custom scripts -->
+  <script defer type="module" src="/static/js/sidepanel.js"></script>
+</html>
