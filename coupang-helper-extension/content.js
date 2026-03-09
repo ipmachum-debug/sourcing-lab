@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v6.6.1
+   Coupang Sourcing Helper — Content Script v6.6.2
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -7,6 +7,14 @@
    2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
    3) TOP 3 상품만 간결 표시
    4) 쿠팡 DOM 최소 건드림
+
+   v6.6.2 평점 파싱 강화:
+   - 쿠팡 2026 DOM 변경 대응: 별점 텍스트 미표시 대응
+   - SVG 별점 감지 대폭 강화 (clipPath, gradient, opacity, getComputedStyle)
+   - getComputedStyle 기반 CSS width 별점 감지 추가
+   - 접근성(a11y) 숨겨진 텍스트에서 평점 추출
+   - calcParseQuality 개선: 리뷰수 기반 추정도 유효 파싱으로 인정
+   - 경고 임계값 60% → 30%로 조정 (쿠팡 구조 변경 반영)
 
    v5.5.7 1688 한국어 직접 전달 (번역 제거):
    - 1688이 한국어를 자동 분석/번역해줌 → 번역 로직 완전 제거
@@ -35,7 +43,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.5.0';
+  const VER = '6.6.2';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -823,6 +831,36 @@
         }
       }
 
+      // 전략 4b: getComputedStyle 기반 width 탐색 (v6.6.2 추가)
+      // 인라인 style이 아닌 CSS 클래스로 width가 설정된 경우 (쿠팡 2026 React SSR)
+      if (!rating) {
+        const ratingAreas = box.querySelectorAll(
+          '[class*="rating"], [class*="star"], [class*="score"], [class*="Rate"], [class*="rate"]'
+        );
+        for (const area of ratingAreas) {
+          if (area.closest('#sh-panel')) continue;
+          // 자식 중 width가 부모보다 작은 것 = 채움 바
+          const children = area.querySelectorAll('div, span');
+          for (const child of children) {
+            if (child.children.length > 3) continue;
+            try {
+              const cs = window.getComputedStyle(child);
+              const w = parseFloat(cs.width);
+              const parentW = parseFloat(window.getComputedStyle(child.parentElement).width);
+              // 별점 바: 작은 크기 (200px 이하), 부모 대비 비율로 계산
+              if (parentW > 10 && parentW <= 200 && w > 0 && w <= parentW) {
+                const pct = (w / parentW) * 100;
+                if (pct >= 10 && pct <= 100 && pct !== 100) { // 100%면 컨테이너 자체
+                  const v = Math.round(pct / 20 * 10) / 10;
+                  if (v >= 1.0 && v <= 5.0) { rating = v; break; }
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }
+          if (rating) break;
+        }
+      }
+
       // 전략 5: filled star 개수 (img/svg) — 클래스 명 확장
       if (!rating) {
         const starContainer = box.querySelector(
@@ -910,6 +948,38 @@
               if (!/원|₩|%|적립|배송|할인/.test(sibText)) {
                 rating = v; break;
               }
+            }
+          }
+        }
+      }
+
+      // 전략 7c: 접근성(aria) 숨겨진 텍스트에서 평점 추출 (v6.6.2 추가)
+      // 쿠팡이 시각적으로만 별점 표시하되 스크린리더용 숨겨진 텍스트가 있을 수 있음
+      if (!rating) {
+        for (const el of box.querySelectorAll('[aria-hidden="true"], .sr-only, .visually-hidden, [class*="blind"], [class*="hidden"], [class*="a11y"]')) {
+          if (el.closest('#sh-panel')) continue;
+          const t = tx(el).trim();
+          // "4.5점", "별점 4.5", "4.5 out of 5" 등
+          const rm = t.match(/(\d\.\d)\s*(?:점|$)/) || t.match(/별점\s*(\d\.\d)/) || t.match(/(\d\.\d)\s*\/\s*5/);
+          if (rm) {
+            const v = parseFloat(rm[1]);
+            if (v > 0 && v <= 5) { rating = v; break; }
+          }
+        }
+        // 역방향: aria-hidden="false" 또는 role이 있는 요소
+        if (!rating) {
+          for (const el of box.querySelectorAll('[role="img"][aria-label], [role="meter"], [aria-valuenow]')) {
+            if (el.closest('#sh-panel')) continue;
+            const ariaVal = el.getAttribute('aria-valuenow');
+            if (ariaVal) {
+              const v = parseFloat(ariaVal);
+              if (v > 0 && v <= 5) { rating = v; break; }
+            }
+            const label = el.getAttribute('aria-label') || '';
+            const rm = label.match(/(\d\.\d)/);
+            if (rm) {
+              const v = parseFloat(rm[1]);
+              if (v > 0 && v <= 5) { rating = v; break; }
             }
           }
         }
@@ -1106,7 +1176,7 @@
           }
         }
 
-        // 전략 9b: SVG 기반 별점 (채워진 비율) — 클래스 무관 SVG 탐색
+        // 전략 9b: SVG 기반 별점 (채워진 비율) — 클래스 무관 SVG 탐색 (v6.6.2 강화)
         if (!rating) {
           // 먼저 클래스 기반
           let svgStars = box.querySelectorAll('svg[class*="star"], svg[class*="Star"]');
@@ -1129,25 +1199,120 @@
           if (svgStars.length === 5) {
             let filledCount = 0;
             for (const svg of svgStars) {
-              const fill = svg.getAttribute('fill') || svg.querySelector('[fill]')?.getAttribute('fill') || '';
-              const cls = (svg.className?.baseVal || svg.className || '') + ' ' + fill;
-              // 채워진 별: 노란색/골드/주황색 계열
-              if (/gold|yellow|orange|#f[a-f0-9]{2,5}|#ff|filled|active|full|on|rgb\(2[0-5]\d/i.test(cls)) filledCount++;
-              else if (/half/i.test(cls)) filledCount += 0.5;
-              else {
-                // fill 색상으로 판단: 노란/주황 계열 vs 회색 계열
-                const fillColor = svg.getAttribute('fill') || '';
-                if (/^#(?:f[a-f0-9]{2}|ff|e[a-f]|d[a-f])[a-f0-9]{2,4}$/i.test(fillColor)) filledCount++;
+              // v6.6.2: 다양한 SVG 별점 렌더링 방식 지원
+              const fill = svg.getAttribute('fill') || '';
+              const innerFill = svg.querySelector('path[fill], rect[fill], circle[fill]')?.getAttribute('fill') || '';
+              const allFills = fill + ' ' + innerFill;
+              const cls = (svg.className?.baseVal || svg.className || '');
+
+              // 방법 1: 클래스명 기반
+              if (/filled|active|full|on|checked/i.test(cls)) { filledCount++; continue; }
+              if (/half/i.test(cls)) { filledCount += 0.5; continue; }
+              if (/empty|off|inactive|unfilled/i.test(cls)) continue; // 빈 별 — 스킵
+
+              // 방법 2: fill 색상 기반 (노란/주황/골드 vs 회색/투명)
+              const isWarmColor = /gold|yellow|orange|#f[a-f0-9]{2,5}|#ff|#e[a-f]|#d[89a-f]/i.test(allFills) ||
+                /rgb\(\s*2[0-5]\d|rgba?\(\s*(?:25[0-5]|2[0-4]\d|1\d{2}),\s*(?:1[5-9]\d|2\d{2})/i.test(allFills);
+              const isGrayColor = /gray|grey|#[89a-d][89a-d]|#ccc|#ddd|#eee|transparent|none/i.test(allFills);
+              if (isWarmColor && !isGrayColor) { filledCount++; continue; }
+              if (isGrayColor) continue; // 빈 별
+
+              // 방법 3: opacity 기반 — 채워진 별은 불투명, 빈 별은 반투명
+              const opacity = parseFloat(svg.getAttribute('opacity') || svg.style?.opacity || '1');
+              if (opacity < 0.4) continue; // 빈 별
+              if (opacity >= 0.8 && allFills && !isGrayColor) { filledCount++; continue; }
+
+              // 방법 4: getComputedStyle로 색상 확인
+              try {
+                const cs = window.getComputedStyle(svg);
+                const cFill = cs.fill || cs.color || '';
+                if (/rgb\(\s*2[0-5]\d|rgba?\(\s*(?:25[0-5]|2[0-4]\d|1\d{2}),\s*(?:1[5-9]\d|2\d{2})/i.test(cFill)) { filledCount++; continue; }
+                // 밝은 색(노란/주황) 체크
+                if (/rgb\(\s*(?:2\d{2}),\s*(?:1[5-9]\d|2\d{2}),\s*(?:[0-9]{1,2})\s*\)/i.test(cFill)) { filledCount++; continue; }
+              } catch (e) { /* ignore */ }
+
+              // 방법 5: 내부 clipPath/gradient 기반 (부분 채움)
+              const clipPath = svg.querySelector('clipPath, linearGradient');
+              if (clipPath) {
+                const stops = svg.querySelectorAll('stop');
+                if (stops.length >= 2) {
+                  // linearGradient로 부분 채움 표현: 첫 stop offset = 채움 비율
+                  const firstOffset = stops[0]?.getAttribute('offset') || '';
+                  const pct = parseFloat(firstOffset);
+                  if (pct > 0) { filledCount += pct / 100; continue; }
+                }
+                // clipPath rect width로 부분 채움
+                const clipRect = clipPath.querySelector('rect');
+                if (clipRect) {
+                  const rw = parseFloat(clipRect.getAttribute('width') || '0');
+                  const viewBox = svg.getAttribute('viewBox');
+                  if (viewBox) {
+                    const vbw = parseFloat(viewBox.split(/\s+/)[2] || '0');
+                    if (vbw > 0) { filledCount += rw / vbw; continue; }
+                  }
+                }
+              }
+
+              // 방법 6: 두 개의 path (채워진 부분 + 빈 부분) — 첫 번째 path의 fill이 색상이면 채워진 별
+              const paths = svg.querySelectorAll('path');
+              if (paths.length >= 1) {
+                const firstPathFill = paths[0].getAttribute('fill') || '';
+                if (/gold|yellow|orange|#f[a-f0-9]{2,5}|#ff|currentColor/i.test(firstPathFill)) { filledCount++; continue; }
+                // currentColor: 부모 CSS color를 상속 — 보통 채워진 별
+                if (firstPathFill === 'currentColor') {
+                  try {
+                    const parentColor = window.getComputedStyle(svg).color || '';
+                    if (/rgb\(\s*2[0-5]\d|rgba?\(\s*(?:25[0-5]|2[0-4]\d|1\d{2}),\s*(?:1[5-9]\d|2\d{2})/i.test(parentColor)) {
+                      filledCount++; continue;
+                    }
+                  } catch (e) { /* ignore */ }
+                }
               }
             }
-            if (filledCount > 0 && filledCount <= 5) rating = filledCount;
+            if (filledCount > 0 && filledCount <= 5) rating = Math.round(filledCount * 10) / 10;
           }
         }
 
-        // 전략 10: 별 이미지/SVG가 있으면 추정
+        // 전략 9c: getComputedStyle 기반 width% 탐색 (v6.6.2 추가)
+        // 인라인 style 없이 CSS 클래스로만 width가 지정된 경우
         if (!rating) {
-          const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
-          if (hasStars) {
+          const ratingContainers = box.querySelectorAll('[class*="rating"], [class*="star"], [class*="score"]');
+          for (const container of ratingContainers) {
+            if (container.closest('#sh-panel')) continue;
+            const innerEls = container.querySelectorAll('div, span');
+            for (const el of innerEls) {
+              if (el.children.length > 3) continue;
+              try {
+                const cs = window.getComputedStyle(el);
+                const w = cs.width;
+                const pw = el.parentElement ? window.getComputedStyle(el.parentElement).width : '0';
+                if (w && pw && w !== 'auto' && pw !== 'auto') {
+                  const wPx = parseFloat(w);
+                  const pPx = parseFloat(pw);
+                  if (pPx > 0 && wPx > 0 && wPx <= pPx) {
+                    const pct = (wPx / pPx) * 100;
+                    if (pct >= 10 && pct <= 100) {
+                      const v = Math.round(pct / 20 * 10) / 10;
+                      if (v >= 1.0 && v <= 5.0) { rating = v; break; }
+                    }
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
+            if (rating) break;
+          }
+        }
+
+        // 전략 10: 별 이미지/SVG/CSS 시각적 요소가 있으면 리뷰 수 기반 추정
+        // v6.6.2: 쿠팡이 별점 텍스트를 DOM에서 제거하고 시각적으로만 표시하는 경우
+        // 리뷰 수가 있다면 별점 시각 요소 유무와 관계없이 추정 적용
+        if (!rating) {
+          const hasVisualStars = box.querySelector(
+            '[class*="star"], [class*="Star"], [class*="rating"], [class*="Rating"], ' +
+            'img[alt*="별"], img[alt*="star"], svg, ' +
+            '[class*="score"], [class*="Score"]'
+          );
+          if (hasVisualStars || reviewCount > 0) {
             ratingIsEstimated = true;
             if (reviewCount >= 500) rating = 4.6;
             else if (reviewCount >= 100) rating = 4.5;
@@ -1727,22 +1892,32 @@
   // ============================================================
   function calcParseQuality(items) {
     const total = items.length;
-    if (!total) return { priceRate: 0, ratingRate: 0, reviewRate: 0, overall: 0, estimatedRatingCount: 0 };
+    if (!total) return { priceRate: 0, ratingRate: 0, reviewRate: 0, overall: 0, estimatedRatingCount: 0, ratingWithReviewRate: 0 };
     const priceOk = items.filter(i => i.price > 0).length;
     // 평점: 추정값이 아닌 실제 파싱된 것만 카운트
     const ratingOk = items.filter(i => i.rating > 0 && i.rating <= 5 && !i.ratingIsEstimated).length;
     const ratingTotal = items.filter(i => i.rating > 0 && i.rating <= 5).length;
     const estimatedRatingCount = items.filter(i => i.ratingIsEstimated).length;
+    // ★ v6.6.2: 리뷰가 있으면서 평점이 있는 것 (추정 포함) = 유효 평점
+    // 쿠팡 2026 검색결과에서 별점 텍스트를 제거하고 시각적 별만 표시하는 경우
+    // 리뷰가 있으면 추정 평점이라도 유효한 데이터로 인정
+    const ratingWithReview = items.filter(i => i.rating > 0 && i.rating <= 5 && (i.reviewCount > 0 || !i.ratingIsEstimated)).length;
     // 리뷰: 실제로 DOM에서 파싱된 것만 카운트 (reviewCount === 0이지만 reviewParsed가 아닌 것은 미파싱)
     const reviewOk = items.filter(i => i.reviewParsed || i.reviewCount > 0).length;
     const priceRate = Math.round(priceOk / total * 100);
-    const ratingRate = Math.round(ratingOk / total * 100);
+    // ★ v6.6.2: ratingRate 계산 개선
+    // 실제 파싱된 것 + 리뷰수 기반 추정값을 합산하여 계산
+    // (쿠팡이 별점 텍스트를 DOM에서 제거한 경우 추정값이 유일한 수단)
+    const ratingRate = Math.round(ratingWithReview / total * 100);
+    const ratingDirectRate = Math.round(ratingOk / total * 100); // 직접 파싱된 것만
     const reviewRate = Math.round(reviewOk / total * 100);
     return {
       priceRate, ratingRate, reviewRate,
       overall: Math.round((priceRate + ratingRate + reviewRate) / 3),
       estimatedRatingCount,
       ratingTotalWithEstimate: ratingTotal,
+      ratingDirectRate, // 직접 파싱률 (디버그용)
+      ratingWithReviewRate: Math.round(ratingWithReview / total * 100),
     };
   }
 
@@ -1766,9 +1941,9 @@
       allItems = items;
       // 파싱 품질 로그
       const pq = calcParseQuality(items);
-      console.log(`%c[SH] ✅ ${items.length}개 파싱 완료 | 품질: 가격${pq.priceRate}% 평점${pq.ratingRate}%(추정${pq.estimatedRatingCount}개) 리뷰${pq.reviewRate}% (전체 ${pq.overall}%)`, 'color:#16a34a;font-weight:bold;');
-      if (pq.ratingRate < 60) {
-        console.warn(`%c[SH] ⚠️ 평점 파싱률 저조 (${pq.ratingRate}%, 추정포함 ${pq.ratingTotalWithEstimate}개) — 쿠팡 DOM 변경 감지`, 'color:#dc2626;font-weight:bold;');
+      console.log(`%c[SH] ✅ ${items.length}개 파싱 완료 | 품질: 가격${pq.priceRate}% 평점${pq.ratingRate}%(직접${pq.ratingDirectRate}%+추정${pq.estimatedRatingCount}개) 리뷰${pq.reviewRate}% (전체 ${pq.overall}%)`, 'color:#16a34a;font-weight:bold;');
+      if (pq.ratingRate < 30) {
+        console.warn(`%c[SH] ⚠️ 평점 파싱률 저조 (유효${pq.ratingRate}%, 직접${pq.ratingDirectRate}%, 추정포함 ${pq.ratingTotalWithEstimate}개) — 쿠팡 DOM 변경 감지`, 'color:#dc2626;font-weight:bold;');
         // DOM 진단 덤프: 첫 번째 상품 카드의 구조 로그
         if (items[0]?._box) {
           const box = items[0]._box;
