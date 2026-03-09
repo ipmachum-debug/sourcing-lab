@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import SourcingFormModal from "@/components/SourcingFormModal";
@@ -83,11 +83,12 @@ export default function ExtensionDashboard() {
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSort, setDemandSort] = useState<"keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price">("keyword_score");
   const [selectedDeleteKws, setSelectedDeleteKws] = useState<Set<string>>(new Set());
+  const [selectedBatchKws, setSelectedBatchKws] = useState<Set<string>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, batchNum: 0 });
   const [batchMode, setBatchMode] = useState<'all' | 'selected'>('all');
   const [batchSize, setBatchSize] = useState(10);
-  const [batchStopped, setBatchStopped] = useState(false);
+  const batchStoppedRef = useRef(false);
   // Sourcing modal state
   const [sourcingModalOpen, setSourcingModalOpen] = useState(false);
   const [sourcingPrefillData, setSourcingPrefillData] = useState<Record<string, any> | undefined>(undefined);
@@ -296,65 +297,69 @@ export default function ExtensionDashboard() {
     },
     onError: (err: any) => toast.error(err.message || "통계 계산 실패"),
   });
-  const runBatch = trpc.extension.runDailyBatchCollection.useMutation({
-    onSuccess: (data) => {
-      if (data) {
-        toast.success(`배치 완료: ${data.processed}건 처리, ${data.updated}건 갱신`);
-        keywordStatsList.refetch();
-        keywordStatsOverview.refetch();
-        if (demandSelectedKw) keywordDailyStats.refetch();
-      }
-    },
-    onError: (err) => toast.error(`배치 오류: ${err.message}`),
-  });
-
-  // 배치 실행 함수
+  // 배치 실행 함수 - computeKeywordDailyStats를 키워드별로 분할 호출
   const handleRunBatch = useCallback(async () => {
     if (batchRunning) return;
     setBatchRunning(true);
-    setBatchStopped(false);
+    batchStoppedRef.current = false;
 
-    const selectedKws = batchMode === 'selected'
-      ? Array.from(selectedDeleteKws)
-      : undefined;
-    const totalKws = batchMode === 'selected'
-      ? selectedDeleteKws.size
-      : (keywordStatsList.data?.length || 0);
+    // 대상 키워드 목록 결정
+    const allKws: string[] = (keywordStatsList.data || []).map((k: any) => k.query);
+    const targetKws = batchMode === 'selected'
+      ? Array.from(selectedBatchKws)
+      : allKws;
 
-    if (totalKws === 0) {
-      toast.error('처리할 키워드가 없습니다');
+    if (targetKws.length === 0) {
+      toast.error(batchMode === 'selected' ? '배치할 키워드를 체크하세요' : '처리할 키워드가 없습니다');
       setBatchRunning(false);
       return;
     }
 
-    let offset = 0;
+    const total = targetKws.length;
+    let processed = 0;
     let batchNum = 0;
-    let totalProcessed = 0;
-    setBatchProgress({ current: 0, total: totalKws, batchNum: 0 });
+    setBatchProgress({ current: 0, total, batchNum: 0 });
 
     try {
-      while (offset < totalKws && !batchStopped) {
+      // batchSize씩 나눠서 처리
+      for (let i = 0; i < total; i += batchSize) {
+        if (batchStoppedRef.current) {
+          toast.info(`배치 중지됨 (${processed}/${total} 처리됨)`);
+          break;
+        }
         batchNum++;
-        setBatchProgress(prev => ({ ...prev, batchNum }));
-        const result = await runBatch.mutateAsync({
-          limit: batchSize,
-          offset,
-          keywords: selectedKws,
-        });
-        totalProcessed += (result?.processed || 0);
-        offset += batchSize;
-        setBatchProgress({ current: Math.min(offset, totalKws), total: totalKws, batchNum });
-        if (!result?.hasMore) break;
+        const chunk = targetKws.slice(i, i + batchSize);
+        setBatchProgress({ current: i, total, batchNum });
+
+        // 각 키워드에 대해 computeKeywordDailyStats 호출
+        for (const query of chunk) {
+          if (batchStoppedRef.current) break;
+          try {
+            await computeStats.mutateAsync({ query });
+            processed++;
+          } catch {
+            // 개별 키워드 에러는 건너뜀
+          }
+          setBatchProgress(prev => ({ ...prev, current: Math.min(i + chunk.indexOf(query) + 1, total) }));
+        }
       }
-      toast.success(`배치 완료! 총 ${totalProcessed}건 처리됨`);
+
+      if (!batchStoppedRef.current) {
+        toast.success(`배치 완료! 총 ${processed}/${total}건 통계 갱신됨`);
+      }
     } catch (err: any) {
       toast.error(`배치 오류: ${err.message}`);
     } finally {
       setBatchRunning(false);
       keywordStatsList.refetch();
       keywordStatsOverview.refetch();
+      if (demandSelectedKw) keywordDailyStats.refetch();
     }
-  }, [batchRunning, batchMode, batchSize, selectedDeleteKws, keywordStatsList.data, batchStopped]);
+  }, [batchRunning, batchMode, batchSize, selectedBatchKws, keywordStatsList.data]);
+
+  const handleStopBatch = useCallback(() => {
+    batchStoppedRef.current = true;
+  }, []);
 
   const deleteKeyword = trpc.extension.deleteKeyword.useMutation({
     onSuccess: (data) => {
@@ -948,9 +953,24 @@ export default function ExtensionDashboard() {
                         <button
                           className={`px-2.5 py-1 text-[10px] rounded-md transition font-medium ${batchMode === 'selected' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
                           onClick={() => setBatchMode('selected')}>
-                          선택 ({selectedDeleteKws.size}개)
+                          선택 ({selectedBatchKws.size}개)
                         </button>
                       </div>
+
+                      {/* 선택 모드일 때 전체선택/해제 */}
+                      {batchMode === 'selected' && (
+                        <button
+                          className="text-[10px] text-orange-600 hover:text-orange-800 underline"
+                          onClick={() => {
+                            if (selectedBatchKws.size === (keywordStatsList.data?.length || 0)) {
+                              setSelectedBatchKws(new Set());
+                            } else {
+                              setSelectedBatchKws(new Set((keywordStatsList.data || []).map((k: any) => k.query)));
+                            }
+                          }}>
+                          {selectedBatchKws.size === (keywordStatsList.data?.length || 0) ? '전체 해제' : '전체 선택'}
+                        </button>
+                      )}
 
                       {/* 배치 크기 */}
                       <div className="flex items-center gap-1.5">
@@ -972,13 +992,13 @@ export default function ExtensionDashboard() {
                       {!batchRunning ? (
                         <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
                           onClick={handleRunBatch}
-                          disabled={batchMode === 'selected' && selectedDeleteKws.size === 0}>
+                          disabled={batchMode === 'selected' && selectedBatchKws.size === 0}>
                           <Play className="w-3 h-3" fill="currentColor" />
                           배치 실행
                         </Button>
                       ) : (
                         <Button size="sm" variant="destructive" className="text-xs gap-1.5"
-                          onClick={() => setBatchStopped(true)}>
+                          onClick={handleStopBatch}>
                           <Square className="w-3 h-3" fill="currentColor" />
                           중지
                         </Button>
@@ -1008,7 +1028,7 @@ export default function ExtensionDashboard() {
                   {/* 배치 모드 안내 */}
                   <div className="text-[10px] text-gray-400">
                     {batchMode === 'all'
-                      ? `전체 키워드를 ${batchSize}개씩 나눠서 배치 수집합니다. 쿠팡 검색 데이터를 기반으로 통계를 갱신합니다.`
+                      ? `전체 키워드(${(keywordStatsList.data?.length || 0)}개)를 ${batchSize}개씩 나눠서 통계를 갱신합니다.`
                       : `체크한 키워드만 ${batchSize}개씩 나눠서 배치 수집합니다. 좌측 테이블에서 키워드를 선택하세요.`}
                   </div>
                 </div>
@@ -1066,7 +1086,21 @@ export default function ExtensionDashboard() {
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b bg-gray-50 text-gray-500 text-[10px]">
-                            <th className="p-2 text-center w-8">
+                            {batchMode === 'selected' && (
+                              <th className="p-2 text-center w-8" title="배치 선택">
+                                <input type="checkbox"
+                                  className="accent-orange-500"
+                                  checked={selectedBatchKws.size > 0 && selectedBatchKws.size === (keywordStatsList.data?.length || 0)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedBatchKws(new Set((keywordStatsList.data || []).map((k: any) => k.query)));
+                                    } else {
+                                      setSelectedBatchKws(new Set());
+                                    }
+                                  }} />
+                              </th>
+                            )}
+                            <th className="p-2 text-center w-8" title="삭제 선택">
                               <input type="checkbox"
                                 checked={selectedDeleteKws.size > 0 && selectedDeleteKws.size === (keywordStatsList.data?.length || 0)}
                                 onChange={(e) => {
@@ -1091,7 +1125,7 @@ export default function ExtensionDashboard() {
                         </thead>
                         <tbody>
                           {!keywordStatsList.data?.length ? (
-                            <tr><td colSpan={11} className="text-center py-10 text-gray-400">
+                            <tr><td colSpan={12} className="text-center py-10 text-gray-400">
                               <Activity className="w-10 h-10 mx-auto mb-2 opacity-20" />
                               <p className="text-sm font-medium">데이터가 없습니다</p>
                               <p className="text-[10px] mt-1">쿠팡에서 검색한 뒤 "통계 계산" 버튼을 눌러주세요</p>
@@ -1104,6 +1138,17 @@ export default function ExtensionDashboard() {
                                 <tr key={kw.id}
                                   className={`border-b cursor-pointer transition ${isSelected ? 'bg-orange-50 ring-1 ring-orange-200' : 'hover:bg-gray-50'}`}
                                   onClick={() => setDemandSelectedKw(kw.query)}>
+                                  {batchMode === 'selected' && (
+                                    <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                      <input type="checkbox" className="accent-orange-500"
+                                        checked={selectedBatchKws.has(kw.query)}
+                                        onChange={() => {
+                                          const next = new Set(selectedBatchKws);
+                                          if (next.has(kw.query)) next.delete(kw.query); else next.add(kw.query);
+                                          setSelectedBatchKws(next);
+                                        }} />
+                                    </td>
+                                  )}
                                   <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
                                     <input type="checkbox" checked={isChecked}
                                       onChange={() => {
