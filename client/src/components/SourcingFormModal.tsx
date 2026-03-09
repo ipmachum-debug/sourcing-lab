@@ -262,7 +262,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-3">
           {/* Left: Form fields */}
           <div className="lg:col-span-2 space-y-4">
             {/* AI Auto-fill Button */}
@@ -283,7 +283,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <Label className="text-[10px] text-muted-foreground">날짜</Label>
                     <Input type="date" value={form.recordDate} onChange={e => set("recordDate", e.target.value)} className="h-8 text-xs mt-1" />
@@ -302,7 +302,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                   <Label className="text-[10px] text-muted-foreground">상품명 *</Label>
                   <Input value={form.productName} onChange={e => set("productName", e.target.value)} placeholder="상품명을 입력하세요" className="h-8 text-xs mt-1" />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <Label className="text-[10px] text-muted-foreground">키워드 1 *</Label>
                     <Input value={form.keyword1} onChange={e => set("keyword1", e.target.value)} placeholder="핵심" className="h-8 text-xs mt-1" />
@@ -316,7 +316,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                     <Input value={form.keyword3} onChange={e => set("keyword3", e.target.value)} placeholder="롱테일" className="h-8 text-xs mt-1" />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <Label className="text-[10px] text-muted-foreground">타겟 고객</Label>
                     <Input value={form.targetCustomer} onChange={e => set("targetCustomer", e.target.value)} placeholder="30대 여성 등" className="h-8 text-xs mt-1" />
@@ -334,7 +334,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-1.5"><span>⚔️</span> 경쟁 & 차별화</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-3 gap-3">
+              <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <Label className="text-[10px] text-muted-foreground">경쟁도</Label>
                   <Select value={form.competitionLevel} onValueChange={v => set("competitionLevel", v)}>
@@ -394,7 +394,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                   <Label className="text-[10px] text-muted-foreground">개발 노트 *</Label>
                   <Textarea value={form.developmentNote} onChange={e => set("developmentNote", e.target.value)} placeholder="상품 개발 방향, OEM/ODM 포인트" rows={3} className="text-xs mt-1" />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <Label className="text-[10px] text-muted-foreground">증정품 아이디어</Label>
                     <Textarea value={form.giftIdea} onChange={e => set("giftIdea", e.target.value)} placeholder="사은품, 증정품" rows={2} className="text-xs mt-1" />
@@ -412,7 +412,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-1.5"><span>🔗</span> 참고 링크</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3">
+              <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-[10px] text-muted-foreground">쿠팡 링크</Label>
                   <Input value={form.coupangUrl} onChange={e => set("coupangUrl", e.target.value)} placeholder="https://www.coupang.com/..." className="h-8 text-xs mt-1" />

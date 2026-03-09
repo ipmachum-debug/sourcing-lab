@@ -662,21 +662,26 @@ export default function ExtensionDashboard() {
           </div>
         </div>
 
-        {/* 탭 네비게이션 */}
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto">
-          {tabs.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-all whitespace-nowrap relative ${
-                activeTab === t.key ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}>
-              <t.icon className="w-3.5 h-3.5" />{t.label}
-              {t.badge ? (
-                <span className="bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center ml-0.5">
-                  {t.badge > 9 ? "9+" : t.badge}
-                </span>
-              ) : null}
-            </button>
-          ))}
+        {/* 탭 네비게이션 - 좌우 드래그 스크롤 */}
+        <div className="relative">
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto scrollbar-hide"
+            style={{ WebkitOverflowScrolling: 'touch' }}>
+            {tabs.map(t => (
+              <button key={t.key} onClick={() => setActiveTab(t.key)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-all whitespace-nowrap relative shrink-0 ${
+                  activeTab === t.key ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}>
+                <t.icon className="w-3.5 h-3.5" />{t.label}
+                {t.badge ? (
+                  <span className="bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center ml-0.5">
+                    {t.badge > 9 ? "9+" : t.badge}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+          {/* 스크롤 가능 표시 - 우측 그라디언트 */}
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent rounded-r-lg pointer-events-none md:hidden" />
         </div>
 
         {/* ===== 대시보드 탭 ===== */}
