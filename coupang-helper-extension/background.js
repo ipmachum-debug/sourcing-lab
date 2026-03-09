@@ -1,5 +1,6 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.2.2
+   Coupang Sourcing Helper — Background Service Worker v7.2.3
+   v7.2.3: 검색시 통계 자동 산출 + saveSearchEvent 데이터 동기화
    v7.2.2: 자동 수집 UNKNOWN 에러 수정 + 딜레이 최적화 + 상태 관리 강화
    v7.2.1: 마진 계산기 셀러라이프 방식 전면 반영 + API 통신 강화
    v7.2: 셀러라이프 수집방식 전면 반영 (대개편)
@@ -86,6 +87,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.storage.session.set({ [`results:${tabId}`]: payload });
       saveSearchHistory(payload);
       syncSnapshotToServer(payload).catch(() => {});
+      // v7.2.2: 사용자 검색 시에도 saveSearchEvent 호출 (웹 대시보드 통계 자동 갱신)
+      syncSearchEventToServer(payload).catch(() => {});
       // 순위 추적에 등록된 키워드면 자동으로 순위 저장
       saveRankFromSearch(payload).catch(() => {});
       chrome.runtime.sendMessage({ type: 'RESULTS_UPDATED', tabId }).catch(() => {});
@@ -860,6 +863,52 @@ async function syncSnapshotToServer(payload) {
     competitionScore, competitionLevel,
     items: items.slice(0, 20),
   });
+}
+
+// v7.2.2: 사용자 검색 시 saveSearchEvent 자동 호출 (웹 대시보드 통계 연동)
+async function syncSearchEventToServer(payload) {
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) return;
+  if (!payload.query || !payload.items?.length) return;
+
+  const items = payload.items;
+  const prices = items.map(i => i.price).filter(p => p > 0);
+  const ratings = items.map(i => i.rating).filter(r => r > 0);
+  const reviews = items.map(i => i.reviewCount).filter(r => r >= 0);
+
+  const avgPrice = prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
+  const avgRating = ratings.length ? +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : 0;
+  const avgReview = reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0;
+  const totalReviewSum = Math.min(reviews.reduce((a, b) => a + b, 0), 2147483647);
+  const adCount = items.filter(i => i.isAd).length;
+  const rocketCount = items.filter(i => i.isRocket).length;
+  const highReviewCount = items.filter(i => (i.reviewCount || 0) >= 100).length;
+  const priceRate = items.length ? Math.round(prices.length / items.length * 100) : 0;
+  const ratingRate = items.length ? Math.round(ratings.length / items.length * 100) : 0;
+  const reviewRate = items.length ? Math.round(reviews.length / items.length * 100) : 0;
+
+  try {
+    await apiClient.saveSearchEvent({
+      keyword: payload.query,
+      source: 'user_search',
+      pageUrl: payload.url || '',
+      totalItems: items.length,
+      items: items.slice(0, 36),
+      avgPrice,
+      avgRating,
+      avgReview,
+      totalReviewSum,
+      adCount,
+      rocketCount,
+      highReviewCount,
+      priceParseRate: priceRate,
+      ratingParseRate: ratingRate,
+      reviewParseRate: reviewRate,
+    });
+    console.log(`[SH] saveSearchEvent 자동 동기화: "${payload.query}" (${items.length}개)`);
+  } catch (e) {
+    console.warn('[SH] saveSearchEvent 동기화 실패:', e.message);
+  }
 }
 
 async function syncCandidateToServer(item) {
