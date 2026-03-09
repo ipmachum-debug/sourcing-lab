@@ -10,3 +10,4 @@ supervisord.log
 supervisor.sock
 pnpm-lock.yaml
 tmp/
+sellerlife-ref/

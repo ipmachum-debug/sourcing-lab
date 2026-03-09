@@ -13,7 +13,7 @@
         <h1>🐢 소싱 헬퍼</h1>
         <div class="header-right">
           <span class="sync-status" id="syncStatus" title="서버 연결 상태">●</span>
-          <span class="version">v7.2.0</span>
+          <span class="version">v7.2.2</span>
         </div>
       </div>
       <p id="summary">쿠팡 검색 결과 페이지를 열면 자동 분석됩니다.</p>
@@ -395,25 +395,79 @@
       <p class="empty-msg" id="historyEmpty">검색 히스토리가 없습니다.</p>
     </div>
 
-    <!-- ========== 마진 계산기 탭 ========== -->
+    <!-- ========== 마진 계산기 탭 (v7.2 셀러라이프 방식 전면 개편) ========== -->
     <div class="tab-content" id="tab-calculator">
-      <div class="section-header"><h2>🧮 마진 계산기</h2></div>
+      <div class="section-header"><h2>🧮 마진 계산기 <span style="font-size:10px;color:#94a3b8;font-weight:400">v7.2 SellerLife</span></h2></div>
       <div class="calc-form">
+        <!-- 기본 입력 -->
+        <div class="calc-row"><label>쿠팡 판매가 (원)</label><input type="number" id="calcSalePrice" placeholder="0" step="100" /></div>
         <div class="calc-row"><label>1688 원가 (CNY)</label><input type="number" id="calcCnyCost" placeholder="0" step="0.1" /></div>
         <div class="calc-row"><label>환율 (CNY→KRW)</label><div class="calc-input-group"><input type="number" id="calcExchangeRate" value="190" step="1" /><button class="btn-sm btn-rate" id="fetchRateBtn" title="실시간 환율 가져오기">🔄</button></div></div>
+        <div class="calc-row"><label>세트 수량</label><input type="number" id="calcSetQty" value="1" min="1" step="1" /></div>
+        <div class="calc-row"><label>월 예상 판매량</label><input type="number" id="calcMonthlySales" placeholder="30" step="1" /></div>
+
+        <!-- 카테고리별 수수료 (셀러라이프 spGrowthCalcRepo) -->
+        <div class="calc-row">
+          <label>카테고리 (수수료)</label>
+          <select id="calcCategory" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <option value="10.8">일반 (10.8%)</option>
+            <option value="7.8">가전디지털 (7.8%)</option>
+            <option value="5.8">TV (5.8%)</option>
+            <option value="5.0">태블릿 (5.0%)</option>
+            <option value="4.5">모니터 (4.5%)</option>
+            <option value="10.8">생활용품 (10.8%)</option>
+            <option value="10.8">패션의류 (10.8%)</option>
+            <option value="10.8">패션잡화 (10.8%)</option>
+            <option value="10.3">뷰티 (10.3%)</option>
+            <option value="10.8">식품 (10.8%)</option>
+            <option value="5.8">가구/인테리어 (5.8%)</option>
+            <option value="10.8">스포츠/레저 (10.8%)</option>
+            <option value="10.8">출산/유아동 (10.8%)</option>
+            <option value="10.8">완구/취미 (10.8%)</option>
+            <option value="10.3">반려동물 (10.3%)</option>
+            <option value="5.8">자동차용품 (5.8%)</option>
+            <option value="10.8">문구/오피스 (10.8%)</option>
+            <option value="0">직접입력</option>
+          </select>
+        </div>
+        <div class="calc-row" id="customCommissionRow" style="display:none"><label>수수료율 직접입력 (%)</label><input type="number" id="calcCommission" value="10.8" step="0.1" /></div>
+
+        <!-- 배송비 — 셀러라이프 spGrowthCalcUtils 사이즈·무게 기반 -->
+        <div style="margin:8px 0 4px;font-weight:600;font-size:11px;color:#374151">📦 쿠팡 배송비 (로켓그로스 기준)</div>
+        <div class="calc-row">
+          <label>택배 유형</label>
+          <select id="calcDeliveryTier" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <option value="1950">극소 (≤80cm, ≤2kg) — 1,950원</option>
+            <option value="2200" selected>소형 (≤100cm, ≤5kg) — 2,200원</option>
+            <option value="3350">중형 (≤120cm, ≤10kg) — 3,350원</option>
+            <option value="3575">대형 (≤140cm, ≤15kg) — 3,575원</option>
+            <option value="5475">특대 (≤160cm, ≤20kg) — 5,475원</option>
+            <option value="6975">초특대 (≤250cm, ≤30kg) — 6,975원</option>
+            <option value="0">직접입력</option>
+          </select>
+        </div>
+        <div class="calc-row" id="customDeliveryRow" style="display:none"><label>배송비 직접입력 (원)</label><input type="number" id="calcCustomDelivery" value="2200" step="100" /></div>
+
+        <div style="margin:8px 0 4px;font-weight:600;font-size:11px;color:#374151">📋 추가 비용</div>
         <div class="calc-row"><label>국제배송비 (원)</label><input type="number" id="calcShipping" value="3000" step="100" /></div>
         <div class="calc-row"><label>관부가세율 (%)</label><input type="number" id="calcTaxRate" value="10" step="1" /></div>
-        <div class="calc-row"><label>쿠팡 판매가 (원)</label><input type="number" id="calcSalePrice" placeholder="0" step="100" /></div>
-        <div class="calc-row"><label>쿠팡 수수료율 (%)</label><input type="number" id="calcCommission" value="10.8" step="0.1" /></div>
-        <button class="btn-primary" id="calcBtn">계산하기</button>
+        <div class="calc-row"><label>광고비율 (%)</label><input type="number" id="calcAdRate" value="5" step="0.5" /></div>
+
+        <button class="btn-primary" id="calcBtn" style="margin-top:8px">계산하기</button>
+
+        <!-- 셀러라이프 방식 상세 결과 -->
         <div class="calc-result" id="calcResult" style="display:none">
           <div class="calc-result-row"><span>원가 (KRW)</span><span id="resultCostKrw">-</span></div>
-          <div class="calc-result-row"><span>배송비</span><span id="resultShipping">-</span></div>
+          <div class="calc-result-row"><span>국제배송비</span><span id="resultShipping">-</span></div>
           <div class="calc-result-row"><span>관부가세</span><span id="resultTax">-</span></div>
-          <div class="calc-result-row total-cost"><span>총 원가</span><span id="resultTotalCost">-</span></div>
-          <div class="calc-result-row"><span>쿠팡 수수료</span><span id="resultCommission">-</span></div>
+          <div class="calc-result-row total-cost"><span>총 원가 (원가+배송+관세)</span><span id="resultTotalCost">-</span></div>
+          <div class="calc-result-row"><span>쿠팡 배송비 (로켓)</span><span id="resultCoupangDelivery">-</span></div>
+          <div class="calc-result-row"><span>쿠팡 수수료 (<span id="resultCommRate">-</span>%)</span><span id="resultCommission">-</span></div>
+          <div class="calc-result-row"><span>광고비 (<span id="resultAdRateLabel">5</span>%)</span><span id="resultAdCost">-</span></div>
           <div class="calc-result-row profit-row" id="profitRow"><span>예상 순이익</span><span id="resultProfit">-</span></div>
           <div class="calc-result-row margin-row" id="marginRow"><span>마진율</span><span id="resultMargin">-</span></div>
+          <div class="calc-result-row" id="roasRow" style="display:none"><span>최소 ROAS</span><span id="resultMinRoas">-</span></div>
+          <div class="calc-result-row" id="monthlyRow" style="display:none"><span>월 예상 수익</span><span id="resultMonthlyProfit">-</span></div>
         </div>
         <button class="btn-sm btn-export" id="exportMarginBtn" style="margin-top:8px" title="마진 계산 내보내기">📥 결과 저장</button>
       </div>

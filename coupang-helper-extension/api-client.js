@@ -1,6 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Server API Client v7.2
+   Coupang Sourcing Helper — Server API Client v7.2.1
    lumiriz.kr 서버와 통신하는 API 클라이언트
+   v7.2.1: API 통신 강화 — 리트라이/타임아웃/인증 갱신/동시요청 큐
    v7.2: 셀러라이프 방식 다중 전략 수집 통합
    v7.1: tRPC SuperJSON 래핑(result.data.json) 자동 해제
    + AI 소싱 코치 + 하이브리드 수집 + 자동 순회 수집
@@ -248,8 +249,37 @@ class ApiClient {
     return this._call('extension.getDetailHistory', opts, 'query');
   }
 
-  // ===== 내부 통신 =====
-  async _call(procedure, input, type = 'query') {
+  // ===== v7.2: 내부 통신 (리트라이·타임아웃·인증 갱신 강화) =====
+
+  // 동시 요청 큐 — 서버 과부하 방지 (최대 3개)
+  _concurrency = 0;
+  _maxConcurrency = 3;
+  _requestQueue = [];
+
+  async _enqueue(fn) {
+    if (this._concurrency < this._maxConcurrency) {
+      this._concurrency++;
+      try { return await fn(); }
+      finally { this._concurrency--; this._drainQueue(); }
+    }
+    return new Promise((resolve, reject) => {
+      this._requestQueue.push(() => fn().then(resolve).catch(reject));
+    });
+  }
+
+  _drainQueue() {
+    while (this._requestQueue.length > 0 && this._concurrency < this._maxConcurrency) {
+      this._concurrency++;
+      const next = this._requestQueue.shift();
+      next().finally(() => { this._concurrency--; this._drainQueue(); });
+    }
+  }
+
+  async _call(procedure, input, type = 'query', _retryCount = 0) {
+    return this._enqueue(() => this._callInner(procedure, input, type, _retryCount));
+  }
+
+  async _callInner(procedure, input, type = 'query', _retryCount = 0) {
     const url = type === 'query'
       ? `${API_BASE}/${procedure}${input ? '?input=' + encodeURIComponent(JSON.stringify({ json: input })) : ''}`
       : `${API_BASE}/${procedure}`;
@@ -264,21 +294,79 @@ class ApiClient {
       options.body = JSON.stringify({ json: input });
     }
 
-    const resp = await fetch(url, options);
-    if (!resp.ok) {
-      const errBody = await resp.json().catch(() => ({}));
-      const msg = errBody?.[0]?.error?.message || errBody?.error?.message || `HTTP ${resp.status}`;
-      throw new Error(msg);
-    }
+    // v7.2: 타임아웃 (30초 일반, 60초 배치/AI)
+    const isBatch = procedure.includes('Batch') || procedure.includes('batch') || procedure.includes('ai');
+    const timeout = isBatch ? 60000 : 30000;
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    const timer = setTimeout(() => controller.abort(), timeout);
 
-    const data = await resp.json();
-    // tRPC 배치 응답은 배열로 래핑됨: [{result:{data:{json:...}}}]
-    const unwrapped = Array.isArray(data) ? data[0] : data;
-    // tRPC SuperJSON 래핑 해제: result.data.json → result.data
-    if (unwrapped?.result?.data?.json !== undefined) {
-      unwrapped.result.data = unwrapped.result.data.json;
+    try {
+      const resp = await fetch(url, options);
+      clearTimeout(timer);
+
+      // v7.2: 401 인증 만료 → 자동 재인증 시도 (1회)
+      if (resp.status === 401 && _retryCount === 0) {
+        console.warn('[API] 인증 만료 감지, 재인증 시도...');
+        const { serverEmail, serverPassword } = await chrome.storage.local.get(['serverEmail', 'serverPassword']);
+        if (serverEmail) {
+          try {
+            await this.checkAuth();
+            return this._callInner(procedure, input, type, 1);
+          } catch (_) {
+            await chrome.storage.local.set({ serverLoggedIn: false });
+          }
+        }
+        throw new Error('인증 만료 — 재로그인 필요');
+      }
+
+      // v7.2: 429 Too Many Requests → 지수 백오프 리트라이
+      if (resp.status === 429 && _retryCount < 3) {
+        const delay = Math.pow(2, _retryCount) * 1000 + Math.random() * 1000;
+        console.warn(`[API] 429 Too Many Requests, ${Math.round(delay/1000)}초 후 재시도 (${_retryCount + 1}/3)`);
+        await new Promise(r => setTimeout(r, delay));
+        return this._callInner(procedure, input, type, _retryCount + 1);
+      }
+
+      // v7.2: 5xx 서버 에러 → 1회 리트라이
+      if (resp.status >= 500 && _retryCount < 2) {
+        const delay = 2000 + Math.random() * 3000;
+        console.warn(`[API] 서버 에러 ${resp.status}, ${Math.round(delay/1000)}초 후 재시도`);
+        await new Promise(r => setTimeout(r, delay));
+        return this._callInner(procedure, input, type, _retryCount + 1);
+      }
+
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        const msg = errBody?.[0]?.error?.message || errBody?.error?.message || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+
+      const data = await resp.json();
+      // tRPC 배치 응답은 배열로 래핑됨: [{result:{data:{json:...}}}]
+      const unwrapped = Array.isArray(data) ? data[0] : data;
+      // tRPC SuperJSON 래핑 해제: result.data.json → result.data
+      if (unwrapped?.result?.data?.json !== undefined) {
+        unwrapped.result.data = unwrapped.result.data.json;
+      }
+      return unwrapped;
+    } catch (e) {
+      clearTimeout(timer);
+
+      // v7.2: 네트워크 에러 (오프라인, DNS 등) → 1회 리트라이
+      if (e.name === 'AbortError') {
+        throw new Error(`요청 타임아웃 (${timeout/1000}초): ${procedure}`);
+      }
+      if (e.name === 'TypeError' && _retryCount < 1) {
+        // fetch 자체가 실패 (네트워크 끊김)
+        const delay = 3000;
+        console.warn(`[API] 네트워크 에러, ${delay/1000}초 후 재시도:`, e.message);
+        await new Promise(r => setTimeout(r, delay));
+        return this._callInner(procedure, input, type, _retryCount + 1);
+      }
+
+      throw e;
     }
-    return unwrapped;
   }
 }
 
