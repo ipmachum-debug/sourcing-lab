@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "5.7.0";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v5.7.zip";
-const EXTENSION_FILE_SIZE = "92KB";
+const EXTENSION_VERSION = "6.6.0";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v6.6.zip";
+const EXTENSION_FILE_SIZE = "131KB";
 
 function AccordionSection({
   icon: Icon,
@@ -146,7 +146,7 @@ export default function ExtensionGuide() {
             {/* 1. 설치 방법 */}
             <AccordionSection icon={Chrome} title="1. 설치 방법" defaultOpen={true}>
               <div className="space-y-4 mt-3">
-                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v5.1.zip 파일을 받습니다." />
+                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v6.6.zip 파일을 받습니다." />
                 <Step num={2} title="압축 해제" desc="다운로드한 zip 파일의 압축을 풀어줍니다." />
                 <Step num={3} title="Chrome 확장프로그램 페이지 열기" desc="Chrome 주소창에 chrome://extensions 입력 후 이동합니다." />
                 <Step num={4} title="개발자 모드 활성화" desc="우측 상단의 '개발자 모드' 토글을 켜세요." />
@@ -586,9 +586,23 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
+                    version: "v6.6.0",
+                    date: "2026-03-09",
+                    badge: "Latest",
+                    changes: [
+                      "자동 수집(Auto-Collect) 전면 개편: 순차 키워드 검색 → DOM 파싱 → 다음 키워드 루프",
+                      "배치 실행 UI: 전체/선택 모드, 배치 크기(5/10/20/50), 진행률 표시, 중지 버튼",
+                      "배치 로직 수정: computeKeywordDailyStats 기반 실제 통계 갱신",
+                      "useRef 기반 즉시 중지 플래그 (클로저 문제 해결)",
+                      "배치 선택용 오렌지 체크박스 분리 (삭제 체크박스와 독립)",
+                      "모바일 반응형: 탭 좌우 드래그 스크롤, 소싱폼 경쟁&차별화 겹침 수정",
+                      "검색 수요 탭: 배치 수집 컨트롤 카드 추가",
+                      "안전 장치: 키워드당 50~90초 딜레이, 최대 200개, 실패 시 2~5분 재시도",
+                    ],
+                  },
+                  {
                     version: "v5.7.0",
                     date: "2026-03-08",
-                    badge: "Latest",
                     changes: [
                       "내 상품 자동 추적 시스템: 소싱 상품/후보/쿠팡 매핑에서 자동 등록",
                       "상품명 기반 키워드 자동 추출 → 추적 키워드에 자동 등록",
