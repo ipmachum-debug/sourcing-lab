@@ -2791,3 +2791,159 @@ document.querySelector('#demandSelectAll').addEventListener('change', function(e
 });
 document.querySelector('#demandRefreshBtn').addEventListener('click', function() { loadDemandDashboard(); loadDemandKeywords(); });
 document.querySelector('#demandDetailClose').addEventListener('click', function() { document.querySelector('#demandDetailCard').style.display = 'none'; });
+
+// ============================================================
+//  v7.0: 하이브리드 자동 수집기 UI 제어
+//  Background fetch + DOMParser (셀러라이프 방식)
+// ============================================================
+
+let autoCollectPollingId = null;
+
+function showAutoCollectCard() {
+  const card = document.querySelector('#autoCollectCard');
+  if (card) card.style.display = '';
+}
+
+function updateAutoCollectUI(state) {
+  if (!state) return;
+  const badge = document.querySelector('#autoCollectStatusBadge');
+  const startBtn = document.querySelector('#startAutoCollectBtn');
+  const pauseBtn = document.querySelector('#pauseAutoCollectBtn');
+  const stopBtn = document.querySelector('#stopAutoCollectBtn');
+  const progressDiv = document.querySelector('#autoCollectProgress');
+  const progressFill = document.querySelector('#autoCollectProgressFill');
+  const progressText = document.querySelector('#autoCollectProgressText');
+  const logDiv = document.querySelector('#autoCollectLog');
+
+  if (!badge) return;
+
+  // 상태 뱃지
+  const statusMap = {
+    'IDLE': { text: '준비', cls: '' },
+    'RUNNING': { text: '수집중', cls: 'level-medium' },
+    'NAVIGATING': { text: '이동중', cls: 'level-medium' },
+    'PARSING': { text: '파싱중', cls: 'level-medium' },
+    'WAITING_NEXT': { text: '대기중', cls: 'level-easy' },
+    'COLLECTING_DETAIL': { text: '상세수집', cls: 'level-medium' },
+    'PAUSED': { text: '일시정지', cls: 'level-hard' },
+    'STOPPED': { text: '중단됨', cls: 'level-hard' },
+  };
+  const st = statusMap[state.status] || { text: state.status, cls: '' };
+  badge.textContent = st.text;
+  badge.className = 'competition-badge ' + st.cls;
+
+  // 버튼 상태
+  if (state.running && !state.paused) {
+    startBtn.style.display = 'none';
+    pauseBtn.style.display = '';
+    stopBtn.style.display = '';
+    progressDiv.style.display = '';
+  } else if (state.paused) {
+    startBtn.textContent = '▶ 재개';
+    startBtn.style.display = '';
+    pauseBtn.style.display = 'none';
+    stopBtn.style.display = '';
+    progressDiv.style.display = '';
+  } else {
+    startBtn.textContent = '▶ 자동 수집 시작';
+    startBtn.style.display = '';
+    pauseBtn.style.display = 'none';
+    stopBtn.style.display = 'none';
+    if (!state.successCount && !state.failCount) progressDiv.style.display = 'none';
+  }
+
+  // 진행률
+  if (progressFill && progressText) {
+    progressFill.style.width = state.progress + '%';
+    var kw = state.currentKeyword ? ' "' + state.currentKeyword + '"' : '';
+    progressText.textContent = (state.successCount + state.failCount + state.skipCount) + '/' + state.totalQueued + kw;
+  }
+
+  // 로그
+  if (logDiv) {
+    var html = '';
+    if (state.running || state.paused) {
+      html += '<div>성공: <b style="color:#16a34a">' + state.successCount + '</b> · ';
+      html += '실패: <b style="color:#dc2626">' + state.failCount + '</b> · ';
+      html += '대기: ' + state.queueLength + '개</div>';
+      if (state.currentKeyword) {
+        html += '<div>현재: "' + escHtml(state.currentKeyword) + '" (' + st.text + ')</div>';
+      }
+      if (state.lastError) {
+        html += '<div style="color:#dc2626">⚠️ ' + escHtml(state.lastError) + '</div>';
+      }
+    } else if (state.status === 'IDLE' && (state.successCount > 0 || state.failCount > 0)) {
+      html += '<div>✅ 수집 완료 — 성공: ' + state.successCount + ', 실패: ' + state.failCount + '</div>';
+    }
+    logDiv.innerHTML = html;
+  }
+}
+
+async function pollAutoCollectState() {
+  try {
+    var resp = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+    if (resp && resp.ok) updateAutoCollectUI(resp.data);
+  } catch (e) { /* ignore */ }
+}
+
+function startAutoCollectPolling() {
+  if (autoCollectPollingId) clearInterval(autoCollectPollingId);
+  autoCollectPollingId = setInterval(pollAutoCollectState, 2000);
+}
+
+function stopAutoCollectPolling() {
+  if (autoCollectPollingId) { clearInterval(autoCollectPollingId); autoCollectPollingId = null; }
+}
+
+// 자동 수집 시작 버튼
+document.querySelector('#startAutoCollectBtn').addEventListener('click', async function() {
+  var limit = parseInt(document.querySelector('#autoCollectLimitSelect').value || '30');
+  var collectDetail = document.querySelector('#autoCollectDetailCheck').checked;
+
+  var resp = await sendMsg({
+    type: 'START_AUTO_COLLECT',
+    payload: { limit: limit, collectDetail: collectDetail },
+  });
+
+  if (resp && resp.ok) {
+    document.querySelector('#autoCollectProgress').style.display = '';
+    startAutoCollectPolling();
+    pollAutoCollectState();
+  } else {
+    alert('자동 수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
+  }
+});
+
+// 일시정지 버튼
+document.querySelector('#pauseAutoCollectBtn').addEventListener('click', async function() {
+  await sendMsg({ type: 'PAUSE_AUTO_COLLECT' });
+  stopAutoCollectPolling();
+  pollAutoCollectState();
+});
+
+// 중단 버튼
+document.querySelector('#stopAutoCollectBtn').addEventListener('click', async function() {
+  await sendMsg({ type: 'STOP_AUTO_COLLECT' });
+  stopAutoCollectPolling();
+  pollAutoCollectState();
+});
+
+// 탭 전환 시 자동 수집 상태 확인
+async function checkAutoCollectOnTabSwitch() {
+  var resp = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+  if (resp && resp.ok && resp.data) {
+    showAutoCollectCard();
+    updateAutoCollectUI(resp.data);
+    if (resp.data.running) startAutoCollectPolling();
+  }
+}
+
+// demand 탭 로드 시 자동 수집 카드 연동
+(function() {
+  var origLoadDemand = loadDemandTab;
+  loadDemandTab = async function() {
+    await origLoadDemand();
+    showAutoCollectCard();
+    await checkAutoCollectOnTabSwitch();
+  };
+})();
