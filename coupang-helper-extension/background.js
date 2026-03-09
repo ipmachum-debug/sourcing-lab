@@ -5,7 +5,7 @@
          - V2 DOM 자동감지 (ProductUnit, aria-label 평점)
          - 배송유형 6종 분류
          - declarativeNetRequest 헤더 위조
-         - 배치 수집 완전 재작성 (순차 1개씩, 28~90초 간격)
+         - 배치 수집 완전 재작성 (순차 1개씩, 50~89초 간격)
          - 모바일 리뷰 API 통합
          - SSR JSON 파싱 폴백
    v6.6: 검색수요 분석 + 자동배치 토글 + 분할 배치
@@ -1365,7 +1365,7 @@ async function autoRunDailyBatch() {
 //  1. content.js 메시지 의존 완전 제거
 //  2. chrome.scripting.executeScript로 렌더링된 HTML 가져옴
 //  3. Background의 DOMParser로 V1/V2 자동 파싱
-//  4. 순차 처리 (1개씩), 28~90초 랜덤 딜레이
+//  4. 순차 처리 (1개씩), 50~89초 랜덤 딜레이
 //  5. 배치 크기 항상 1 (안전)
 //  6. 실패 시 더 긴 대기 (2~5분)
 // ============================================================
@@ -1388,7 +1388,7 @@ const collector = {
 };
 
 // ---- 유틸 ----
-function randomDelay(min = 28000, max = 90000) {
+function randomDelay(min = 50000, max = 89000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
@@ -1696,7 +1696,7 @@ async function runNextKeyword() {
       }
     }
 
-    // 8. 다음 키워드 — 28~90초 랜덤 딜레이
+    // 8. 다음 키워드 — 50~89초 랜덤 딜레이
     if (!collector.running || collector._aborted) return;
     const delay = randomDelay();
     console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
