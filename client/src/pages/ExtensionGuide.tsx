@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "6.6.0";
+const EXTENSION_VERSION = "6.6.2";
 const EXTENSION_ZIP_URL = "/coupang-helper-extension-v6.6.zip";
-const EXTENSION_FILE_SIZE = "131KB";
+const EXTENSION_FILE_SIZE = "132KB";
 
 function AccordionSection({
   icon: Icon,
@@ -586,9 +586,21 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v6.6.0",
+                    version: "v6.6.2",
                     date: "2026-03-09",
                     badge: "Latest",
+                    changes: [
+                      "평점 파싱률 저조(12%) 오류 수정 — 쿠팡 2026 DOM 변경 대응",
+                      "SVG 별점 감지 대폭 강화: clipPath/gradient/opacity/getComputedStyle 6가지 방법",
+                      "getComputedStyle 기반 CSS width% 별점 감지 (인라인 style 없는 경우)",
+                      "접근성(a11y) 숨겨진 텍스트에서 평점 추출 (sr-only, blind, aria-valuenow)",
+                      "calcParseQuality 개선: 리뷰수 기반 추정값도 유효 파싱으로 인정",
+                      "경고 임계값 60% → 30%로 하향 (쿠팡 구조 변경 현실 반영)",
+                    ],
+                  },
+                  {
+                    version: "v6.6.0",
+                    date: "2026-03-09",
                     changes: [
                       "자동 수집(Auto-Collect) 전면 개편: 순차 키워드 검색 → DOM 파싱 → 다음 키워드 루프",
                       "배치 실행 UI: 전체/선택 모드, 배치 크기(5/10/20/50), 진행률 표시, 중지 버튼",
