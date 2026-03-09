@@ -320,7 +320,7 @@ export default function ExtensionDashboard() {
     { key: "notifications", label: "알림", icon: Bell, badge: unreadCount.data?.count || 0 },
     { key: "wing", label: "WING", icon: Eye },
     { key: "history", label: "검색 이력", icon: Search },
-    { key: "sourcing", label: "uc18cuc2f1 uad00ub9ac", icon: Layers },
+    { key: "sourcing", label: "소싱 관리", icon: Layers },
   ];
 
   // CSV Export helper
