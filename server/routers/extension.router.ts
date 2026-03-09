@@ -3729,7 +3729,7 @@ export const extensionRouter = router({
 
   // ===== 배치 수집 대상 키워드 조회 =====
   getBatchKeywordSelection: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(20) }))
     .query(async ({ ctx, input }) => {
       return await selectBatchKeywords(ctx.user!.id, input.limit);
     }),

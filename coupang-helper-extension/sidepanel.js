@@ -2804,7 +2804,7 @@ function stopAutoCollectPolling() {
   if (autoCollectPollingId) { clearInterval(autoCollectPollingId); autoCollectPollingId = null; }
 }
 
-// 통합 수집 시작 버튼 (v7.1: 배치+자동 통합)
+// 통합 수집 시작 버튼 (v7.1.1: 서버 키워드 직접 조회 폴백)
 document.querySelector('#startAutoCollectBtn').addEventListener('click', async function() {
   var collectDetail = document.querySelector('#autoCollectDetailCheck').checked;
   var mode = document.querySelector('input[name="batchMode"]:checked');
@@ -2820,8 +2820,38 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     keywordList = demandKeywords.map(function(kw) { return kw.keyword; });
   }
 
+  // v7.1.1: demandKeywords가 비어있으면 서버에서 직접 가져옴
+  if (keywordList.length === 0 && mode !== 'selected') {
+    console.log('[수집] demandKeywords 비어있음, 서버에서 직접 키워드 조회...');
+    try {
+      var kwResp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 } });
+      if (kwResp && kwResp.ok && kwResp.data && kwResp.data.length > 0) {
+        demandKeywords = kwResp.data;
+        keywordList = kwResp.data.map(function(kw) { return kw.keyword; });
+        console.log('[수집] 서버에서 ' + keywordList.length + '개 키워드 로드 완료');
+      }
+    } catch(e) { console.error('[수집] 서버 키워드 조회 실패:', e); }
+  }
+
+  // 그래도 없으면 START_AUTO_COLLECT가 서버에서 자체 조회하도록 빈 상태로 전달
   if (keywordList.length === 0) {
-    alert('수집할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : '\n쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.'));
+    if (!confirm('사이드패널에 로드된 키워드가 없습니다.\n서버의 감시 키워드에서 직접 가져와서 수집할까요?')) return;
+    // keywords를 전달하지 않으면 background.js가 서버 getBatchKeywordSelection으로 자체 조회
+    var resp = await sendMsg({
+      type: 'START_AUTO_COLLECT',
+      payload: { limit: batchSize > 0 ? batchSize : 100, collectDetail: collectDetail },
+    });
+    if (resp && resp.ok) {
+      batchRunning = true;
+      document.querySelector('#autoCollectProgress').style.display = '';
+      document.querySelector('#batchProgressBar').style.display = '';
+      document.querySelector('#batchProgressFill').style.width = '0%';
+      document.querySelector('#batchProgressText').textContent = '서버 키워드 수집중...';
+      startAutoCollectPolling();
+      pollAutoCollectState();
+    } else {
+      alert('수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
+    }
     return;
   }
 
