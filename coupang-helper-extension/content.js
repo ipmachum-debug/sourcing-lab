@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v5.5.5
+   Coupang Sourcing Helper — Content Script v6.6.1
    "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
 
    원칙:
@@ -996,7 +996,61 @@
         }
       }
 
-      // 별점 재시도: 리뷰가 있는데 별점이 없는 경우 (전략 8~12)
+      // 전략 4 (리뷰): 클래스 무관 leaf 노드에서 괄호 숫자 "(N,NNN)" 탐색
+      if (!reviewCount) {
+        for (const el of box.querySelectorAll('span, em, strong, div')) {
+          if (el.closest('#sh-panel')) continue;
+          if (el.children.length > 1) continue;
+          const t = tx(el).trim();
+          if (t.length > 15) continue;
+          // "(1,234)" 또는 "(123)" 패턴 — 독립 요소
+          const rm = t.match(/^\(\s*([\d,]+)\s*\)$/);
+          if (rm) {
+            const v = nm(rm[1]);
+            // 리뷰수 범위: 1~천만, 가격이나 무게가 아닌지 확인
+            if (v > 0 && v < 1e7) {
+              // 이전 형제가 평점(N.N)이면 확실
+              const prev = el.previousElementSibling;
+              if (prev) {
+                const pt = tx(prev).trim();
+                if (/^\d\.\d$/.test(pt)) {
+                  const rv = parseFloat(pt);
+                  if (rv >= 1.0 && rv <= 5.0 && !rating) rating = rv;
+                  reviewCount = v;
+                  reviewParsed = true;
+                  break;
+                }
+              }
+              // 부모 내부 확인
+              const parentT = tx(el.parentElement || el);
+              if (!/원|₩|g당|ml당|배송|적립/.test(parentT)) {
+                reviewCount = v;
+                reviewParsed = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // 전략 5 (리뷰): 카드 전체 텍스트에서 "N.N (N,NNN)" 또는 "N.N(N)" 패턴 → 동시에 평점+리뷰 추출
+      if (!reviewCount && !rating) {
+        const fullText = tx(box);
+        // 가격 관련 텍스트 제거
+        const clean = fullText.replace(/[\d,]+\s*원/g, '').replace(/적립[\s\S]{0,20}/g, '');
+        const m = clean.match(/(\d\.\d)\s*\(?\s*([\d,]+)\s*\)?/);
+        if (m) {
+          const rv = parseFloat(m[1]);
+          const rc = nm(m[2]);
+          if (rv >= 1.0 && rv <= 5.0 && rc > 0 && rc < 1e7) {
+            rating = rv;
+            reviewCount = rc;
+            reviewParsed = true;
+          }
+        }
+      }
+
+      // 별점 재시도: 리뷰가 있는데 별점이 없는 경우 (전략 8~15)
       if (!rating && reviewCount > 0) {
         // 전략 8: 리뷰 영역 근처의 모든 width% 기반 별점 재탐색
         const reviewArea = box.querySelector('[class*="rating"], [class*="review"], [class*="star"]');
@@ -1007,6 +1061,36 @@
             if (wm) {
               const v = Math.round(parseFloat(wm[1]) / 20 * 10) / 10;
               if (v > 0 && v <= 5) { rating = v; break; }
+            }
+          }
+        }
+
+        // 전략 8b: 클래스 무관 width% 기반 — 카드 전체에서 작은 컨테이너 내 width% 탐색
+        if (!rating) {
+          const allWidthEls = box.querySelectorAll('[style*="width"]');
+          for (const el of allWidthEls) {
+            if (el.closest('#sh-panel')) continue;
+            const style = el.getAttribute('style') || '';
+            const wm = style.match(/width:\s*([\d.]+)%/);
+            if (!wm) continue;
+            const pct = parseFloat(wm[1]);
+            // 별점 width는 보통 60~100% 범위, 부모가 작은 요소
+            if (pct >= 10 && pct <= 100) {
+              const parent = el.parentElement;
+              if (!parent) continue;
+              // 부모 또는 조부모가 작은 컨테이너인지 확인 (이미지 썸네일 width%는 제외)
+              const parentTag = parent.tagName?.toLowerCase();
+              if (parentTag === 'img' || el.tagName?.toLowerCase() === 'img') continue;
+              // 부모 텍스트에 가격 관련이면 스킵
+              const pt = tx(parent);
+              if (/원|₩|배송|적립/.test(pt)) continue;
+              // 근처에 별/평점 시각적 단서 (형제에 비슷한 width% 요소가 있거나)
+              const siblings = parent.querySelectorAll('[style*="width"]');
+              // 별점 바: 보통 하나의 채워진 부분만 있음
+              if (siblings.length <= 3) {
+                const v = Math.round(pct / 20 * 10) / 10;
+                if (v >= 1.0 && v <= 5.0) { rating = v; break; }
+              }
             }
           }
         }
@@ -1022,31 +1106,136 @@
           }
         }
 
-        // 전략 9b: SVG 기반 별점 (채워진 비율)
+        // 전략 9b: SVG 기반 별점 (채워진 비율) — 클래스 무관 SVG 탐색
         if (!rating) {
-          const svgStars = box.querySelectorAll('svg[class*="star"], svg[class*="Star"]');
+          // 먼저 클래스 기반
+          let svgStars = box.querySelectorAll('svg[class*="star"], svg[class*="Star"]');
+          // 클래스 무관: 카드 내 5개 연속 SVG가 있으면 별점일 가능성
+          if (svgStars.length !== 5) {
+            const allSvgs = box.querySelectorAll('svg');
+            // 같은 부모를 공유하는 5개 SVG 그룹 찾기
+            const svgsByParent = new Map();
+            for (const svg of allSvgs) {
+              if (svg.closest('#sh-panel')) continue;
+              const p = svg.parentElement;
+              if (!p) continue;
+              if (!svgsByParent.has(p)) svgsByParent.set(p, []);
+              svgsByParent.get(p).push(svg);
+            }
+            for (const [, group] of svgsByParent) {
+              if (group.length === 5) { svgStars = group; break; }
+            }
+          }
           if (svgStars.length === 5) {
             let filledCount = 0;
             for (const svg of svgStars) {
               const fill = svg.getAttribute('fill') || svg.querySelector('[fill]')?.getAttribute('fill') || '';
-              const cls = svg.className?.baseVal || svg.className || '';
-              if (/gold|yellow|#f.{4,5}|#ff|filled|active|full/i.test(fill + ' ' + cls)) filledCount++;
-              else if (/half/i.test(fill + ' ' + cls)) filledCount += 0.5;
+              const cls = (svg.className?.baseVal || svg.className || '') + ' ' + fill;
+              // 채워진 별: 노란색/골드/주황색 계열
+              if (/gold|yellow|orange|#f[a-f0-9]{2,5}|#ff|filled|active|full|on|rgb\(2[0-5]\d/i.test(cls)) filledCount++;
+              else if (/half/i.test(cls)) filledCount += 0.5;
+              else {
+                // fill 색상으로 판단: 노란/주황 계열 vs 회색 계열
+                const fillColor = svg.getAttribute('fill') || '';
+                if (/^#(?:f[a-f0-9]{2}|ff|e[a-f]|d[a-f])[a-f0-9]{2,4}$/i.test(fillColor)) filledCount++;
+              }
             }
             if (filledCount > 0 && filledCount <= 5) rating = filledCount;
           }
         }
 
-        // 전략 10: 최후 수단 — 별 이미지/SVG가 있으면 추정 (리뷰 수에 비례)
+        // 전략 10: 별 이미지/SVG가 있으면 추정
         if (!rating) {
           const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
           if (hasStars) {
             ratingIsEstimated = true;
-            // 좀 더 세밀한 추정: 리뷰 수에 따라 차등
             if (reviewCount >= 500) rating = 4.6;
             else if (reviewCount >= 100) rating = 4.5;
             else if (reviewCount >= 30) rating = 4.3;
             else rating = 4.0;
+          }
+        }
+
+        // 전략 11: 클래스 무관 — leaf 노드에서 "N.N" 뒤에 괄호 숫자가 오는 패턴
+        if (!rating) {
+          for (const el of box.querySelectorAll('em, span, strong, div, p')) {
+            if (el.closest('#sh-panel')) continue;
+            if (el.children.length > 3) continue;
+            const t = tx(el);
+            if (t.length > 30) continue;
+            // "4.5 (1,234)" 또는 "4.5(1234)" 패턴
+            const m = t.match(/^(\d\.\d)\s*\(?\s*[\d,]+\s*\)?$/);
+            if (m) {
+              const v = parseFloat(m[1]);
+              if (v >= 1.0 && v <= 5.0) { rating = v; break; }
+            }
+          }
+        }
+
+        // 전략 12: 연속된 형제 요소에서 평점+리뷰수 쌍 찾기 (클래스 무관)
+        if (!rating) {
+          for (const el of box.querySelectorAll('em, span, strong')) {
+            if (el.closest('#sh-panel')) continue;
+            const t = tx(el).trim();
+            if (!/^\d\.\d$/.test(t)) continue;
+            const v = parseFloat(t);
+            if (v < 1.0 || v > 5.0) continue;
+            // 다음 형제가 리뷰수(괄호) 형태인지 확인
+            const next = el.nextElementSibling;
+            if (next) {
+              const nt = tx(next).trim();
+              if (/^\(?\s*[\d,]+\s*\)?$/.test(nt) && nm(nt) > 0) {
+                rating = v; break;
+              }
+            }
+            // 부모의 다음 형제도 확인
+            const parentNext = el.parentElement?.nextElementSibling;
+            if (parentNext) {
+              const pnt = tx(parentNext).trim();
+              if (/^\(?\s*[\d,]+\s*\)?$/.test(pnt) && nm(pnt) > 0) {
+                rating = v; break;
+              }
+            }
+          }
+        }
+
+        // 전략 13: 카드 텍스트에서 평점 패턴 최종 탐색 (리뷰수가 있으므로 신뢰도 높음)
+        if (!rating) {
+          const fullText = tx(box);
+          // 가격/할인 텍스트 제거 후 N.N 찾기
+          const cleanText = fullText
+            .replace(/[\d,]+\s*원/g, '')
+            .replace(/\d{1,2}%/g, '')
+            .replace(/적립[\s\S]{0,20}/g, '')
+            .replace(/배송[\s\S]{0,10}/g, '');
+          const nums = [...cleanText.matchAll(/(\d\.\d)/g)].map(m => parseFloat(m[1]));
+          for (const v of nums) {
+            if (v >= 1.0 && v <= 5.0) { rating = v; break; }
+          }
+        }
+
+        // 전략 14: 최종 추정 — 리뷰가 존재하면 클래스 무관하게 추정 (DOM에서 별점 못 찾음)
+        if (!rating) {
+          ratingIsEstimated = true;
+          if (reviewCount >= 500) rating = 4.6;
+          else if (reviewCount >= 100) rating = 4.5;
+          else if (reviewCount >= 30) rating = 4.3;
+          else rating = 4.0;
+        }
+      }
+
+      // 별점 없고 리뷰도 없는 경우: 카드 텍스트에서 마지막 시도
+      if (!rating && !reviewCount) {
+        // 전략 15: 리뷰 없는 상품이라도 텍스트에 N.N (1~5) + (N) 패턴이 있으면 추출
+        const fullText = tx(box);
+        const rp = fullText.match(/(\d\.\d)\s*\(\s*([\d,]+)\s*\)/);
+        if (rp) {
+          const rv = parseFloat(rp[1]);
+          const rc = nm(rp[2]);
+          if (rv >= 1.0 && rv <= 5.0 && rc > 0 && rc < 1e7) {
+            rating = rv;
+            reviewCount = rc;
+            reviewParsed = true;
           }
         }
       }
@@ -1580,6 +1769,24 @@
       console.log(`%c[SH] ✅ ${items.length}개 파싱 완료 | 품질: 가격${pq.priceRate}% 평점${pq.ratingRate}%(추정${pq.estimatedRatingCount}개) 리뷰${pq.reviewRate}% (전체 ${pq.overall}%)`, 'color:#16a34a;font-weight:bold;');
       if (pq.ratingRate < 60) {
         console.warn(`%c[SH] ⚠️ 평점 파싱률 저조 (${pq.ratingRate}%, 추정포함 ${pq.ratingTotalWithEstimate}개) — 쿠팡 DOM 변경 감지`, 'color:#dc2626;font-weight:bold;');
+        // DOM 진단 덤프: 첫 번째 상품 카드의 구조 로그
+        if (items[0]?._box) {
+          const box = items[0]._box;
+          const classes = new Set();
+          box.querySelectorAll('*').forEach(el => {
+            (el.className || '').toString().split(/\s+/).forEach(c => { if (c) classes.add(c); });
+          });
+          console.log('[SH] DOM 진단 — 첫 상품 카드 클래스:', [...classes].filter(c => /rat|star|score|review|count/i.test(c)).join(', ') || '(관련 클래스 없음)');
+          console.log('[SH] DOM 진단 — 전체 클래스 목록:', [...classes].slice(0, 50).join(', '));
+          // 카드 내 작은 텍스트 요소들 (평점 후보)
+          const smallTexts = [];
+          box.querySelectorAll('em, span, strong').forEach(el => {
+            if (el.closest('#sh-panel')) return;
+            const t = tx(el).trim();
+            if (t.length <= 10 && t.length > 0) smallTexts.push(`<${el.tagName} class="${el.className}"> "${t}"`);
+          });
+          console.log('[SH] DOM 진단 — 작은 텍스트:', smallTexts.slice(0, 30).join(' | '));
+        }
       }
     }
 
