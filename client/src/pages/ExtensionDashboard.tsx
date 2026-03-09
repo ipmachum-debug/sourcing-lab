@@ -87,7 +87,7 @@ export default function ExtensionDashboard() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, batchNum: 0 });
   const [batchMode, setBatchMode] = useState<'all' | 'selected'>('all');
-  const [batchSize, setBatchSize] = useState(10);
+  const [batchSize, setBatchSize] = useState(1);
   const batchStoppedRef = useRef(false);
   // Sourcing modal state
   const [sourcingModalOpen, setSourcingModalOpen] = useState(false);
@@ -940,7 +940,7 @@ export default function ExtensionDashboard() {
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
                         <Settings2 className="w-4 h-4 text-orange-500" />
-                        <span className="text-xs font-semibold text-gray-700">배치 수집</span>
+                        <span className="text-xs font-semibold text-gray-700">통계 갱신 (서버)</span>
                       </div>
 
                       {/* 배치 모드 */}
@@ -979,10 +979,15 @@ export default function ExtensionDashboard() {
                           value={batchSize}
                           onChange={(e) => setBatchSize(Number(e.target.value))}
                           className="text-[10px] border rounded px-1.5 py-1 bg-white">
+                          <option value={1}>1개</option>
+                          <option value={2}>2개</option>
+                          <option value={3}>3개</option>
                           <option value={5}>5개</option>
                           <option value={10}>10개</option>
                           <option value={20}>20개</option>
+                          <option value={30}>30개</option>
                           <option value={50}>50개</option>
+                          <option value={100}>전체</option>
                         </select>
                       </div>
                     </div>
@@ -1028,7 +1033,7 @@ export default function ExtensionDashboard() {
                   {/* 배치 모드 안내 */}
                   <div className="text-[10px] text-gray-400">
                     {batchMode === 'all'
-                      ? `전체 키워드(${(keywordStatsList.data?.length || 0)}개)를 ${batchSize}개씩 나눠서 통계를 갱신합니다.`
+                      ? `전체 키워드(${(keywordStatsList.data?.length || 0)}개)를 ${batchSize}개씩 나눠서 통계를 갱신합니다. (실제 수집은 확장프로그램에서)`
                       : `체크한 키워드만 ${batchSize}개씩 나눠서 배치 수집합니다. 좌측 테이블에서 키워드를 선택하세요.`}
                   </div>
                 </div>
