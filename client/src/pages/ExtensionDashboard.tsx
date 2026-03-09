@@ -681,7 +681,7 @@ export default function ExtensionDashboard() {
             ))}
           </div>
           {/* 스크롤 가능 표시 - 우측 그라디언트 */}
-          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent rounded-r-lg pointer-events-none md:hidden" />
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent rounded-r-lg pointer-events-none" />
         </div>
 
         {/* ===== 대시보드 탭 ===== */}
