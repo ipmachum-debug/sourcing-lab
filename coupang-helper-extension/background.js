@@ -1446,13 +1446,26 @@ async function startAutoCollect(options = {}) {
 
   const limit = Math.min(options.limit || 30, 200);
   const collectDetail = options.collectDetail !== false;
+  const directKeywords = options.keywords || null;  // v7.0.1: 직접 키워드 목록 지원
 
-  console.log(`[SH-AC] v7.0 하이브리드 수집 시작 (limit=${limit})`);
+  console.log(`[SH-AC] v7.0.1 하이브리드 수집 시작 (limit=${limit}, direct=${directKeywords ? directKeywords.length : 'N/A'})`);
 
   // 큐 로드
   try {
-    const resp = await apiClient.getBatchKeywordSelection({ limit });
-    const keywords = resp?.result?.data || [];
+    let keywords;
+    if (directKeywords && directKeywords.length > 0) {
+      // 직접 키워드 목록이 제공된 경우 (배치 실행 버튼에서 호출)
+      keywords = directKeywords.map(kw => ({
+        keyword: typeof kw === 'string' ? kw : kw.keyword,
+        priority: 50,
+        selectionReason: 'batch_manual',
+      }));
+      console.log(`[SH-AC] 직접 키워드 ${keywords.length}개 로드`);
+    } else {
+      // 서버에서 우선순위 기반 키워드 조회
+      const resp = await apiClient.getBatchKeywordSelection({ limit });
+      keywords = resp?.result?.data || [];
+    }
     if (!keywords.length) {
       console.log('[SH-AC] 수집할 키워드가 없습니다.');
       return { ok: false, error: '수집할 키워드가 없습니다 (watch_keywords 등록 필요)' };
