@@ -2680,27 +2680,39 @@ document.querySelector('#batchToggle').addEventListener('change', async function
   }
 });
 
-// 배치 수동 실행 — 분할 배치 지원
+// 배치 수동 실행 — v7.0.1: 자동 수집기(Auto-Collect)로 실제 쿠팡 방문 + HTML 파싱
 document.querySelector('#runBatchNowBtn').addEventListener('click', async function() {
   if (batchRunning) return;
   var mode = document.querySelector('input[name="batchMode"]:checked');
   mode = mode ? mode.value : 'all';
-  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '10');
 
-  // 선택 모드: 유저가 선택한 키워드만
-  var selectedKwNames = [];
+  // 키워드 목록 준비
+  var keywordList = [];
   if (mode === 'selected' && selectedKeywordIds.size > 0) {
     var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
-    selectedKwNames = selectedKws.map(function(kw) { return kw.keyword; });
+    keywordList = selectedKws.map(function(kw) { return kw.keyword; });
+  } else {
+    keywordList = demandKeywords.map(function(kw) { return kw.keyword; });
+  }
+  if (keywordList.length === 0) {
+    alert('처리할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : ''));
+    return;
   }
 
-  // 일괄 모드일 때 전체 키워드 수, 선택 모드일 때 선택된 수
-  var totalTarget = mode === 'selected' ? selectedKwNames.length : demandKeywords.length;
-  if (totalTarget === 0) { alert('처리할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : '')); return; }
+  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '10');
+  var targetKeywords = keywordList.slice(0, batchSize);
+  var estMin = Math.ceil(targetKeywords.length * 1);
+  var estMax = Math.ceil(targetKeywords.length * 2);
+
+  if (!confirm('실제 쿠팡 페이지를 방문하여 데이터를 수집합니다.\n\n' +
+    '📋 대상: ' + targetKeywords.length + '개 키워드\n' +
+    '⏱️ 예상 시간: 약 ' + estMin + '~' + estMax + '분\n' +
+    '   (키워드당 28~90초 딜레이 적용)\n\n' +
+    '⚠️ 수집 중 쿠팡 탭이 자동으로 전환됩니다.\n\n계속하시겠습니까?')) return;
 
   batchRunning = true;
   var btn = document.querySelector('#runBatchNowBtn');
-  btn.textContent = '⏳ 실행중...';
+  btn.textContent = '⏳ 수집중...';
   btn.disabled = true;
   var stopBtn = document.querySelector('#stopBatchBtn');
   if (stopBtn) stopBtn.style.display = '';
@@ -2710,74 +2722,67 @@ document.querySelector('#runBatchNowBtn').addEventListener('click', async functi
   var progressText = document.querySelector('#batchProgressText');
   progressBar.style.display = '';
   progressFill.style.width = '0%';
-  progressText.textContent = '0/' + totalTarget;
-
-  // 분할 배치 반복 실행
-  var totalProcessed = 0;
-  var totalUpdated = 0;
-  var totalErrors = 0;
-  var offset = 0;
-  var hasMore = true;
-  var batchRound = 0;
+  progressText.textContent = '0/' + targetKeywords.length + ' (자동 수집기 시작중...)';
 
   try {
-    while (hasMore && batchRunning) {
-      batchRound++;
-      var msg = {
-        type: 'HYBRID_RUN_DAILY_BATCH',
-        limit: batchSize,
-        offset: offset,
-      };
-      if (mode === 'selected' && selectedKwNames.length > 0) {
-        msg.keywords = selectedKwNames;
-      }
+    var resp = await sendMsg({
+      type: 'START_AUTO_COLLECT',
+      payload: { limit: targetKeywords.length, collectDetail: false, keywords: targetKeywords },
+    });
 
-      var resp = await sendMsg(msg);
-      if (!resp || !resp.ok) {
-        progressText.textContent = '오류: ' + (resp ? resp.error : '응답 없음');
-        break;
-      }
-
-      var data = resp.data || {};
-      totalProcessed += (data.processed || 0);
-      totalUpdated += (data.updated || 0);
-      totalErrors += (data.errors || 0);
-      hasMore = !!data.hasMore;
-      offset += batchSize;
-
-      // 진행률 업데이트
-      var pct = Math.min(100, Math.round((totalProcessed / totalTarget) * 100));
-      progressFill.style.width = pct + '%';
-      progressText.textContent = totalProcessed + '/' + totalTarget + ' (배치 #' + batchRound + ')';
+    if (!resp || !resp.ok) {
+      progressText.textContent = '오류: ' + (resp ? resp.error : '응답 없음');
+      batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
+      if (stopBtn) stopBtn.style.display = 'none';
+      return;
     }
 
-    progressFill.style.width = '100%';
-    progressText.textContent = '완료! ' + totalProcessed + '개 처리, ' + totalUpdated + '개 업데이트' + (totalErrors > 0 ? ', ' + totalErrors + '개 오류' : '');
-    await chrome.storage.local.set({
-      lastDailyBatchRun: new Date().toISOString(),
-      batchOffset: 0,
-    });
-    setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 500);
+    btn.textContent = '⏳ 수집중... (쿠팡 탭 확인)';
+    var batchPollId = setInterval(async function() {
+      try {
+        var stateResp = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+        if (!stateResp || !stateResp.ok) return;
+        var state = stateResp.data;
+        var done = state.successCount + state.failCount + state.skipCount;
+        var total = state.totalQueued || targetKeywords.length;
+        var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+        progressFill.style.width = pct + '%';
+        var statusText = done + '/' + total;
+        if (state.currentKeyword) statusText += ' "' + state.currentKeyword + '"';
+        if (state.status === 'NAVIGATING') statusText += ' (이동중)';
+        else if (state.status === 'PARSING') statusText += ' (파싱중)';
+        else if (state.status === 'WAITING_NEXT') statusText += ' (다음 대기중)';
+        if (state.failCount > 0) statusText += ' ⚠️실패:' + state.failCount;
+        progressText.textContent = statusText;
+        if (!state.running && state.status !== 'PAUSED') {
+          clearInterval(batchPollId);
+          progressFill.style.width = '100%';
+          progressText.textContent = '✅ 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
+          batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
+          if (stopBtn) stopBtn.style.display = 'none';
+          try { await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' }); } catch(_){}
+          await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString(), batchOffset: 0 });
+          setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 1000);
+          setTimeout(function() { progressBar.style.display = 'none'; }, 8000);
+        }
+      } catch (e) {}
+    }, 3000);
   } catch (e) {
     progressText.textContent = '오류: ' + e.message;
-  } finally {
-    batchRunning = false;
-    btn.textContent = '▶ 배치 실행';
-    btn.disabled = false;
-    var stopBtn2 = document.querySelector('#stopBatchBtn');
-    if (stopBtn2) stopBtn2.style.display = 'none';
-    setTimeout(function() { progressBar.style.display = 'none'; }, 5000);
+    batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
+    if (stopBtn) stopBtn.style.display = 'none';
   }
 });
 
 
-// 배치 중지 버튼
+// 배치 중지 버튼 — v7.0.1: 자동 수집기도 중단
 (function() {
   var stopBtn = document.querySelector('#stopBatchBtn');
   if (stopBtn) {
-    stopBtn.addEventListener('click', function() {
+    stopBtn.addEventListener('click', async function() {
       batchRunning = false;
       stopBtn.style.display = 'none';
+      try { await sendMsg({ type: 'STOP_AUTO_COLLECT' }); } catch(_){}
     });
   }
 })();
