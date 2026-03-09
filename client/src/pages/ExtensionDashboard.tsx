@@ -7,13 +7,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
   Search, Star, TrendingUp, Package, ArrowUpRight, ArrowDownRight,
   Trash2, Target, BarChart3, Eye, ExternalLink, Download,
   Brain, Bell, Users, ChevronDown, ChevronUp, Minus,
   FileDown, Activity, Lightbulb, Zap, AlertTriangle, CheckCircle,
-  FileText, BellRing, BellOff, Clock, Shield, Sparkles,
+  FileText, BellRing, BellOff, Clock, Shield, Sparkles, Play, Square, Loader2, Settings2,
   ThumbsUp, ThumbsDown, Info, X, ChevronRight, Plus, Edit3, ShoppingBag, Layers
 } from "lucide-react";
 import {
@@ -81,6 +83,11 @@ export default function ExtensionDashboard() {
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSort, setDemandSort] = useState<"keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price">("keyword_score");
   const [selectedDeleteKws, setSelectedDeleteKws] = useState<Set<string>>(new Set());
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, batchNum: 0 });
+  const [batchMode, setBatchMode] = useState<'all' | 'selected'>('all');
+  const [batchSize, setBatchSize] = useState(10);
+  const [batchStopped, setBatchStopped] = useState(false);
   // Sourcing modal state
   const [sourcingModalOpen, setSourcingModalOpen] = useState(false);
   const [sourcingPrefillData, setSourcingPrefillData] = useState<Record<string, any> | undefined>(undefined);
@@ -289,6 +296,66 @@ export default function ExtensionDashboard() {
     },
     onError: (err: any) => toast.error(err.message || "통계 계산 실패"),
   });
+  const runBatch = trpc.extension.runDailyBatchCollection.useMutation({
+    onSuccess: (data) => {
+      if (data) {
+        toast.success(`배치 완료: ${data.processed}건 처리, ${data.updated}건 갱신`);
+        keywordStatsList.refetch();
+        keywordStatsOverview.refetch();
+        if (demandSelectedKw) keywordDailyStats.refetch();
+      }
+    },
+    onError: (err) => toast.error(`배치 오류: ${err.message}`),
+  });
+
+  // 배치 실행 함수
+  const handleRunBatch = useCallback(async () => {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    setBatchStopped(false);
+
+    const selectedKws = batchMode === 'selected'
+      ? Array.from(selectedDeleteKws)
+      : undefined;
+    const totalKws = batchMode === 'selected'
+      ? selectedDeleteKws.size
+      : (keywordStatsList.data?.length || 0);
+
+    if (totalKws === 0) {
+      toast.error('처리할 키워드가 없습니다');
+      setBatchRunning(false);
+      return;
+    }
+
+    let offset = 0;
+    let batchNum = 0;
+    let totalProcessed = 0;
+    setBatchProgress({ current: 0, total: totalKws, batchNum: 0 });
+
+    try {
+      while (offset < totalKws && !batchStopped) {
+        batchNum++;
+        setBatchProgress(prev => ({ ...prev, batchNum }));
+        const result = await runBatch.mutateAsync({
+          limit: batchSize,
+          offset,
+          keywords: selectedKws,
+        });
+        totalProcessed += (result?.processed || 0);
+        offset += batchSize;
+        setBatchProgress({ current: Math.min(offset, totalKws), total: totalKws, batchNum });
+        if (!result?.hasMore) break;
+      }
+      toast.success(`배치 완료! 총 ${totalProcessed}건 처리됨`);
+    } catch (err: any) {
+      toast.error(`배치 오류: ${err.message}`);
+    } finally {
+      setBatchRunning(false);
+      keywordStatsList.refetch();
+      keywordStatsOverview.refetch();
+    }
+  }, [batchRunning, batchMode, batchSize, selectedDeleteKws, keywordStatsList.data, batchStopped]);
+
   const deleteKeyword = trpc.extension.deleteKeyword.useMutation({
     onSuccess: (data) => {
       keywordStatsList.refetch(); keywordStatsOverview.refetch(); snapshots.refetch(); searchStats.refetch();
@@ -853,6 +920,95 @@ export default function ExtensionDashboard() {
                 )}
               </div>
             </div>
+
+            {/* ===== 배치 수집 컨트롤 ===== */}
+            <Card className="border-orange-200 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex flex-col gap-3">
+                  {/* 1행: 배치 설정 */}
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Settings2 className="w-4 h-4 text-orange-500" />
+                        <span className="text-xs font-semibold text-gray-700">배치 수집</span>
+                      </div>
+
+                      {/* 배치 모드 */}
+                      <div className="flex items-center gap-1.5 bg-white rounded-lg px-2 py-1 border">
+                        <button
+                          className={`px-2.5 py-1 text-[10px] rounded-md transition font-medium ${batchMode === 'all' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
+                          onClick={() => setBatchMode('all')}>
+                          일괄 (전체)
+                        </button>
+                        <button
+                          className={`px-2.5 py-1 text-[10px] rounded-md transition font-medium ${batchMode === 'selected' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
+                          onClick={() => setBatchMode('selected')}>
+                          선택 ({selectedDeleteKws.size}개)
+                        </button>
+                      </div>
+
+                      {/* 배치 크기 */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-gray-500">배치 크기:</span>
+                        <select
+                          value={batchSize}
+                          onChange={(e) => setBatchSize(Number(e.target.value))}
+                          className="text-[10px] border rounded px-1.5 py-1 bg-white">
+                          <option value={5}>5개</option>
+                          <option value={10}>10개</option>
+                          <option value={20}>20개</option>
+                          <option value={50}>50개</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 실행/중지 버튼 */}
+                    <div className="flex items-center gap-2">
+                      {!batchRunning ? (
+                        <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
+                          onClick={handleRunBatch}
+                          disabled={batchMode === 'selected' && selectedDeleteKws.size === 0}>
+                          <Play className="w-3 h-3" fill="currentColor" />
+                          배치 실행
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="destructive" className="text-xs gap-1.5"
+                          onClick={() => setBatchStopped(true)}>
+                          <Square className="w-3 h-3" fill="currentColor" />
+                          중지
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2행: 프로그레스 (배치 실행 중일 때만) */}
+                  {batchRunning && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-gray-500 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
+                          배치 #{batchProgress.batchNum} 실행중...
+                        </span>
+                        <span className="font-medium text-orange-600">
+                          {batchProgress.current}/{batchProgress.total}
+                        </span>
+                      </div>
+                      <Progress
+                        value={batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}
+                        className="h-2"
+                      />
+                    </div>
+                  )}
+
+                  {/* 배치 모드 안내 */}
+                  <div className="text-[10px] text-gray-400">
+                    {batchMode === 'all'
+                      ? `전체 키워드를 ${batchSize}개씩 나눠서 배치 수집합니다. 쿠팡 검색 데이터를 기반으로 통계를 갱신합니다.`
+                      : `체크한 키워드만 ${batchSize}개씩 나눠서 배치 수집합니다. 좌측 테이블에서 키워드를 선택하세요.`}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* 개요 카드 */}
             {keywordStatsOverview.data && (
