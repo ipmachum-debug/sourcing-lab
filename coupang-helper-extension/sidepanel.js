@@ -2502,7 +2502,7 @@ async function loadDemandDashboard() {
     document.querySelector('#demandStatEvents').textContent = (d.searchEvents && d.searchEvents.totalLast7d) || 0;
     document.querySelector('#demandStatQuality').textContent = ((d.parseQuality && d.parseQuality.avgPriceRate) || 0) + '%';
     document.querySelector('#demandStatGrowth').textContent = (d.watchKeywords && d.watchKeywords.withGrowth) || 0;
-    const badge = document.querySelector('#demandStatusBadge');
+    const badge = document.querySelector('#autoCollectStatusBadge');
     if (d.watchKeywords && d.watchKeywords.total > 0) {
       badge.textContent = d.watchKeywords.active + '개 활성';
       badge.className = 'competition-badge level-easy';
@@ -2651,7 +2651,7 @@ async function showKeywordDetail(keyword) {
 
 function updateBatchToggleUI(enabled) {
   var label = document.querySelector('#batchToggleLabel');
-  var badge = document.querySelector('#demandStatusBadge');
+  var badge = document.querySelector('#autoCollectStatusBadge');
   var controls = document.querySelector('#demandBatchControls');
   if (enabled) {
     label.textContent = '배치 ON';
@@ -2680,102 +2680,7 @@ document.querySelector('#batchToggle').addEventListener('change', async function
   }
 });
 
-// 배치 수동 실행 — v7.0.1: 자동 수집기(Auto-Collect)로 실제 쿠팡 방문 + HTML 파싱
-document.querySelector('#runBatchNowBtn').addEventListener('click', async function() {
-  if (batchRunning) return;
-  var mode = document.querySelector('input[name="batchMode"]:checked');
-  mode = mode ? mode.value : 'all';
-
-  // 키워드 목록 준비
-  var keywordList = [];
-  if (mode === 'selected' && selectedKeywordIds.size > 0) {
-    var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
-    keywordList = selectedKws.map(function(kw) { return kw.keyword; });
-  } else {
-    keywordList = demandKeywords.map(function(kw) { return kw.keyword; });
-  }
-  if (keywordList.length === 0) {
-    alert('처리할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : ''));
-    return;
-  }
-
-  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '10');
-  var targetKeywords = keywordList.slice(0, batchSize);
-  var estMin = Math.ceil(targetKeywords.length * 1);
-  var estMax = Math.ceil(targetKeywords.length * 2);
-
-  if (!confirm('실제 쿠팡 페이지를 방문하여 데이터를 수집합니다.\n\n' +
-    '📋 대상: ' + targetKeywords.length + '개 키워드\n' +
-    '⏱️ 예상 시간: 약 ' + estMin + '~' + estMax + '분\n' +
-    '   (키워드당 50~89초 딜레이 적용)\n\n' +
-    '⚠️ 수집 중 쿠팡 탭이 자동으로 전환됩니다.\n\n계속하시겠습니까?')) return;
-
-  batchRunning = true;
-  var btn = document.querySelector('#runBatchNowBtn');
-  btn.textContent = '⏳ 수집중...';
-  btn.disabled = true;
-  var stopBtn = document.querySelector('#stopBatchBtn');
-  if (stopBtn) stopBtn.style.display = '';
-
-  var progressBar = document.querySelector('#batchProgressBar');
-  var progressFill = document.querySelector('#batchProgressFill');
-  var progressText = document.querySelector('#batchProgressText');
-  progressBar.style.display = '';
-  progressFill.style.width = '0%';
-  progressText.textContent = '0/' + targetKeywords.length + ' (자동 수집기 시작중...)';
-
-  try {
-    var resp = await sendMsg({
-      type: 'START_AUTO_COLLECT',
-      payload: { limit: targetKeywords.length, collectDetail: false, keywords: targetKeywords },
-    });
-
-    if (!resp || !resp.ok) {
-      progressText.textContent = '오류: ' + (resp ? resp.error : '응답 없음');
-      batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
-      if (stopBtn) stopBtn.style.display = 'none';
-      return;
-    }
-
-    btn.textContent = '⏳ 수집중... (쿠팡 탭 확인)';
-    var batchPollId = setInterval(async function() {
-      try {
-        var stateResp = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
-        if (!stateResp || !stateResp.ok) return;
-        var state = stateResp.data;
-        var done = state.successCount + state.failCount + state.skipCount;
-        var total = state.totalQueued || targetKeywords.length;
-        var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-        progressFill.style.width = pct + '%';
-        var statusText = done + '/' + total;
-        if (state.currentKeyword) statusText += ' "' + state.currentKeyword + '"';
-        if (state.status === 'NAVIGATING') statusText += ' (이동중)';
-        else if (state.status === 'PARSING') statusText += ' (파싱중)';
-        else if (state.status === 'WAITING_NEXT') statusText += ' (다음 대기중)';
-        if (state.failCount > 0) statusText += ' ⚠️실패:' + state.failCount;
-        progressText.textContent = statusText;
-        if (!state.running && state.status !== 'PAUSED') {
-          clearInterval(batchPollId);
-          progressFill.style.width = '100%';
-          progressText.textContent = '✅ 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
-          batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
-          if (stopBtn) stopBtn.style.display = 'none';
-          try { await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' }); } catch(_){}
-          await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString(), batchOffset: 0 });
-          setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 1000);
-          setTimeout(function() { progressBar.style.display = 'none'; }, 8000);
-        }
-      } catch (e) {}
-    }, 3000);
-  } catch (e) {
-    progressText.textContent = '오류: ' + e.message;
-    batchRunning = false; btn.textContent = '▶ 배치 실행'; btn.disabled = false;
-    if (stopBtn) stopBtn.style.display = 'none';
-  }
-});
-
-
-// 배치 중지 버튼 — v7.0.1: 자동 수집기도 중단
+// 배치 중지 (레거시 호환)
 (function() {
   var stopBtn = document.querySelector('#stopBatchBtn');
   if (stopBtn) {
@@ -2805,8 +2710,7 @@ document.querySelector('#demandDetailClose').addEventListener('click', function(
 let autoCollectPollingId = null;
 
 function showAutoCollectCard() {
-  const card = document.querySelector('#autoCollectCard');
-  if (card) card.style.display = '';
+  // v7.1: 통합 UI — autoCollectCard 제거됨, demandBatchControls가 통합 UI
 }
 
 function updateAutoCollectUI(state) {
@@ -2900,22 +2804,82 @@ function stopAutoCollectPolling() {
   if (autoCollectPollingId) { clearInterval(autoCollectPollingId); autoCollectPollingId = null; }
 }
 
-// 자동 수집 시작 버튼
+// 통합 수집 시작 버튼 (v7.1: 배치+자동 통합)
 document.querySelector('#startAutoCollectBtn').addEventListener('click', async function() {
-  var limit = parseInt(document.querySelector('#autoCollectLimitSelect').value || '30');
   var collectDetail = document.querySelector('#autoCollectDetailCheck').checked;
+  var mode = document.querySelector('input[name="batchMode"]:checked');
+  mode = mode ? mode.value : 'all';
+  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '0');
+
+  // 키워드 목록 준비 (서버의 검색수요 키워드 사용)
+  var keywordList = [];
+  if (mode === 'selected' && selectedKeywordIds.size > 0) {
+    var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
+    keywordList = selectedKws.map(function(kw) { return kw.keyword; });
+  } else {
+    keywordList = demandKeywords.map(function(kw) { return kw.keyword; });
+  }
+
+  if (keywordList.length === 0) {
+    alert('수집할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : '\n쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.'));
+    return;
+  }
+
+  // batchSize가 0이면 전체, 아니면 slice
+  var targetKeywords = batchSize > 0 ? keywordList.slice(0, batchSize) : keywordList;
+  var estMin = Math.ceil(targetKeywords.length * 1);
+  var estMax = Math.ceil(targetKeywords.length * 1.5);
+
+  if (!confirm('쿠팡 데이터를 수집합니다.\n\n' +
+    '📋 대상: ' + targetKeywords.length + '개 키워드\n' +
+    '⏱️ 예상: 약 ' + estMin + '~' + estMax + '분 (키워드당 50~89초)\n' +
+    '⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?')) return;
 
   var resp = await sendMsg({
     type: 'START_AUTO_COLLECT',
-    payload: { limit: limit, collectDetail: collectDetail },
+    payload: { limit: targetKeywords.length, collectDetail: collectDetail, keywords: targetKeywords },
   });
 
   if (resp && resp.ok) {
+    batchRunning = true;
     document.querySelector('#autoCollectProgress').style.display = '';
+    document.querySelector('#batchProgressBar').style.display = '';
+    document.querySelector('#batchProgressFill').style.width = '0%';
+    document.querySelector('#batchProgressText').textContent = '0/' + targetKeywords.length + ' (수집 시작중...)';
     startAutoCollectPolling();
     pollAutoCollectState();
+    // 완료 감지 폴링
+    var completePollId = setInterval(async function() {
+      try {
+        var st = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+        if (!st || !st.ok) return;
+        var state = st.data;
+        var done = state.successCount + state.failCount + state.skipCount;
+        var total = state.totalQueued || targetKeywords.length;
+        var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+        document.querySelector('#batchProgressFill').style.width = pct + '%';
+        var statusText = done + '/' + total;
+        if (state.currentKeyword) statusText += ' "' + state.currentKeyword + '"';
+        if (state.status === 'NAVIGATING') statusText += ' (이동중)';
+        else if (state.status === 'PARSING') statusText += ' (파싱중)';
+        else if (state.status === 'WAITING_NEXT') statusText += ' (다음 대기중)';
+        if (state.failCount > 0) statusText += ' ⚠️실패:' + state.failCount;
+        document.querySelector('#batchProgressText').textContent = statusText;
+
+        if (!state.running && state.status !== 'PAUSED') {
+          clearInterval(completePollId);
+          document.querySelector('#batchProgressFill').style.width = '100%';
+          document.querySelector('#batchProgressText').textContent = '✅ 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
+          batchRunning = false;
+          try { await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' }); } catch(_){}
+          await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString(), batchOffset: 0 });
+          setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 1000);
+          setTimeout(function() { document.querySelector('#batchProgressBar').style.display = 'none'; }, 8000);
+        }
+      } catch (e) {}
+    }, 3000);
   } else {
-    alert('자동 수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
+    alert('수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
   }
 });
 
