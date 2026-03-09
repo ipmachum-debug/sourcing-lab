@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 익스텐션</title>
+    <!-- MDB icon -->
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <!-- Google Fonts Roboto -->
+
+    <!-- MDB ESSENTIAL -->
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+    <link rel="stylesheet" href="/static/css/popup.css" />
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- Custom styles -->
+    <!-- MDB ESSENTIAL -->
+    <script type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+  </head>
+  <body>
+    <div class="extension">
+      <div class="logo">
+        <a href="https://sellochomes.co.kr/sellerlife/" target="_blank">
+          <img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" style="cursor: pointer; height: 29px; width: auto" />
+        </a>
+      </div>
+
+      <ul class="nav nav-tabs mb-2 gap-1" id="myTab0" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link m-0 active" id="home-tab0" data-mdb-toggle="tab" data-mdb-target="#home0" type="button" role="tab" aria-controls="home" aria-selected="true">키워드분석</button>
+        </li>
+        <!-- <li class="nav-item" role="presentation">
+          <button class="nav-link m-0" id="profile-tab0" data-mdb-toggle="tab" data-mdb-target="#profile0" type="button" role="tab" aria-controls="profile" aria-selected="false">
+            연관키워드 검색
+          </button>
+        </li> -->
+        <!-- <li class="nav-item" role="presentation">
+          <button class="nav-link" id="gudae-tab0" data-mdb-toggle="tab" data-mdb-target="#gudae0" type="button" role="tab" aria-controls="gudae" aria-selected="false">구대파인더</button>
+        </li> -->
+        <li class="nav-item" role="presentation">
+          <button class="nav-link m-0" id="img-tab0" data-mdb-toggle="tab" data-mdb-target="#img0" type="button" role="tab" aria-controls="gudae" aria-selected="false">이미지 수집</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link m-0" id="copy-tab0" data-mdb-toggle="tab" data-mdb-target="#copy0" type="button" role="tab" aria-controls="gudae" aria-selected="false">URL 수집</button>
+        </li>
+      </ul>
+      <div class="tab-content" id="myTabContent0">
+        <div class="tab-pane fade show active" id="home0" role="tabpanel" aria-labelledby="home-tab0" sellerlife-target="sellerlife-keywordsearch-tab">
+          <div class="input-group rounded">
+            <input type="search" class="form-control rounded" placeholder="키워드를 검색해주세요." aria-label="Search" aria-describedby="search-addon" />
+            <span class="input-group-text border-0 sellerlife-search-addon" id="search-addon">
+              <i class="fas fa-search"></i>
+            </span>
+          </div>
+        </div>
+        <!-- <div class="tab-pane fade" id="profile0" role="tabpanel" aria-labelledby="profile-tab0" sellerlife-target="sellerlife-relkeywordsearch-tab">
+          <div class="input-group rounded">
+            <input type="search" class="form-control rounded" placeholder="키워드를 검색해주세요." aria-label="Search" aria-describedby="search-addon" />
+            <span class="input-group-text border-0 sellerlife-search-addon" id="search-addon">
+              <i class="fas fa-search"></i>
+            </span>
+          </div>
+        </div> -->
+        <!-- <div class="tab-pane fade" id="gudae0" role="tabpanel" aria-labelledby="gudae-tab0" sellerlife-target="sellerlife-gudae-tab">
+          <a href="https://sellochomes.co.kr/sellerlife/finder" target="_blank"><img src="/static/img/finder-extension.png" /></a>
+        </div> -->
+        <div class="tab-pane fade" id="copy0" role="tabpanel" aria-labelledby="copy-tab0" sellerlife-target="sellerlife-relkeywordsearch-tab">
+          <div class="top-text d-flex justify-content-between px-2">
+            <p class="m-0">URL 수집 목록</p>
+            <p class="m-0 fw-bolder">총 수집 URL <span class="url-total-num" style="color: #2152d1">6개</span></p>
+          </div>
+          <div class="copy-url-body border p-2" style="overflow: scroll; height: 90px"></div>
+          <div class="button-box mt-2 d-flex gap-1 justify-content-center align-items-center">
+            <div class="w-1 all-copy">
+              <button class="btn copy all-copy py-1 px-3">
+                <p class="m-0"><i class="far fa-clone me-1"></i> 전체 복사</p>
+              </button>
+              <button class="btn success d-none py-1 px-3">
+                <p class="m-0">
+                  <svg class="animated-check" viewBox="0 0 24 24">
+                    <path d="M4.1 12.7L9 17.6 20.3 6.3" fill="none" />
+                  </svg>
+                  복사 성공
+                </p>
+              </button>
+              <button class="btn failed py-1 px-3 d-none">
+                <p class="m-0"><i class="fas fa-x me-1 dropAndVibrate"></i> 복사 실패</p>
+              </button>
+            </div>
+            <div class="w-2 t-copy">
+              <button class="btn copy t-copy py-1 px-3">
+                <p class="m-0"><i class="far fa-clone me-1"></i> 타오바오 + Tmall 복사</p>
+              </button>
+              <button class="btn success py-1 px-3 d-none">
+                <p class="m-0">
+                  <svg class="animated-check" viewBox="0 0 24 24">
+                    <path d="M4.1 12.7L9 17.6 20.3 6.3" fill="none" />
+                  </svg>
+                  복사 성공
+                </p>
+              </button>
+              <button class="btn failed py-1 px-3 d-none">
+                <p class="m-0"><i class="fas fa-x me-1 dropAndVibrate"></i> 복사 실패</p>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="tab-pane fade" id="img0" role="tabpanel" aria-labelledby="img-tab0" sellerlife-target="sellerlife-img-tab">
+          <a href="javascript:;" class="btn w-100 p-0" style="height: 28px; line-height: 28px">현재 탭 화면 이미지 추출하기</a>
+        </div>
+      </div>
+    </div>
+  </body>
+  <!-- Custom scripts -->
+  <script defer type="module" src="/static/js/popup.js"></script>
+</html>

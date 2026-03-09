@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" style="overflow: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 공식 익스텐션</title>
+    <!-- MDB icon -->
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <script type="text/javascript" src="/static/chart/toastui-chart.min.js"></script>
+    <link rel="stylesheet" href="/static/chart/toastui-chart.min.css" />
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- MDB ESSENTIAL -->
+
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+
+    <!-- MDB PLUGINS -->
+    <link rel="stylesheet" href="/static/css/analysis2.css" />
+    <link rel="stylesheet" href="/static/css/coupDashboard.css" />
+
+    <!-- Custom styles -->
+  </head>
+
+  <body>
+    <div class="analysis-wrap">
+      <div class="analysis analysis-wrap2">
+        <div class="analysis-header">
+          <div class="analysis-header-left">
+            <div class="logo">
+              <a href="https://sellochomes.co.kr" target="_blank"><img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" /></a>
+            </div>
+            <span class="keyword" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="분석한 검색어">검색 키워드 : <span></span> </span>
+          </div>
+
+          <div class="arrow">
+            <button><i class="fas fa-angle-down"></i></button>
+          </div>
+        </div>
+        <div class="analysis-body">
+          <div class="skeleton">
+            <!-- 그래프 -->
+            <div class="div-1">
+              <div class="div1-1"></div>
+              <div class="div1-2">
+                <div class="div1-3"></div>
+                <div class="div1-4"></div>
+              </div>
+            </div>
+
+            <div class="div-2">
+              <div class="div2-1"></div>
+              <div class="div2-2"></div>
+              <div class="div2-3"></div>
+              <div class="div2-4"></div>
+              <div class="div2-5"></div>
+            </div>
+          </div>
+          <div class="main-body d-none">
+            <div class="main-left">
+              <div class="chart-top">
+                <!-- //라인차트 -->
+                <div id="trendChart"></div>
+              </div>
+              <div class="chart-bottom">
+                <div class="delivery-container">
+                  <p class="chart-header">배송 (비율/상품 수)</p>
+                  <div class="chart-container">
+                    <div class="delivery-chart-container">
+                      <div class="delivery-chart"></div>
+                    </div>
+                    <div class="additional-content">
+                      <ul class="long-table">
+                        <li>
+                          <p>로켓배송</p>
+                          <span class="ship-rate" id="rocket-shipping">
+                            <span class="percent"></span>
+                            <span class="count"></span>
+                          </span>
+                        </li>
+                        <li>
+                          <p>판매자로켓</p>
+                          <span class="ship-rate" id="seller-shipping">
+                            <span class="percent"></span>
+                            <span class="count"></span>
+                          </span>
+                        </li>
+                        <li>
+                          <p>로켓직구</p>
+                          <span class="ship-rate" id="globalrocket-shipping">
+                            <span class="percent"></span>
+                            <span class="count"></span>
+                          </span>
+                        </li>
+                        <li>
+                          <p>일반국내배송</p>
+                          <span class="ship-rate" id="normal-shipping">
+                            <span class="percent"></span>
+                            <span class="count"></span>
+                          </span>
+                        </li>
+                        <li>
+                          <p>일반해외배송</p>
+                          <span class="ship-rate" id="global-shipping">
+                            <span class="percent"></span>
+                            <span class="count"></span>
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                  <!-- <div class="delivery-bar-chart"></div> -->
+                </div>
+                <div class="price-chart-wrap">
+                  <p class="chart-header">판매가 분포</p>
+                  <div class="price-chart"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="main-right">
+              <div class="container">
+                <p class="chart-header">검색량</p>
+                <div class="card-group average_value">
+                  <div class="custom-card">
+                    <p class="card-text-header">최근 1달</p>
+                    <p class="result" id="recent_1_month">0</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">예상 1달</p>
+                    <p class="result" id="forecast_1_month">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">예상 3달 평균</p>
+                    <p class="result" id="forecast_3_months">0</p>
+                  </div>
+                </div>
+              </div>
+              <div class="container">
+                <p class="chart-header">상품</p>
+                <div class="card-group productOverview">
+                  <div class="custom-card">
+                    <p class="card-text-header">경쟁 강도</p>
+                    <p class="result" id="competition-strength">0</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">상품수</p>
+                    <p class="result" id="product-amount">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">평균 평점</p>
+                    <p class="result" id="average-rating">0</p>
+                  </div>
+                </div>
+              </div>
+              <div class="container">
+                <p class="chart-header">가격</p>
+                <div class="card-group productPrice">
+                  <div class="custom-card">
+                    <p class="card-text-header">평균가</p>
+                    <p class="result" id="average-price">0원</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">최대 판매가</p>
+                    <p class="result" id="max-price">0원</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">최소 판매가</p>
+                    <p class="result" id="min-price">0원</p>
+                  </div>
+                </div>
+              </div>
+              <div class="container">
+                <p class="chart-header">리뷰</p>
+                <div class="card-group productReview">
+                  <div class="custom-card">
+                    <p class="card-text-header">총 리뷰 수</p>
+                    <p class="result card-text-body" id="total-review">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">최대 리뷰 수</p>
+                    <p class="result" id="max-review">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">최소 리뷰 수</p>
+                    <p class="result" id="min-review">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">해외배송 총 리뷰 수</p>
+                    <p class="result" id="total-overseas-review">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">해외배송 최대 리뷰 수</p>
+                    <p class="result" id="max-overseas-review">0개</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">해외배송 최소 리뷰 수</p>
+                    <p class="result" id="min-overseas-review">0개</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="container">
+                <p class="chart-header">CPC 광고</p>
+                <div class="card-group cpc-group after-skeleton d-none">
+                  <div class="custom-card">
+                    <p class="card-text-header">최대</p>
+                    <p class="result" id="max-cpc">0</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">최소</p>
+                    <p class="result" id="min-cpc">0</p>
+                  </div>
+                  <div class="custom-card">
+                    <p class="card-text-header">추천</p>
+                    <p class="result" id="recommend-cpc">0</p>
+                  </div>
+                </div>
+                <div class="wing-login-request">
+                  <p>
+                    쿠팡 윙에
+                    <!-- <a href="https://xauth.coupang.com/auth/realms/seller/protocol/openid-connect/auth?client_id=wing&scope=openid%20phone%20web-origins%20profile%20roles%20address%20microprofile-jwt%20email&response_type=code&redirect_uri=https%3A%2F%2Fadvertising.coupang.com%2Fuser%2Fwing%2Fauthorization-callback&state=WcOlMHFKHIFbKVagQcpYwsw57u2Lkil8MFW3Dxx4l7Q&code_challenge=ElfwBEWhy0eXyguT-yXSKR5-HO83X-niAgWBNwTxxn4&code_challenge_method=S256" target="_blank" rel="noopener noreferrer">로그인</a>  -->
+                    <a id="wing-login-click" href="#" target="_blank" rel="noopener noreferrer">로그인</a>
+                    하셔야 볼 수 있습니다
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+  <!-- MDB ESSENTIAL -->
+  <script type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+  <!-- Custom scripts -->
+  <script defer type="module" src="/static/js/coupDashboard.js"></script>
+</html>

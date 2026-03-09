@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en" style="overflow: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 공식 익스텐션</title>
+    <!-- MDB icon -->
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- <script type="text/javascript" src="/static/js/jquery-3.7.0.min.js"></script> -->
+    <!-- MDB ESSENTIAL -->
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+    <link rel="stylesheet" href="/static/css/translate.css" />
+    <!-- Custom styles -->
+  </head>
+  <body>
+    <div id="tl-wrap" class="card border" style="width: 650px">
+      <div class="card-body">
+        <div class="d-flex justify-content-between">
+          <div class="s-card-header">
+            <a href="https://sellochomes.co.kr" target="_blank">
+              <img src="/static/img/s-logo-1024-ver2.png" class="sellerlife-logo" style="width: auto; max-height: 30px; cursor: pointer" />
+            </a>
+          </div>
+          <div>
+            <a href="" role="button" class="text-muted translate-close-btn">
+              <i class="fas fa-xmark fa-xl"></i>
+            </a>
+          </div>
+        </div>
+        <div class="d-flex mt-3">
+          <div class="source-box border rounded-5 w-50 me-1">
+            <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+              <div class="source-select-box">
+                <select class="select" id="source-select" data-mdb-size="sm" data-mdb-option-height="30.5">
+                  <option value="ko">한국어</option>
+                  <option value="en">영어</option>
+                  <option value="ja">일본어</option>
+                  <option value="zh-CN">중국어 간체</option>
+                  <option value="zh-TW">중국어 번체</option>
+                  <option value="vi">베트남어</option>
+                  <option value="id">인도네시아어</option>
+                  <option value="th">태국어</option>
+                  <option value="de">독일어</option>
+                  <option value="ru">러시아어</option>
+                  <option value="es">스페인어</option>
+                  <option value="it">이탈리아어</option>
+                  <option value="fr">프랑스어</option>
+                </select>
+              </div>
+              <div>
+                <a href="" id="right-left-change" role="button" class="text-muted">
+                  <i class="fas fa-right-left"></i>
+                </a>
+              </div>
+            </div>
+            <div class="d-flex p-3">
+              <textarea rows="1" id="source-text-form" class="edit-box" placeholder="번역할 내용을 입력하세요."></textarea>
+              <div>
+                <a role="button" class="text-muted d-none clear-source">
+                  <i class="fas fa-xmark"></i>
+                </a>
+              </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center border-top p-3">
+              <div class="text-black-50">
+                <a role="button" class="text-muted">
+                  <i class="far fa-copy fa-xl copy-ico source-ico"></i>
+                </a>
+              </div>
+              <div>
+                <button type="button" id="translate-btn" class="btn btn-success" style="font-size: 13px">번역실행</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="target-box border rounded-5 w-50 ms-1">
+            <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+              <div class="target-select-box">
+                <select class="select" id="target-select" data-mdb-size="sm" data-mdb-option-height="30.5">
+                  <option value="en">영어</option>
+                  <option value="ja">일본어</option>
+                  <option value="zh-CN">중국어 간체</option>
+                  <option value="zh-TW">중국어 번체</option>
+                  <option value="vi">베트남어</option>
+                  <option value="id">인도네시아어</option>
+                  <option value="th">태국어</option>
+                  <option value="de">독일어</option>
+                  <option value="ru">러시아어</option>
+                  <option value="es">스페인어</option>
+                  <option value="it">이탈리아어</option>
+                  <option value="fr">프랑스어</option>
+                </select>
+              </div>
+            </div>
+            <div class="d-flex p-3">
+              <!-- <div id="target-text-form" class="edit-box" style="white-space : pre-wrap;"> -->
+              <textarea id="target-text-form" class="edit-box" style="white-space: pre-wrap" disabled></textarea>
+              <!-- </div> -->
+            </div>
+            <div class="d-flex justify-content-between align-items-center border-top p-3">
+              <div class="text-black-50 mt-2">
+                <a role="button" class="text-muted">
+                  <i class="far fa-copy fa-xl copy-ico target-ico"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ad-body">
+        <a target="_blank" href="" id="extensionAdLink">
+          <img crossorigin="anonymous" src="" alt="" id="extensionAdImage" />
+        </a>
+      </div>
+    </div>
+    <div
+      class="alert fade"
+      id="alert-info"
+      role="alert"
+      data-mdb-color="info"
+      data-mdb-position="bottom-center"
+      data-mdb-stacking="true"
+      data-mdb-width="200px"
+      data-mdb-height="20px"
+      data-mdb-append-to-body="true"
+      data-mdb-hidden="true"
+      data-mdb-autohide="true"
+      data-mdb-delay="2000"
+      style="font-size: 13px; border-radius: 50px"
+    >
+      복사되었습니다.
+    </div>
+  </body>
+  <!-- MDB ESSENTIAL -->
+  <script type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+  <script type="module" src="/translate/translate-sl.js"></script>
+</html>

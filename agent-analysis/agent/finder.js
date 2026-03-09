@@ -1,0 +1,1 @@
+document.documentElement.setAttribute("extension-id",chrome.runtime.id),document.documentElement.setAttribute("extension-version",chrome.runtime.getManifest().version);

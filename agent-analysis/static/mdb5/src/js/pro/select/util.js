@@ -1,0 +1,1 @@
+export default function e(e){return e.filter((e=>!e.disabled)).every((e=>e.selected))}

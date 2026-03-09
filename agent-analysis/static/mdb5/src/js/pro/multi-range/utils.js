@@ -1,0 +1,1 @@
+export const getEventTypeClientX=e=>"touchmove"===e.type?e.touches[0].clientX:e.clientX;

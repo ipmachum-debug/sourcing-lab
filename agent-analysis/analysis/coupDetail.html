@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" style="overflow: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 공식 익스텐션 상품분석</title>
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <script type="text/javascript" src="/static/chart/toastui-chart.min.js"></script>
+    <link rel="stylesheet" href="/static/chart/toastui-chart.min.css" />
+    <!-- MDB icon -->
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- MDB ESSENTIAL -->
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/css/coupDetail.css" />
+  </head>
+
+  <body>
+    <div class="frame">
+      <div class="frame-header">
+        <div class="logo">
+          <a href="https://sellochomes.co.kr" target="_blank"><img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" /></a>
+        </div>
+        <div class="arrow">
+          <button><i class="fas fa-angle-down"></i></button>
+        </div>
+      </div>
+
+      <div class="frame-body">
+        <div class="skeleton">
+          <div class="div1"></div>
+          <div class="div2"></div>
+        </div>
+        <div class="tab1-warp d-none">
+          <div class="left-box">
+            <div class="img-box-1"></div>
+          </div>
+          <div class="text-box">
+            <div class="top-info">
+              <div class="left-block">
+                <b class="main-t"></b>
+                <b class="amount"> <span></span></b>
+                <div class="ttl-box">
+                  <span class="category-breadcrumb">-</span>
+                </div>
+    
+                <div class="box1">
+                  <p class="review rv-box">리뷰<span> - </span></p>
+                  <p class="score rv-box">평점<span> - </span></p>
+                  <p class="shipping rv-box">배송방법<span> - </span></p>
+                </div>
+    
+                <div class="box2">
+                  <p class="view-count rv-box">조회(28일)<span> - </span></p>
+                  <p class="brand-name rv-box">브랜드명<span> - </span></p>
+                  <p class="manufacture rv-box">제조사<span> - </span></p>
+                  <p class="rv-box login-suggest d-none">
+                    <a id="wing-login" href="#">조회하기(쿠팡윙 로그인)</a>
+                  </p>
+                </div>
+              </div>
+              <div class="right-block">
+                <button id="coup-reviewDate" class="coup-reviewDate">옵션·리뷰 분석</button>
+                <button id="coup-rankTracking" class="coup-rankTracking">일간 순위추적</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+
+  <!-- Custom scripts -->
+</html>
+<script defer type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+<script defer type="module" src="/static/js/coupDetail.js"></script>

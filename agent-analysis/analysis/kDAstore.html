@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en" style="overflow: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>셀러라이프 공식 익스텐션</title>
+    <!-- MDB icon -->
+    <link rel="icon" href="/static/mdb5/img/mdb-favicon.ico" type="image/x-icon" />
+    <script type="text/javascript" src="/static/chart/toastui-chart.min.js"></script>
+    <link rel="stylesheet" href="/static/chart/toastui-chart.min.css" />
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/static/icon/fontawesome-6.3.0/css/all.min.css" />
+    <!-- MDB ESSENTIAL -->
+
+    <link rel="stylesheet" href="/static/mdb5/css/mdb.min.css" />
+
+    <!-- MDB PLUGINS -->
+    <link rel="stylesheet" href="/static/css/analysis2.css" />
+
+    <!-- Custom styles -->
+  </head>
+
+  <body style="display: flex; align-items: center; justify-content: center; background: transparent">
+    <div class="analysis-wrap kDAstore-wrap">
+      <div class="analysis">
+        <div class="analysis-header">
+          <div class="analysis-header-left">
+            <div class="logo">
+              <a href="https://sellochomes.co.kr" target="_blank"><img src="/static/img/s-logo-1024-ver2.png" alt="셀러라이프 로고" style="height: 29px; width: auto" /></a>
+            </div>
+            <div class="summary-box" role="group" aria-label="Basic">
+              <button type="button" class="btn">
+                <span class="keyword" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="분석한 검색어">검색 키워드 : <span></span> </span>
+              </button>
+              <button type="button" class="btn brandkey d-none">
+                <span data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="검색어 내 포함된 브랜드명">브랜드 키워드 : <span> </span> </span>
+              </button>
+              <button type="button" class="btn topbrand d-none">
+                <span data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="네이버 1페이지 최다 등록 브랜드"
+                  >대표 브랜드 : <span> </span>
+                </span>
+              </button>
+            </div>
+            <button class="keywordsearch" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="셀러라이프에서 키워드를 검색합니다.">
+              키워드 분석 <i class="fas fa-up-right-from-square"></i>
+            </button>
+            <button class="categorysearch" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="셀라소싱 서비스에 카테고리의 키워드를 확인합니다.">
+              카테고리 소싱 <i class="fas fa-up-right-from-square"></i>
+            </button>
+            <button class="relkeyword" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="셀라소싱 서비스에서 연관 키워드를 검색합니다.">
+              연관키워드 <i class="fas fa-up-right-from-square"></i>
+            </button>
+          </div>
+          <ul class="nav nav-pills" id="ex1" role="tablist">
+            <li class="nav-item" role="presentation">
+              <a class="nav-link fs-6 k-analysis active" id="ex1-pills-1" data-mdb-toggle="pill" role="tab" href="#ex1-tabs-1" aria-controls="ex1-pills-1" aria-selected="true">키워드 분석</a>
+            </li>
+            <li class="nav-item" role="presentation">
+              <a class="nav-link fs-6 pname-analysis" id="ex1-pills-2" data-mdb-toggle="pill" role="tab" href="#ex1-tabs-2" aria-controls="ex1-pills-2" aria-selected="false" tabindex="-1"
+                >상품명 분석</a
+              >
+            </li>
+          </ul>
+
+          <div class="arrow">
+            <button><i class="fas fa-angle-down"></i></button>
+          </div>
+        </div>
+        <div class="analysis-body">
+          <!-- Tabs content -->
+          <div class="tab-content" id="ex1-content">
+            <div class="tab-pane fade show active" id="ex1-tabs-1" role="tabpanel" aria-labelledby="ex1-pills-1"></div>
+            <div class="tab-pane fade" id="ex1-tabs-2" role="tabpanel" aria-labelledby="ex1-pills-2"></div>
+          </div>
+          <div class="main k-analysis">
+            <div class="skeleton">
+              <div class="div1">
+                <div class="div1-1"></div>
+                <div class="div1-2"></div>
+                <div class="div1-3"></div>
+              </div>
+              <div class="div2">
+                <div class="div2-1"></div>
+                <div class="div2-2"></div>
+              </div>
+            </div>
+
+            <div class="main-container d-none">
+              <div class="main-left">
+                <div class="body-top">
+                  <div class="box totalprdcnt">
+                    <p data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="전체 검색 결과 상품 수">총 상품수</p>
+                    <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                    <div class="cnt d-none"><span>12,546,789</span><b> 개</b></div>
+                  </div>
+                  <div class="box ovsprdcnt">
+                    <p data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="전체 검색 결과 중 해외직구 상품 수">해외 상품수</p>
+                    <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                    <div class="cnt d-none"><span>546,789</span><b> 개</b></div>
+                  </div>
+                </div>
+
+                <div class="ttl-info">
+                  <div class="table table-t">
+                    <div class="thead">
+                      <div class="tr">
+                        <div class="th"></div>
+                        <div class="th">
+                          평균가격
+                          <!-- <i
+                            class="far fa-circle-question"
+                            data-mdb-toggle="tooltip"
+                            data-mdb-placement="bottom"
+                            data-mdb-html="true"
+                            aria-label="전체 탭의 Top40/Top80 상품의 평균 가격입니다."
+                            data-mdb-original-title="전체 탭의 top40/top80 상품의<br>평균 가격입니다."
+                          ></i> -->
+                        </div>
+                        <div class="th">
+                          해외평균가격
+                          <!-- <i
+                            class="far fa-circle-question"
+                            data-mdb-toggle="tooltip"
+                            data-mdb-placement="bottom"
+                            data-mdb-html="true"
+                            aria-label="전체 탭의 Top40/Top80 상품 중 해외배송 상품의 평균 가격입니다."
+                            data-mdb-original-title="전체 탭의 top40/top80 상품 중<br>해외배송 상품의 평균 가격입니다."
+                          ></i> -->
+                        </div>
+                        <div class="th">
+                          6개월 판매건수
+                          <!-- <i
+                            class="far fa-circle-question"
+                            data-mdb-toggle="tooltip"
+                            data-mdb-placement="bottom"
+                            data-mdb-html="true"
+                            aria-label="전체 탭의 Top40/Top80 상품의 6개월 판매건수의 합입니다."
+                            data-mdb-original-title="전체 탭의 top40/top80 상품의<br>6개월 판매건수의 합입니다."
+                          ></i> -->
+                        </div>
+                        <div class="th">
+                          6개월 매출액
+                          <!-- <i
+                            class="far fa-circle-question"
+                            data-mdb-toggle="tooltip"
+                            data-mdb-placement="bottom"
+                            data-mdb-html="true"
+                            aria-label="전체 탭의 Top40/Top80 상품의 6개월 매출액입니다."
+                            data-mdb-original-title="전체 탭의 top40/top80 상품의<br>6개월 매출액입니다."
+                          ></i> -->
+                        </div>
+                      </div>
+                    </div>
+                    <div class="tbody">
+                      <div class="tr top40">
+                        <div class="td title">Top 40</div>
+                        <div class="td avgprice">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                        <div class="td ovsavgprice">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                        <div class="td sellcount">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="cnt d-none"><span></span><b>개</b></div>
+                        </div>
+                        <div class="td revenue">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                      </div>
+                      <div class="tr top80">
+                        <div class="td title">Top 80</div>
+                        <div class="td avgprice">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                        <div class="td ovsavgprice">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                        <div class="td sellcount">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="cnt d-none"><span></span><b>개</b></div>
+                        </div>
+                        <div class="td revenue">
+                          <!-- <div class="spinner-border spinner-border-sm text-success" role="status"></div> -->
+                          <div class="price d-none"><span></span><b>원</b></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="table-b table table-bordered">
+                  <div class="thead">
+                    <div class="th">
+                      <div class="td main-header">
+                        검색량
+                        <i
+                          class="far fa-circle-question"
+                          data-mdb-toggle="tooltip"
+                          data-mdb-placement="bottom"
+                          data-mdb-html="true"
+                          aria-label="네이버 월검색량"
+                          data-mdb-original-title="네이버 월검색량"
+                        ></i>
+                      </div>
+                      <div class="td main-header">
+                        경쟁강도
+                        <i class="far fa-circle-question" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="총 상품수 / 검색량"></i>
+                      </div>
+                      <div class="td main-header">
+                        상품비율
+                        <i class="far fa-circle-question" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title=" Top40 중 묶음/국내/해외 상품 비중"></i>
+                      </div>
+                      <div class="td main-header">
+                        신상품비율
+                        <i
+                          class="far fa-circle-question"
+                          data-mdb-toggle="tooltip"
+                          data-mdb-placement="bottom"
+                          data-mdb-html="true"
+                          title="Top40 중 1년 이내 등록 상품 비중"
+                        ></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="tbody">
+                    <div class="flex">
+                      <div class="tr bg-monthlyQcCnt">
+                        <div class="td sub-header">최근 1달</div>
+                        <div class="td vl total monthlyQcCnt">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="cnt"><span></span></div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">예상 1달</div>
+                        <div class="td vl total estQcCnt">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="cnt"><span></span></div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">예상 3달 평균</div>
+                        <div class="td vl total estThrQcCnt">
+                          <!-- <div class="spinner-border spinner-border-sm text-primar" role="status"></div> -->
+                          <div class="cnt"><span></span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex">
+                      <div class="tr bg-monthlyQc">
+                        <div class="td sub-header">최근 1달</div>
+                        <div class="td vl total monthlyQc">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="s-ratio d-none">
+                            <span></span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">예상 1달</div>
+                        <div class="td vl total estQc">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="s-ratio d-none"><span></span></div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">예상 3달 평균</div>
+                        <div class="td vl total estThrQc">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="s-ratio d-none"><span></span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex">
+                      <div class="tr">
+                        <div class="td sub-header">묶음 상품</div>
+                        <div class="td vl total bundleratio">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="percent d-none"><span></span>%</div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">국내 상품</div>
+                        <div class="td vl total stanratio">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="percent d-none"><span></span>%</div>
+                        </div>
+                      </div>
+                      <div class="tr">
+                        <div class="td sub-header">해외 상품</div>
+                        <div class="td vl oversea ovsratio">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="percent d-none"><span></span>%</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex-row">
+                      <div class="tr">
+                        <div class="td vl total newprdratio">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="percent d-none"><span></span>%</div>
+                        </div>
+                        <div class="td main-header">
+                          키워드 분류
+                          <i
+                            class="far fa-circle-question"
+                            data-mdb-toggle="tooltip"
+                            data-mdb-placement="bottom"
+                            data-mdb-html="true"
+                            title="쇼핑성/정보성/쇼핑성+정보성 키워드 속성"
+                          ></i>
+                        </div>
+                        <div class="td key-box">
+                          <!-- <div class="spinner-border spinner-border-sm" role="status"></div> -->
+                          <div class="sort shoping d-none">
+                            <i class="fas fa-cart-shopping"></i>
+                            <b>쇼핑성</b>
+                          </div>
+
+                          <div class="sort info d-none">
+                            <i class="fas fa-book"></i>
+                            <b>정보성</b>
+                          </div>
+
+                          <div class="sort shopinginfo d-none">
+                            <div class="icon-box">
+                              <i class="fas fa-cart-shopping"></i>
+                              <i class="fas fa-book"></i>
+                            </div>
+                            <b>쇼핑+정보</b>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="main-right">
+                <div class="chart">
+                  <div id="trendChart"></div>
+                </div>
+
+                <div class="right-b">
+                  <div class="category">
+                    <div class="cate1 catetop1">
+                      <p style="cursor: pointer"></p>
+                    </div>
+                    <div class="cate1 catetop2">
+                      <p style="cursor: pointer"></p>
+                    </div>
+                    <div class="cate1 catetop3">
+                      <p style="cursor: pointer"></p>
+                    </div>
+                  </div>
+                  <div class="bannerImg">
+                    <a href="https://sellochomes.co.kr/sellerlife/sourcing/recommend/daily-main" target="_blank">
+                      <img src="/static/img/dailyKeyword_20230914.gif" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="main pname-analysis d-none" data-set="false">
+            <div class="main-card p-analysis">
+              <h6>
+                네이버 상품명 분석
+                <i class="far fa-circle-question" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="전체 탭의 top40 상품들의 상품명을 분석합니다."></i>
+              </h6>
+              <div class="table">
+                <div class="thead">
+                  <div class="th">키워드명</div>
+                  <div class="th">빈도수</div>
+                  <div class="th">검색량</div>
+                  <div class="th view"></div>
+                  <div class="th discover"></div>
+                </div>
+                <div class="tbody"></div>
+              </div>
+              <div class="panel d-none">
+                <h6>없음</h6>
+              </div>
+              <caption></caption>
+            </div>
+            <div class="main-card search-rel table-responsive">
+              <h6>
+                네이버 검색 연관키워드
+                <i class="far fa-circle-question" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="네이버 광고 검색 결과의 연관키워드를 출력합니다."></i>
+              </h6>
+              <div class="table">
+                <div class="thead">
+                  <div class="th">키워드명</div>
+                  <div class="th">검색량</div>
+                  <div class="th view"></div>
+                  <div class="th discover"></div>
+                </div>
+                <div div class="tbody"></div>
+              </div>
+              <div class="panel d-none">
+                <h6>없음</h6>
+              </div>
+            </div>
+            <div class="main-card shop-rel table-responsive">
+              <h6>
+                네이버 쇼핑 연관키워드
+                <i class="far fa-circle-question" data-mdb-toggle="tooltip" data-mdb-placement="bottom" data-mdb-html="true" title="네이버 쇼핑 검색 결과의 연관키워드를 출력합니다."></i>
+              </h6>
+              <div class="table">
+                <div class="thead">
+                  <div class="th">키워드명</div>
+                  <div class="th view"></div>
+                  <div class="th discover"></div>
+                </div>
+                <div div class="tbody"></div>
+              </div>
+              <div class="panel d-none">
+                <h6>없음</h6>
+              </div>
+            </div>
+            <div class="main-card">
+              <!-- <h5 style="margin-left:30px; font-weight:700;">상품명 분석 이미지</h5>
+            <table class="table align-middle mb-0 bg-white table-hover" style="font-size:11px;">
+              <thead class="bg-light">
+                <tr>
+                  <div class="th">순위</th>
+                  <div class="th">키워드명</th>
+                  <div class="th">빈도수</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+              </tbody>
+            </table>
+            <div class="panel d-none" style="display:flex; justify-content: center; align-items: center; height: 300px;">
+              <h6 >없음</h6>
+            </div> -->
+              <img class="make-prdname-link" src="/static/img/banner.png" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+  <!-- MDB ESSENTIAL -->
+  <script type="text/javascript" src="/static/mdb5/js/mdb.min.js"></script>
+  <!-- Custom scripts -->
+  <script defer type="module" src="/static/js/kDAS.js"></script>
+</html>
+
+<!-- <div class="tr">
+  <div class="td">${prdArr.name}</div>
+  <div class="td">${prdArr.count}</div>
+  <div class="td">
+    <div class="spinner-border spinner-border-sm text-warning" role="status" style="height: 11px; width: 11px"></div>
+    <div class="cnt d-none">
+      <span></span>
+    </div>
+  </div>
+  <div class="td lookup"><button type="button" class="btn lookup-button">조회</button></div>
+  <div class="td discovery"><button type="button" class="btn discovery-button">발굴</button></div>
+</div> -->

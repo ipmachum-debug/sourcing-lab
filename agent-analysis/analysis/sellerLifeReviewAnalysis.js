@@ -1,0 +1,1 @@
+"use strict";chrome.runtime.onMessage.addListener(((e,t,p)=>{"REVIEW_PROGRESS_SEND"===e.type&&window.postMessage({type:e.type,payload:{percent:e.payload.percent}})}));

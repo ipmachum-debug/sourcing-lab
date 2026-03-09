@@ -1,0 +1,61 @@
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('../font/Pretendard-1.3.8/PretendardVariable.woff2') format('woff2');
+  font-style: normal;
+}
+
+html {
+  font-size: 16px;
+}
+body {
+  font-family: 'Pretendard Variable';
+}
+
+.select-dropdown .select-option {
+  font-size: 0.8rem;
+}
+.card-body > .source-select-box > i:hover {
+  color: #0d6efd;
+}
+
+.translate-close-btn:hover {
+  /* filter: invert(0.5); */
+  /* background-color: #f2f4f7; */
+}
+
+.tooltip .tooltip-inner {
+  font-size: 10px;
+}
+#tl-wrap .select-input {
+  font-size: 16px;
+}
+
+#tl-wrap .edit-box {
+  -webkit-backface-visibility: hidden;
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #888;
+  font-size: 16px;
+  line-height: 1.26em;
+  min-height: 100px;
+  resize: none;
+  transform: translateZ(0);
+  width: 95%;
+  word-break: break-word;
+  overflow-y: auto;
+}
+
+#tl-wrap .edit-box:focus {
+  outline: none;
+}
+
+#tl-wrap .target-box .edit-box {
+  color: #888;
+  font-size: 16px;
+  line-height: 1.26em;
+  min-height: 100px;
+  overflow-y: auto;
+}

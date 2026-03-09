@@ -1,0 +1,92 @@
+{
+   "action": {
+      "default_icon": {
+         "128": "static/icon/ico_logo_128.png",
+         "16": "static/icon/ico_logo_128.png",
+         "24": "static/icon/ico_logo_128.png",
+         "32": "static/icon/ico_logo_128.png",
+         "64": "static/icon/ico_logo_128.png"
+      },
+      "default_title": "셀러라이프"
+   },
+   "background": {
+      "service_worker": "background.js",
+      "type": "module"
+   },
+   "content_scripts": [ {
+      "js": [ "analysis/coupAd.js" ],
+      "matches": [ "https://advertising.coupang.com/*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "analysis/coupWing.js" ],
+      "matches": [ "https://wing.coupang.com/*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "analysis/pDAFGS.js", "analysis/request.js" ],
+      "matches": [ "https://brand.naver.com/*/products/*", "https://smartstore.naver.com/*/products/*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "analysis/sellerLifeReviewAnalysis.js" ],
+      "matches": [ "https://sellochomes.co.kr/sellerlife*", "https://*.sellochomes.co.kr/sellerlife*", "http://*:5173/sellerlife*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "analysis/DAScript.js", "analysis/request.js" ],
+      "matches": [ "https://search.shopping.naver.com/search/*", "https://smartstore.naver.com/*/products/*", "https://brand.naver.com/*/products/*", "https://shopping.naver.com/window-products/*", "https://www.coupang.com/vp/products/*", "https://www.coupang.com/np/search*", "https://search.shopping.naver.com/ns/*" ],
+      "run_at": "document_end"
+   }, {
+      "exclude_globs": [ "*sellochomes.co.kr*" ],
+      "js": [ "analysis/imageSearch.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_end"
+   }, {
+      "all_frames": true,
+      "js": [ "translate/translate.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "agent/agent.js" ],
+      "matches": [ "https://sellochomes.co.kr/agent-finder", "https://*.sellerlife.co.kr/agent-finder" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "agent/finder.js" ],
+      "matches": [ "https://sellochomes.co.kr/finder*", "https://*.sellerlife.co.kr/finder*", "https://sellochomes.co.kr/scouter*", "https://*.sellerlife.co.kr/scouter*", "https://sellochomes.co.kr/soma*", "https://*.sellerlife.co.kr/soma*", "https://sellochomes.co.kr/keyword*", "https://*.sellerlife.co.kr/keyword*", "https://sellochomes.co.kr/tracker*", "https://*.sellerlife.co.kr/tracker*", "https://sellochomes.co.kr/shipping-tracker*", "https://*.sellerlife.co.kr/shipping-tracker*", "https://sellochomes.co.kr/bloglife*", "https://*.sellerlife.co.kr/bloglife*", "https://sellochomes.co.kr/sellerlife*", "https://*.sellochomes.co.kr/sellerlife*", "https://sellochomes.co.kr/bloglife*", "https://*.sellochomes.co.kr/bloglife*", "http://*:5173/sellerlife*", "http://*:5173/bloglife*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "popup/img-dnd-content.js" ],
+      "matches": [ "https://sellochomes.co.kr/sellerlife/img-dnd/", "https://*.sellochomes.co.kr/sellerlife/img-dnd/", "http://*:5173/sellerlife/img-dnd/" ],
+      "run_at": "document_end"
+   } ],
+   "content_security_policy": {
+      "extension_page": "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://www.googletagmanager.com; object-src 'self'; default-src 'self'"
+   },
+   "declarative_net_request": {
+      "rule_resources": [ {
+         "enabled": true,
+         "id": "rule_set_1",
+         "path": "rules1.json"
+      } ]
+   },
+   "description": "셀러라이프 공식 익스텐션(키워드 및 상품 분석, 번역기, 그 외 다양한 기능 제공)",
+   "externally_connectable": {
+      "matches": [ "*://sellerlife.co.kr/*", "*://*.sellerlife.co.kr/*", "*://sellochomes.co.kr/*", "*://*.sellochomes.co.kr/*", "*://localhost/*" ]
+   },
+   "host_permissions": [ "https://www.naver.com/*", "https://smartstore.naver.com/*", "https://brand.naver.com/*", "https://*.smartstore.naver.com/*", "https://shopping.naver.com/*", "https://*.shopping.naver.com/*", "https://brand.naver.com/*", "https://*.brand.naver.com/*", "https://datalab.naver.com/*", "https://search.shopping.naver.com/*", "https://search.naver.com/*", "http://20.200.232.181:7800/*", "https://api-01.sellerlife.co.kr/*", "https://www.coupang.com/*", "https://*.coupang.com/*", "https://www.gmarket.co.kr/*", "https://*.gmarket.com/*", "https://*.gmarket.co.kr/*", "https://*.blog.naver.com/*", "https://*.lotteglogis.com/*", "https://sellochomes.co.kr/pc/*", "https://sellochomes.co.kr/review*", "https://*.sellerlife.co.kr/review*", "https://sellochomes.co.kr/sellerlife*", "https://*.sellochomes.co.kr/sellerlife*", "http://*:5173/sellerlife*", "https://search.shopping.naver.com/ns/*", "https://*.taobao.com/*", "https://*.tmall.com/*", "https://*.aliexpress.com/*", "https://*.1688.com/*" ],
+   "icons": {
+      "128": "static/icon/ico_logo_128.png"
+   },
+   "incognito": "split",
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApuvMC4LbxA04tW7kiuFp6HKt0kLfxLZXffwUZpcM3qw/DsY6+gevvJvZ8nARFYHwPhuogEwHDGqS0E2+Rn9eL6LZr9I6MNu8+j9ap69I7ueflVQ9PUxOHnC1MqWjda5Y+UEkHA796akDQ+wG5XmKpkpWU9VFYcqqvcykRWkXR+ka7L+f9RebxX96DM4iDv7r+tMTevUxxrBE+rMwCeIm+0JnVd4J/ALPoDWByNoN9vYeZTf6BuDyfmA5b+P2GSTanM6HGiGLsPCwyyoCkg14uMyP7mOgxsfUPs2I38AvwOzl/GiDIAtTH/EL7aOItIP+nLO7sGnIz75F/K4Xm+qljwIDAQAB",
+   "manifest_version": 3,
+   "name": "셀러라이프",
+   "permissions": [ "windows", "scripting", "tabs", "activeTab", "background", "declarativeNetRequest", "declarativeNetRequestFeedback", "downloads", "storage", "contextMenus", "sidePanel" ],
+   "side_panel": {
+      "default_path": "sidepanel/sidepanel.html"
+   },
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "1.2.1.27",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "analysis/*.html", "analysis/*.js", "static/css/*.css", "static/icon/*.png", "static/img/*.png", "static/font/**", "static/js/*.js", "static/mdb/**", "translate/*.html", "translate/*.js" ],
+      "type": "module"
+   } ]
+}

@@ -1,0 +1,1 @@
+import o from"../../mdb/dom/manipulator";import{element as d}from"../../mdb/util/index";export function getBackdropTemplate({backdropID:r,backdropOpacity:a,backdropColor:t}){const p=d("div");return o.addClass(p,"loading-backdrop"),p.id=r,o.addStyle(p,{opacity:a,backgroundColor:t}),p}
