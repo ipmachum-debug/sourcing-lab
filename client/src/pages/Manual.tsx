@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 const EXTENSION_VERSION = "6.6.0";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.1.zip";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.2.zip";
 
 // ===== 공통 컴포넌트 =====
 function Section({ id, icon: Icon, title, children, defaultOpen = false }: {
@@ -183,7 +183,7 @@ export default function Manual() {
           <Section id="install" icon={Download} title="1. 설치 방법" defaultOpen>
             <div className="space-y-4 mt-4">
               <StepCard num={1} title="ZIP 파일 다운로드" desc="이 페이지 상단 또는 '확장프로그램' 페이지에서 다운로드 버튼을 클릭합니다." color="bg-blue-500" />
-              <StepCard num={2} title="압축 해제" desc="다운로드한 coupang-helper-extension-v7.1.zip의 압축을 풀어줍니다. (폴더 안에 manifest.json 파일이 있어야 합니다)" color="bg-blue-500" />
+              <StepCard num={2} title="압축 해제" desc="다운로드한 coupang-helper-extension-v7.2.zip의 압축을 풀어줍니다. (폴더 안에 manifest.json 파일이 있어야 합니다)" color="bg-blue-500" />
               <StepCard num={3} title="Chrome 확장프로그램 페이지" desc="Chrome 주소창에 chrome://extensions 입력 후 Enter를 누릅니다." color="bg-blue-500" />
               <StepCard num={4} title="개발자 모드 ON" desc="우측 상단의 '개발자 모드' 토글을 활성화합니다." color="bg-blue-500" />
               <StepCard num={5} title="압축해제된 확장 프로그램 로드" desc="좌측 상단 '압축해제된 확장 프로그램을 로드합니다' 클릭 → 압축 해제한 폴더를 선택합니다." color="bg-blue-500" />

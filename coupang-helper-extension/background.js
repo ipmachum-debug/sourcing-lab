@@ -1,11 +1,12 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.1
-   v7.1: tRPC SuperJSON 응답 해제 수정 (핵심 버그 수정)
-         - api-client _call() 에서 result.data.json 자동 해제
-         - 서버 키워드 정상 로딩 + 자동 수집 동작
+   Coupang Sourcing Helper — Background Service Worker v7.2
+   v7.2: 셀러라이프 수집방식 전면 반영 (대개편)
+         - 다중 전략 수집 (Background fetch → DNR fetch → Tab → Hidden Tab 폴링)
+         - 'Already running' 상태 관리 버그 수정
+         - 자동 복구 및 에러 처리 강화
+         - 셀러라이프 k()/cDataTab2 방식 통합
+   v7.1: tRPC SuperJSON 응답 해제 수정
    v7.0: 하이브리드 수집 아키텍처 대개편
-         - Background fetch + DOMParser (셀러라이프 방식)
-         - 배치 수집 완전 재작성 (순차 1개씩, 50~89초 간격)
    ============================================================ */
 
 importScripts('api-client.js');
@@ -36,7 +37,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v7.0.0 — hybrid architecture`);
+    console.log(`[SH] Extension ${details.reason}d — v7.2.0 — multi-strategy architecture (SellerLife)`);
   }
 });
 
@@ -734,6 +735,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v7.2: 강제 수집기 리셋 (사이드패널에서 'Already running' 에러 시 사용)
+    case 'FORCE_RESET_COLLECTOR': {
+      resetCollector();
+      sendResponse({ ok: true, message: '수집기 강제 리셋 완료' });
+      return true;
+    }
+
     case 'PAUSE_AUTO_COLLECT': {
       pauseAutoCollect();
       sendResponse({ ok: true });
@@ -1352,16 +1360,15 @@ async function autoRunDailyBatch() {
 
 
 // ============================================================
-//  v7.0: 하이브리드 자동 수집기 (완전 재작성)
-//  "Background HTML fetch + DOMParser" 방식
-//
-//  핵심 변경사항 (v6.4 대비):
-//  1. content.js 메시지 의존 완전 제거
-//  2. chrome.scripting.executeScript로 렌더링된 HTML 가져옴
-//  3. Background의 DOMParser로 V1/V2 자동 파싱
-//  4. 순차 처리 (1개씩), 50~89초 랜덤 딜레이
-//  5. 배치 크기 항상 1 (안전)
-//  6. 실패 시 더 긴 대기 (2~5분)
+//  v7.2: 하이브리드 자동 수집기 (셀러라이프 방식 전면 반영)
+//  
+//  핵심 변경사항 (v7.0 대비):
+//  1. 다중 전략 수집 (Direct fetch → DNR fetch → Tab → Hidden Tab 폴링)
+//  2. 'Already running' 상태 버그 수정 — 확실한 초기화
+//  3. 강화된 에러 복구 (2회 재시도, 전략 변경)
+//  4. 셀러라이프 cDataTab2 방식 폴링 (최종 폴백)
+//  5. 수집 실패 시 탭 재생성 로직
+//  6. 안전한 상태 전환 (무한루프 방지)
 // ============================================================
 
 const collector = {
@@ -1379,6 +1386,7 @@ const collector = {
   startedAt: null,
   _delayTimeoutId: null,  // 딜레이 타이머
   _aborted: false,        // 중단 플래그
+  _consecutiveErrors: 0,  // v7.2: 연속 에러 카운터
 };
 
 // ---- 유틸 ----
@@ -1390,6 +1398,19 @@ function collectorSleep(ms) {
   return new Promise((resolve) => {
     collector._delayTimeoutId = setTimeout(resolve, ms);
   });
+}
+
+// v7.2: 수집기 상태 완전 초기화 (강제 리셋)
+function resetCollector() {
+  if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
+  collector.running = false;
+  collector.paused = false;
+  collector._aborted = false;
+  collector.status = 'IDLE';
+  collector.current = null;
+  collector.queue = [];
+  collector._consecutiveErrors = 0;
+  console.log('[SH-AC] 수집기 상태 리셋 완료');
 }
 
 function getCollectorState() {
@@ -1413,11 +1434,24 @@ function getCollectorState() {
   };
 }
 
-// ---- 자동 수집 시작 ----
+// ---- 자동 수집 시작 (v7.2: 'Already running' 버그 수정) ----
 async function startAutoCollect(options = {}) {
+  // v7.2: 강화된 상태 체크 — STOPPED/에러 상태에서도 재시작 가능
   if (collector.running && !collector.paused) {
-    console.warn('[SH-AC] 이미 실행 중');
-    return { ok: false, error: 'Already running' };
+    // 실제로 실행 중인지 확인 (좀비 상태 방지)
+    const elapsed = collector.startedAt ? (Date.now() - new Date(collector.startedAt).getTime()) : 0;
+    if (elapsed > 30 * 60 * 1000) {
+      // 30분 이상 경과 — 좀비 상태로 판단, 강제 리셋
+      console.warn('[SH-AC] ⚠️ 좀비 상태 감지 (30분+), 강제 리셋');
+      resetCollector();
+    } else if (collector.current === null && collector.queue.length === 0) {
+      // 큐가 비어있고 현재 작업도 없음 — 실질적으로 중단된 상태
+      console.warn('[SH-AC] ⚠️ 빈 상태 감지, 리셋');
+      resetCollector();
+    } else {
+      console.warn('[SH-AC] 이미 실행 중 — 현재 키워드:', collector.current?.keyword);
+      return { ok: false, error: `이미 실행 중 (현재: ${collector.current?.keyword || '대기중'})` };
+    }
   }
 
   // 일시정지에서 재개
@@ -1435,20 +1469,19 @@ async function startAutoCollect(options = {}) {
     return { ok: false, error: '서버 로그인 필요' };
   }
 
-  // v7.0: declarativeNetRequest 헤더 위조 적용
+  // v7.2: declarativeNetRequest 헤더 위조 적용 (셀러라이프 완전 반영)
   await HybridParser.setupCoupangHeaders().catch(() => {});
 
   const limit = Math.min(options.limit || 30, 200);
   const collectDetail = options.collectDetail !== false;
-  const directKeywords = options.keywords || null;  // v7.0.1: 직접 키워드 목록 지원
+  const directKeywords = options.keywords || null;
 
-  console.log(`[SH-AC] v7.0.1 하이브리드 수집 시작 (limit=${limit}, direct=${directKeywords ? directKeywords.length : 'N/A'})`);
+  console.log(`[SH-AC] v7.2 다중전략 수집 시작 (limit=${limit}, direct=${directKeywords ? directKeywords.length : 'N/A'})`);
 
   // 큐 로드
   try {
     let keywords;
     if (directKeywords && directKeywords.length > 0) {
-      // 직접 키워드 목록이 제공된 경우 (배치 실행 버튼에서 호출)
       keywords = directKeywords.map(kw => ({
         keyword: typeof kw === 'string' ? kw : kw.keyword,
         priority: 50,
@@ -1456,7 +1489,6 @@ async function startAutoCollect(options = {}) {
       }));
       console.log(`[SH-AC] 직접 키워드 ${keywords.length}개 로드`);
     } else {
-      // 서버에서 우선순위 기반 키워드 조회
       const resp = await apiClient.getBatchKeywordSelection({ limit });
       keywords = resp?.result?.data || [];
     }
@@ -1465,6 +1497,8 @@ async function startAutoCollect(options = {}) {
       return { ok: false, error: '수집할 키워드가 없습니다 (watch_keywords 등록 필요)' };
     }
 
+    // 상태 완전 초기화 후 설정
+    resetCollector();
     collector.queue = keywords.map(k => ({
       keyword: k.keyword,
       priority: k.priority || 50,
@@ -1474,8 +1508,6 @@ async function startAutoCollect(options = {}) {
     collector.collectDetail = collectDetail;
     collector.totalQueued = collector.queue.length;
     collector.running = true;
-    collector.paused = false;
-    collector._aborted = false;
     collector.status = 'RUNNING';
     collector.successCount = 0;
     collector.failCount = 0;
@@ -1492,19 +1524,16 @@ async function startAutoCollect(options = {}) {
     return { ok: true, queueLength: collector.queue.length };
   } catch (e) {
     console.error('[SH-AC] 큐 로드 실패:', e.message);
+    resetCollector(); // 실패 시 상태 리셋
     return { ok: false, error: e.message };
   }
 }
 
-// ---- 수집 중단 ----
+// ---- 수집 중단 (v7.2: 확실한 정리) ----
 function stopAutoCollect() {
   console.log('[SH-AC] 수집 중단');
-  collector.running = false;
-  collector.paused = false;
-  collector._aborted = true;
+  resetCollector();
   collector.status = 'STOPPED';
-  collector.current = null;
-  if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
 }
 
 // ---- 일시정지 ----
@@ -1517,14 +1546,14 @@ function pauseAutoCollect() {
   if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
 }
 
-// ---- 쿠팡 탭 확보 ----
+// ---- 쿠팡 탭 확보 (v7.2: 탭 재생성 강화) ----
 async function ensureCoupangTab() {
   // 기존 탭 확인
   if (collector.currentTabId) {
     try {
       const tab = await chrome.tabs.get(collector.currentTabId);
       if (tab?.id && tab.url?.includes('coupang.com')) return tab.id;
-    } catch (_) { /* 탭이 닫혔을 수 있음 */ }
+    } catch (_) { collector.currentTabId = null; }
   }
 
   // 열려있는 쿠팡 탭 찾기
@@ -1540,7 +1569,8 @@ async function ensureCoupangTab() {
     active: false,
   });
   collector.currentTabId = tab.id;
-  await collectorSleep(5000); // 초기 로드 대기
+  // 초기 로드 대기 (5초)
+  await new Promise(r => setTimeout(r, 5000));
   return tab.id;
 }
 
@@ -1561,11 +1591,24 @@ function waitForTabLoad(tabId, maxWait = 30000) {
 }
 
 // ============================================================
-//  ★★★ 핵심: 다음 키워드 실행 (v7.0 완전 재작성) ★★★
-//  content.js 의존 제거 → Background에서 직접 HTML 가져와서 파싱
+//  ★★★ 핵심: 다음 키워드 실행 (v7.2 다중 전략) ★★★
+//  셀러라이프 방식:
+//  전략 1: Background fetch (k() 방식) — 가장 빠름
+//  전략 2: DNR 규칙 적용 fetch (cData-v3 방식)
+//  전략 3: 기존 탭 executeScript (cData-coupang 방식)
+//  전략 4: Hidden Tab + 폴링 (cDataTab2 방식) — 가장 확실
 // ============================================================
 async function runNextKeyword() {
   if (!collector.running || collector.paused || collector._aborted) return;
+
+  // v7.2: 연속 에러 5회 이상이면 30분 대기
+  if (collector._consecutiveErrors >= 5) {
+    console.warn(`[SH-AC] ⚠️ 연속 ${collector._consecutiveErrors}회 실패, 30분 대기 후 재시도`);
+    collector.status = 'WAITING_NEXT';
+    collector._consecutiveErrors = 0;
+    await collectorSleep(30 * 60 * 1000);
+    if (!collector.running || collector._aborted) return;
+  }
 
   const next = collector.queue.shift();
   if (!next) {
@@ -1591,76 +1634,66 @@ async function runNextKeyword() {
   const keyword = next.keyword;
   const progress = collector.successCount + collector.failCount + collector.skipCount + 1;
 
-  console.log(`[SH-AC] 🔍 [${progress}/${collector.totalQueued}] 키워드 수집: "${keyword}"`);
+  console.log(`[SH-AC] 🔍 [${progress}/${collector.totalQueued}] 키워드 수집: "${keyword}" (재시도: ${next.retryCount || 0})`);
 
   try {
-    // 1. 쿠팡 탭 확보
-    const tabId = await ensureCoupangTab();
-
-    // 2. 검색 URL로 이동
-    collector.status = 'NAVIGATING';
-    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&page=1`;
-    await chrome.tabs.update(tabId, { url });
-
-    // 3. 페이지 로드 완료 대기 (최대 30초)
-    const loaded = await waitForTabLoad(tabId, 30000);
-    if (!loaded) {
-      console.warn(`[SH-AC] ⏰ 페이지 로드 타임아웃: "${keyword}"`);
-      await handleCollectFail(keyword, next.retryCount, 'TIMEOUT', '페이지 로드 30초 초과');
-      return;
-    }
-
-    // 중단 체크
-    if (!collector.running || collector._aborted) return;
-
-    // 4. DOM 렌더링 안정화 대기 (5~10초)
-    const renderDelay = Math.floor(Math.random() * 5000) + 5000;
-    console.log(`[SH-AC] 페이지 로드 완료, ${Math.round(renderDelay/1000)}초 렌더링 대기...`);
-    await collectorSleep(renderDelay);
-
-    if (!collector.running || collector._aborted) return;
-
-    // ★★★ 5. Background에서 HTML 가져와서 파싱 (핵심!) ★★★
+    // ★ v7.2: 다중 전략 HTML 수집 (셀러라이프 방식)
     collector.status = 'PARSING';
-    console.log(`[SH-AC] 📄 HTML 가져오기 + 하이브리드 파싱 시작...`);
+    let tabId = null;
+    try { tabId = await ensureCoupangTab(); } catch (_) {}
 
-    const html = await HybridParser.getRenderedHTML(tabId);
-    if (!html || html.length < 1000) {
-      // 차단/비정상 페이지 확인
-      const isBlocked = /봇|robot|captcha|차단|접근.*불가|Access Denied/i.test(html);
-      await handleCollectFail(keyword, next.retryCount,
-        isBlocked ? 'ACCESS_BLOCKED' : 'EMPTY_HTML',
-        isBlocked ? '쿠팡 접근 차단' : 'HTML이 비어있음'
-      );
+    const collectResult = await HybridParser.collectSearchHTML(keyword, {
+      tabId,
+      page: 1,
+      listSize: 36,
+    });
+
+    const html = collectResult.html;
+    const strategy = collectResult.strategy;
+
+    if (!html || html.length < 500) {
+      console.warn(`[SH-AC] ❌ "${keyword}" HTML 수집 실패 (모든 전략)`);
+      await handleCollectFail(keyword, next.retryCount, 'ALL_STRATEGIES_FAILED', '모든 수집 전략 실패');
       return;
     }
 
+    // 차단 확인
+    if (/봇|robot|captcha|차단|접근.*불가|Access Denied|Please verify/i.test(html) && html.length < 5000) {
+      console.warn(`[SH-AC] ⛔ "${keyword}" 접근 차단 감지 (전략: ${strategy})`);
+      await handleCollectFail(keyword, next.retryCount, 'ACCESS_BLOCKED', `쿠팡 접근 차단 (${strategy})`);
+      return;
+    }
+
+    // 파싱
     const result = HybridParser.parseSearchHTML(html, keyword);
 
     if (!result.items.length) {
-      console.warn(`[SH-AC] ❌ "${keyword}" 파싱 결과 0개`);
-      await handleCollectFail(keyword, next.retryCount, 'EMPTY_RESULT', '파싱된 상품 0개');
+      console.warn(`[SH-AC] ❌ "${keyword}" 파싱 결과 0개 (전략: ${strategy}, DOM: ${result.domVersion})`);
+      await handleCollectFail(keyword, next.retryCount, 'EMPTY_RESULT', `파싱된 상품 0개 (${strategy}/${result.domVersion})`);
       return;
     }
 
-    // 6. 성공 처리
-    console.log(`[SH-AC] ✅ "${keyword}" 수집 성공: ${result.items.length}개 (${result.domVersion}) | 평점${result.stats.ratingRate}% 리뷰${result.stats.reviewRate}%`);
+    // 성공 처리
+    console.log(`[SH-AC] ✅ "${keyword}" 수집 성공: ${result.items.length}개 (${strategy}/${result.domVersion}) | 가격${result.stats.priceRate}% 평점${result.stats.ratingRate}% 리뷰${result.stats.reviewRate}%`);
 
     collector.successCount++;
     collector.current = null;
+    collector._consecutiveErrors = 0; // 연속 에러 리셋
+
+    const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&page=1`;
 
     // 서버에 검색 이벤트 저장
     try {
       const saveResp = await apiClient.saveSearchEvent({
         keyword,
-        source: 'auto_collect_v7',
-        pageUrl: url,
+        source: `auto_collect_v72_${strategy}`,
+        pageUrl: searchUrl,
         totalItems: result.items.length,
         items: result.items.slice(0, 36),
         avgPrice: result.stats.avgPrice,
         avgRating: result.stats.avgRating,
         avgReview: result.stats.avgReview,
-        totalReviewSum: result.stats.totalReviewSum,
+        totalReviewSum: Math.min(result.stats.totalReviewSum, 2147483647), // INT overflow 방지
         adCount: result.stats.adCount,
         rocketCount: result.stats.rocketCount,
         highReviewCount: result.stats.highReviewCount,
@@ -1675,7 +1708,7 @@ async function runNextKeyword() {
 
     try { await apiClient.markKeywordCollected({ keyword }); } catch (e) { console.warn('[SH-AC] markKeywordCollected 실패:', e.message); }
 
-    // 7. 상세 페이지 상위 3개 보강
+    // 상세 페이지 상위 3개 보강
     if (collector.collectDetail && result.items.length) {
       const topItems = result.items.filter(i => i.productId && !i.isAd).slice(0, 3);
       if (topItems.length > 0) {
@@ -1693,7 +1726,7 @@ async function runNextKeyword() {
       }
     }
 
-    // 8. 다음 키워드 — 50~89초 랜덤 딜레이
+    // 다음 키워드 — 50~89초 랜덤 딜레이
     if (!collector.running || collector._aborted) return;
     const delay = randomDelay();
     console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
@@ -1708,14 +1741,16 @@ async function runNextKeyword() {
   }
 }
 
-// ---- 수집 실패 처리 (v7.0 단순화) ----
+// ---- 수집 실패 처리 (v7.2: 강화된 재시도) ----
 async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
-  console.warn(`[SH-AC] ❌ "${keyword}" 실패: ${errorCode} — ${errorMessage}`);
+  console.warn(`[SH-AC] ❌ "${keyword}" 실패 [${retryCount}/2]: ${errorCode} — ${errorMessage}`);
   collector.lastError = `${keyword}: ${errorCode}`;
+  collector._consecutiveErrors++;
 
-  // 1회 재시도
-  if (retryCount < 1) {
+  // v7.2: 2회 재시도 (기존 1회에서 증가)
+  if (retryCount < 2) {
     collector.queue.push({ keyword, priority: 0, retryCount: retryCount + 1 });
+    console.log(`[SH-AC] 🔄 "${keyword}" 재시도 큐 추가 (${retryCount + 1}/2)`);
   } else {
     collector.failCount++;
     try { await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage }); } catch (_) {}
@@ -1725,8 +1760,20 @@ async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
 
   if (!collector.running || collector._aborted) return;
 
-  // 실패 시 더 긴 대기 (2~5분)
-  const delay = randomDelay(120000, 300000);
+  // v7.2: 접근 차단 시 더 긴 대기 (5~10분)
+  let delay;
+  if (errorCode === 'ACCESS_BLOCKED') {
+    delay = randomDelay(300000, 600000); // 5~10분
+    console.log(`[SH-AC] ⛔ 접근 차단 — ${Math.round(delay/60000)}분 대기`);
+    // 탭 재생성 (차단된 세션 갱신)
+    if (collector.currentTabId) {
+      try { chrome.tabs.remove(collector.currentTabId); } catch (_) {}
+      collector.currentTabId = null;
+    }
+  } else {
+    delay = randomDelay(120000, 300000); // 2~5분
+  }
+
   collector.status = 'WAITING_NEXT';
   await collectorSleep(delay);
   await runNextKeyword();

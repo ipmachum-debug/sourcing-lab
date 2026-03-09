@@ -2850,7 +2850,15 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       startAutoCollectPolling();
       pollAutoCollectState();
     } else {
-      alert('수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
+      // v7.2: Already running 에러 시 강제 리셋 옵션
+      var errMsg1 = resp ? resp.error : '';
+      if (errMsg1 && (errMsg1.indexOf('이미 실행') >= 0 || errMsg1.indexOf('Already') >= 0)) {
+        if (confirm('수집기가 실행 중 상태입니다.\n강제 리셋 후 다시 시작하세요.')) {
+          await sendMsg({ type: 'FORCE_RESET_COLLECTOR' });
+        }
+      } else {
+        alert('수집 시작 실패: ' + (errMsg1 || '알 수 없는 오류'));
+      }
     }
     return;
   }
@@ -2909,7 +2917,15 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       } catch (e) {}
     }, 3000);
   } else {
-    alert('수집 시작 실패: ' + (resp ? resp.error : '알 수 없는 오류'));
+    // v7.2: Already running 에러 시 강제 리셋 옵션
+    var errMsg2 = resp ? resp.error : '';
+    if (errMsg2 && (errMsg2.indexOf('이미 실행') >= 0 || errMsg2.indexOf('Already') >= 0)) {
+      if (confirm('수집기가 실행 중 상태로 남아있습니다.\n강제 리셋 후 다시 시작 버튼을 눌러주세요.')) {
+        await sendMsg({ type: 'FORCE_RESET_COLLECTOR' });
+      }
+    } else {
+      alert('수집 시작 실패: ' + (errMsg2 || '알 수 없는 오류'));
+    }
   }
 });
 
