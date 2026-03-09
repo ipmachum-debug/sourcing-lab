@@ -59,6 +59,7 @@ $$('.tab').forEach(btn => {
     if (btn.dataset.tab === 'ranking') loadRankingTab();
     if (btn.dataset.tab === 'detail') loadDetailTab();
     if (btn.dataset.tab === 'wing') loadWingTab();
+    if (btn.dataset.tab === 'demand') loadDemandTab();
     if (btn.dataset.tab === 'datasheet') renderDataSheet();
   });
 });
@@ -2434,3 +2435,359 @@ $$('[data-guide-toggle]').forEach(header => {
 // 초기 로드
 refreshFromCurrentTab();
 checkServerAuth();
+
+// ============================================================
+//  검색수요 탭 (v6.3) — 하이브리드 데이터 수집 대시보드
+// ============================================================
+
+let demandKeywords = [];
+let selectedKeywordIds = new Set();
+let batchRunning = false;
+
+// 유틸: 메시지 전송 래퍼
+function sendMsg(msg) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(msg, (resp) => resolve(resp));
+  });
+}
+function formatDemandPrice(v) {
+  if (!v || v === 0) return '-';
+  return Number(v).toLocaleString() + '원';
+}
+function timeAgo(dateStr) {
+  if (!dateStr) return '-';
+  const now = new Date();
+  const d = new Date(dateStr);
+  const diff = now - d;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + '분 전';
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + '시간 전';
+  const days = Math.floor(hours / 24);
+  return days + '일 전';
+}
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+async function loadDemandTab() {
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    document.querySelector('#demandEmpty').textContent = '서버 로그인이 필요합니다. 서버 탭에서 먼저 로그인하세요.';
+    document.querySelector('#demandEmpty').style.display = '';
+    return;
+  }
+  const { batchEnabled } = await chrome.storage.local.get('batchEnabled');
+  document.querySelector('#batchToggle').checked = !!batchEnabled;
+  updateBatchToggleUI(!!batchEnabled);
+
+  const { lastDailyBatchRun } = await chrome.storage.local.get('lastDailyBatchRun');
+  if (lastDailyBatchRun) {
+    document.querySelector('#demandLastRun').style.display = '';
+    document.querySelector('#demandLastRunTime').textContent = new Date(lastDailyBatchRun).toLocaleString('ko-KR');
+  }
+  loadDemandDashboard();
+  loadDemandKeywords();
+}
+
+async function loadDemandDashboard() {
+  try {
+    const resp = await sendMsg({ type: 'HYBRID_DASHBOARD' });
+    if (!resp || !resp.ok || !resp.data) return;
+    const d = resp.data;
+    document.querySelector('#demandStatsGrid').style.display = 'grid';
+    document.querySelector('#demandStatKeywords').textContent = (d.watchKeywords && d.watchKeywords.total) || 0;
+    document.querySelector('#demandStatEvents').textContent = (d.searchEvents && d.searchEvents.totalLast7d) || 0;
+    document.querySelector('#demandStatQuality').textContent = ((d.parseQuality && d.parseQuality.avgPriceRate) || 0) + '%';
+    document.querySelector('#demandStatGrowth').textContent = (d.watchKeywords && d.watchKeywords.withGrowth) || 0;
+    const badge = document.querySelector('#demandStatusBadge');
+    if (d.watchKeywords && d.watchKeywords.total > 0) {
+      badge.textContent = d.watchKeywords.active + '개 활성';
+      badge.className = 'competition-badge level-easy';
+    }
+  } catch (e) { console.error('[Demand] dashboard:', e); }
+}
+
+async function loadDemandKeywords() {
+  const sortSel = document.querySelector('#demandSortSelect');
+  const sortBy = sortSel ? sortSel.value : 'compositeScore';
+  try {
+    const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 100 } });
+    if (!resp || !resp.ok || !resp.data || !resp.data.length) {
+      document.querySelector('#demandEmpty').style.display = '';
+      document.querySelector('#demandKwHeader').style.display = 'none';
+      return;
+    }
+    demandKeywords = resp.data;
+    document.querySelector('#demandEmpty').style.display = 'none';
+    document.querySelector('#demandKwHeader').style.display = 'flex';
+    document.querySelector('#demandBatchControls').style.display = '';
+    renderDemandKeywords(demandKeywords);
+  } catch (e) { console.error('[Demand] keywords:', e); }
+}
+
+function renderDemandKeywords(keywords) {
+  const list = document.querySelector('#demandKeywordList');
+  list.innerHTML = '';
+  keywords.forEach(function(kw) {
+    const el = document.createElement('div');
+    el.className = 'demand-kw-item' + (selectedKeywordIds.has(kw.id) ? ' selected' : '');
+    el.dataset.kwId = kw.id;
+    const scoreClass = kw.compositeScore >= 60 ? 's-high' : kw.compositeScore >= 30 ? 's-mid' : 's-low';
+    let tags = '';
+    if (kw.reviewGrowth7d > 0) tags += '<span class="demand-kw-tag growth">+' + kw.reviewGrowth7d + ' 리뷰</span>';
+    if (kw.totalSearchCount >= 5) tags += '<span class="demand-kw-tag hot">🔥 ' + kw.totalSearchCount + '회</span>';
+    if (kw.compositeScore >= 60) tags += '<span class="demand-kw-tag score">⭐ TOP</span>';
+    if (kw.latestAvgPrice > 0) tags += '<span class="demand-kw-tag">' + formatDemandPrice(kw.latestAvgPrice) + '</span>';
+    const lastStr = kw.lastSearchedAt ? timeAgo(kw.lastSearchedAt) : '-';
+
+    el.innerHTML = '<div class="demand-kw-check"><input type="checkbox" ' + (selectedKeywordIds.has(kw.id) ? 'checked' : '') + ' data-kw-id="' + kw.id + '" /></div>' +
+      '<div class="demand-kw-info">' +
+        '<div class="demand-kw-name">' + escHtml(kw.keyword) + '</div>' +
+        '<div class="demand-kw-meta">' + tags + '<span class="demand-kw-tag">' + lastStr + '</span></div>' +
+      '</div>' +
+      '<div class="demand-kw-score ' + scoreClass + '">' + kw.compositeScore + '</div>' +
+      '<div class="demand-kw-actions-mini">' +
+        '<button class="btn-sm" data-action="detail" data-keyword="' + escHtml(kw.keyword) + '" title="상세">📊</button>' +
+        '<button class="btn-sm" data-action="delete" data-kw-id="' + kw.id + '" title="삭제">🗑</button>' +
+      '</div>';
+
+    // 체크박스 클릭
+    el.querySelector('input[type="checkbox"]').addEventListener('change', function(e) {
+      e.stopPropagation();
+      if (e.target.checked) { selectedKeywordIds.add(kw.id); el.classList.add('selected'); }
+      else { selectedKeywordIds.delete(kw.id); el.classList.remove('selected'); }
+    });
+    // 상세
+    el.querySelector('[data-action="detail"]').addEventListener('click', function(e) {
+      e.stopPropagation(); showKeywordDetail(kw.keyword);
+    });
+    // 삭제
+    el.querySelector('[data-action="delete"]').addEventListener('click', async function(e) {
+      e.stopPropagation();
+      if (confirm('"' + kw.keyword + '" 키워드를 삭제할까요?')) {
+        await sendMsg({ type: 'HYBRID_DELETE_WATCH_KEYWORD', id: kw.id });
+        selectedKeywordIds.delete(kw.id);
+        loadDemandKeywords();
+      }
+    });
+    // 행 클릭 -> 상세
+    el.addEventListener('click', function(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      showKeywordDetail(kw.keyword);
+    });
+    list.appendChild(el);
+  });
+}
+
+async function showKeywordDetail(keyword) {
+  const card = document.querySelector('#demandDetailCard');
+  card.style.display = '';
+  document.querySelector('#demandDetailTitle').textContent = '"' + keyword + '" 상세';
+  const content = document.querySelector('#demandDetailContent');
+  content.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">로딩중...</div>';
+
+  try {
+    const [histResp, diagResp] = await Promise.all([
+      sendMsg({ type: 'HYBRID_KEYWORD_DAILY_STATUS', opts: { keyword: keyword, days: 14 } }),
+      sendMsg({ type: 'HYBRID_DIAGNOSE_PARSE', keyword: keyword }),
+    ]);
+    const history = (histResp && histResp.ok) ? histResp.data : [];
+    const diag = (diagResp && diagResp.ok) ? diagResp.data : null;
+    const latest = (history && history.length) ? history[history.length - 1] : null;
+    let html = '';
+
+    if (latest) {
+      html += '<div class="demand-detail-grid">' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + latest.totalItems + '</div><div class="demand-detail-lbl">상품수</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + formatDemandPrice(latest.avgPrice) + '</div><div class="demand-detail-lbl">평균가</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + latest.avgRating + '</div><div class="demand-detail-lbl">평균 평점</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + latest.avgReview + '</div><div class="demand-detail-lbl">평균 리뷰</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + latest.competitionScore + '</div><div class="demand-detail-lbl">경쟁도</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.competitionLevel || '-') + '</div><div class="demand-detail-lbl">경쟁레벨</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.reviewGrowth || 0) + '</div><div class="demand-detail-lbl">리뷰증가</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.dataQualityScore || 0) + '%</div><div class="demand-detail-lbl">데이터품질</div></div>' +
+      '</div>';
+
+      if (history.length >= 2) {
+        html += '<div style="margin-top:8px"><strong style="font-size:11px">📈 최근 트렌드</strong></div>';
+        var recent = history.slice(-7);
+        recent.forEach(function(day) {
+          var rgClass = day.reviewGrowth > 0 ? 'demand-trend-up' : day.reviewGrowth < 0 ? 'demand-trend-down' : 'demand-trend-flat';
+          var pcClass = day.priceChange > 0 ? 'demand-trend-up' : day.priceChange < 0 ? 'demand-trend-down' : 'demand-trend-flat';
+          html += '<div class="demand-trend-row">' +
+            '<span>' + (day.statDate ? day.statDate.slice(5) : '-') + '</span>' +
+            '<span>상품' + day.totalItems + '</span>' +
+            '<span>평균' + formatDemandPrice(day.avgPrice) + '</span>' +
+            '<span class="' + rgClass + '">리뷰' + (day.reviewGrowth > 0 ? '+' : '') + day.reviewGrowth + '</span>' +
+            '<span class="' + pcClass + '">가격' + (day.priceChange > 0 ? '+' : '') + formatDemandPrice(day.priceChange) + '</span>' +
+          '</div>';
+        });
+      }
+    } else {
+      html += '<p style="color:#94a3b8;font-size:11px;text-align:center">아직 일별 데이터가 없습니다. 쿠팡에서 이 키워드로 검색해주세요.</p>';
+    }
+
+    if (diag && diag.hasData && diag.diagnosis) {
+      var dd = diag.diagnosis;
+      html += '<div style="margin-top:10px;padding:8px;background:#f8fafc;border-radius:6px">' +
+        '<strong style="font-size:11px">🔍 파싱 품질 진단</strong>' +
+        '<div class="demand-detail-grid" style="margin-top:6px">' +
+          '<div class="demand-detail-item"><div class="demand-detail-val">' + dd.priceRate + '%</div><div class="demand-detail-lbl">가격 파싱률</div></div>' +
+          '<div class="demand-detail-item"><div class="demand-detail-val">' + dd.ratingRate + '%</div><div class="demand-detail-lbl">평점 파싱률</div></div>' +
+          '<div class="demand-detail-item"><div class="demand-detail-val">' + dd.reviewRate + '%</div><div class="demand-detail-lbl">리뷰 파싱률</div></div>' +
+          '<div class="demand-detail-item"><div class="demand-detail-val">' + dd.overallScore + '%</div><div class="demand-detail-lbl">전체 품질</div></div>' +
+        '</div>' +
+        (dd.issues && dd.issues.length ? '<div style="margin-top:6px;font-size:10px;color:#dc2626">' + dd.issues.map(function(i) { return '⚠️ ' + i; }).join('<br/>') + '</div>' : '<div style="font-size:10px;color:#16a34a;margin-top:4px">✅ 파싱 품질 양호</div>') +
+      '</div>';
+    }
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = '<p style="color:#dc2626;font-size:11px">로드 실패: ' + e.message + '</p>';
+  }
+}
+
+function updateBatchToggleUI(enabled) {
+  var label = document.querySelector('#batchToggleLabel');
+  var badge = document.querySelector('#demandStatusBadge');
+  var controls = document.querySelector('#demandBatchControls');
+  if (enabled) {
+    label.textContent = '배치 ON';
+    label.style.color = '#6366f1';
+    badge.textContent = '활성';
+    badge.className = 'competition-badge level-easy';
+    if (controls) controls.style.display = '';
+  } else {
+    label.textContent = '배치 OFF';
+    label.style.color = '#64748b';
+    badge.textContent = '대기';
+    badge.className = 'competition-badge';
+    if (controls) controls.style.display = 'none';
+  }
+}
+
+// 배치 토글 이벤트
+document.querySelector('#batchToggle').addEventListener('change', async function(e) {
+  var enabled = e.target.checked;
+  await chrome.storage.local.set({ batchEnabled: enabled });
+  updateBatchToggleUI(enabled);
+  if (enabled) {
+    chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
+  } else {
+    chrome.alarms.clear('dailyBatchCollection');
+  }
+});
+
+// 배치 수동 실행 — 분할 배치 지원
+document.querySelector('#runBatchNowBtn').addEventListener('click', async function() {
+  if (batchRunning) return;
+  var mode = document.querySelector('input[name="batchMode"]:checked');
+  mode = mode ? mode.value : 'all';
+  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '10');
+
+  // 선택 모드: 유저가 선택한 키워드만
+  var selectedKwNames = [];
+  if (mode === 'selected' && selectedKeywordIds.size > 0) {
+    var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
+    selectedKwNames = selectedKws.map(function(kw) { return kw.keyword; });
+  }
+
+  // 일괄 모드일 때 전체 키워드 수, 선택 모드일 때 선택된 수
+  var totalTarget = mode === 'selected' ? selectedKwNames.length : demandKeywords.length;
+  if (totalTarget === 0) { alert('처리할 키워드가 없습니다.' + (mode === 'selected' ? ' 키워드를 먼저 선택하세요.' : '')); return; }
+
+  batchRunning = true;
+  var btn = document.querySelector('#runBatchNowBtn');
+  btn.textContent = '⏳ 실행중...';
+  btn.disabled = true;
+  var stopBtn = document.querySelector('#stopBatchBtn');
+  if (stopBtn) stopBtn.style.display = '';
+
+  var progressBar = document.querySelector('#batchProgressBar');
+  var progressFill = document.querySelector('#batchProgressFill');
+  var progressText = document.querySelector('#batchProgressText');
+  progressBar.style.display = '';
+  progressFill.style.width = '0%';
+  progressText.textContent = '0/' + totalTarget;
+
+  // 분할 배치 반복 실행
+  var totalProcessed = 0;
+  var totalUpdated = 0;
+  var totalErrors = 0;
+  var offset = 0;
+  var hasMore = true;
+  var batchRound = 0;
+
+  try {
+    while (hasMore && batchRunning) {
+      batchRound++;
+      var msg = {
+        type: 'HYBRID_RUN_DAILY_BATCH',
+        limit: batchSize,
+        offset: offset,
+      };
+      if (mode === 'selected' && selectedKwNames.length > 0) {
+        msg.keywords = selectedKwNames;
+      }
+
+      var resp = await sendMsg(msg);
+      if (!resp || !resp.ok) {
+        progressText.textContent = '오류: ' + (resp ? resp.error : '응답 없음');
+        break;
+      }
+
+      var data = resp.data || {};
+      totalProcessed += (data.processed || 0);
+      totalUpdated += (data.updated || 0);
+      totalErrors += (data.errors || 0);
+      hasMore = !!data.hasMore;
+      offset += batchSize;
+
+      // 진행률 업데이트
+      var pct = Math.min(100, Math.round((totalProcessed / totalTarget) * 100));
+      progressFill.style.width = pct + '%';
+      progressText.textContent = totalProcessed + '/' + totalTarget + ' (배치 #' + batchRound + ')';
+    }
+
+    progressFill.style.width = '100%';
+    progressText.textContent = '완료! ' + totalProcessed + '개 처리, ' + totalUpdated + '개 업데이트' + (totalErrors > 0 ? ', ' + totalErrors + '개 오류' : '');
+    await chrome.storage.local.set({
+      lastDailyBatchRun: new Date().toISOString(),
+      batchOffset: 0,
+    });
+    setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 500);
+  } catch (e) {
+    progressText.textContent = '오류: ' + e.message;
+  } finally {
+    batchRunning = false;
+    btn.textContent = '▶ 배치 실행';
+    btn.disabled = false;
+    var stopBtn2 = document.querySelector('#stopBatchBtn');
+    if (stopBtn2) stopBtn2.style.display = 'none';
+    setTimeout(function() { progressBar.style.display = 'none'; }, 5000);
+  }
+});
+
+
+// 배치 중지 버튼
+(function() {
+  var stopBtn = document.querySelector('#stopBatchBtn');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', function() {
+      batchRunning = false;
+      stopBtn.style.display = 'none';
+    });
+  }
+})();
+
+// 정렬, 전체선택, 새로고침, 상세닫기
+document.querySelector('#demandSortSelect').addEventListener('change', function() { loadDemandKeywords(); });
+document.querySelector('#demandSelectAll').addEventListener('change', function(e) {
+  selectedKeywordIds.clear();
+  if (e.target.checked) demandKeywords.forEach(function(kw) { selectedKeywordIds.add(kw.id); });
+  renderDemandKeywords(demandKeywords);
+});
+document.querySelector('#demandRefreshBtn').addEventListener('click', function() { loadDemandDashboard(); loadDemandKeywords(); });
+document.querySelector('#demandDetailClose').addEventListener('click', function() { document.querySelector('#demandDetailCard').style.display = 'none'; });

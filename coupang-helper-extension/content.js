@@ -35,7 +35,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '5.6.1';
+  const VER = '6.5.0';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -51,6 +51,68 @@
   ).forEach(el => el.remove());
 
   console.log(`%c[SH] v${VER} 마켓 대시보드 로드`, 'color:#16a34a;font-weight:bold;font-size:14px;');
+
+  // ============================================================
+  //  v6.5: Selector Registry — DOM 변경 시 여기만 수정하면 됨
+  // ============================================================
+  const SELECTORS = {
+    productCard: [
+      'li.search-product',
+      'li[class*="search-product"]',
+      '.search-product',
+      'li[data-sentry-component="SearchProduct"]',
+    ],
+    productLink: [
+      'a.search-product-link',
+      'a[href*="/vp/products/"]',
+      'a[href*="/products/"]',
+    ],
+    productName: [
+      'div.name', '.name',
+      '.search-product-wrap .name',
+      '[class*="name"]', '[class*="title"]',
+    ],
+    priceValue: [
+      '.search-product__price-value',
+      '[class*="price-value"]:not([class*="unit"]):not([class*="per"])',
+      '[class*="priceValue"]:not([class*="unit"])',
+      'strong.price-value', '.price-value',
+    ],
+    basePrice: [
+      '.search-product__base-price',
+      '[class*="base-price"]', '[class*="basePrice"]',
+      'del[class*="price"]', 'del[class*="Price"]',
+      '[class*="original-price"]', '[class*="originalPrice"]',
+    ],
+    ratingScore: [
+      '.search-product__rating-score',
+      '[class*="rating-score"]:not([class*="count"])',
+      '[class*="ratingScore"]', '[class*="RatingScore"]',
+      'em.rating',
+    ],
+    ratingCount: [
+      '.search-product__rating-count',
+      '[class*="rating-count"]', '[class*="ratingCount"]',
+      '[class*="RatingCount"]',
+      'span.rating-total-count', '.rating-total-count',
+    ],
+    starWidth: [
+      '.search-product__rating [style*="width"]',
+      '[class*="rating-star"] [style*="width"]',
+      '[class*="star-rating"] [style*="width"]',
+      '[class*="star"]', '[class*="Star"]',
+    ],
+    adBadge: [
+      '.search-product__ad-badge', '.ad-badge',
+      '.ad-badge-text', '[class*="ad-badge"]',
+      '[class*="AdBadge"]', '[class*="ad_badge"]',
+    ],
+    rocketBadge: [
+      '.badge-rocket', '[class*="badge-rocket"]',
+      '[class*="rocket-icon"]', '[class*="RocketBadge"]',
+      '[class*="rocket_icon"]', '[class*="Rocket"]',
+    ],
+  };
 
   // ============================================================
   //  CSS
@@ -475,11 +537,17 @@
       const link = box.querySelector('a[href*="/vp/products/"]');
       if (!link) continue;
 
-      const m = (link.href || link.getAttribute('href') || '').match(/\/vp\/products\/(\d+)/);
+      const linkHref = link.href || link.getAttribute('href') || '';
+      const m = linkHref.match(/\/vp\/products\/(\d+)/);
       if (!m) continue;
       const pid = m[1];
       if (seen.has(pid)) continue;
       seen.add(pid);
+
+      // vendorItemId 추출 (URL 파라미터에서)
+      let vendorItemId = null;
+      const vidMatch = linkHref.match(/[?&]vendorItemId=(\d+)/i) || linkHref.match(/[?&]itemId=(\d+)/i);
+      if (vidMatch) vendorItemId = vidMatch[1];
 
       // ── 상품명 ──────────────────────────────
       const nameEl = box.querySelector('div.name, [class*="name"], [class*="title"]');
@@ -487,19 +555,57 @@
       if (!title || title.length < 3) continue;
 
       // ══════════════════════════════════════════
-      // ▶ 가격 추출 (v5.5.3 — 엘리먼트 레벨 분석)
+      // ▶ 가격 추출 (v6.3.0 — 강화)
       // ══════════════════════════════════════════
       let price = 0;
       let originalPrice = 0;
 
-      // 전략 1: 클래스 기반 직접 추출
-      const priceValueEl = box.querySelector('strong.price-value, .price-value, [class*="price-value"]');
-      if (priceValueEl) {
-        const pv = nm(tx(priceValueEl));
-        if (pv >= 1000) price = pv;
+      // 전략 0: 쿠팡 2026 search-product 전용 선택자
+      const spPriceEl = box.querySelector(
+        '.search-product__price-value, [class*="price-value"]:not([class*="unit"]):not([class*="per"]), ' +
+        '[class*="priceValue"]:not([class*="unit"]), [class*="PriceValue"]:not([class*="unit"])'
+      );
+      if (spPriceEl) {
+        const pv = nm(tx(spPriceEl));
+        if (pv >= 100) price = pv;
       }
-      const basePriceEl = box.querySelector('del.base-price, .base-price, del[class*="price"]');
-      if (basePriceEl) originalPrice = nm(tx(basePriceEl));
+      // 원래 가격 (정가/취소선)
+      const spOrigEl = box.querySelector(
+        '.search-product__base-price, [class*="base-price"], [class*="basePrice"], ' +
+        'del[class*="price"], del[class*="Price"], [class*="original-price"], [class*="originalPrice"]'
+      );
+      if (spOrigEl) originalPrice = nm(tx(spOrigEl));
+
+      // 전략 1: 클래스 기반 직접 추출
+      if (!price) {
+        const priceValueEl = box.querySelector('strong.price-value, .price-value, [class*="price-value"]');
+        if (priceValueEl) {
+          const pv = nm(tx(priceValueEl));
+          if (pv >= 1000) price = pv;
+        }
+        if (!originalPrice) {
+          const basePriceEl = box.querySelector('del.base-price, .base-price, del[class*="price"]');
+          if (basePriceEl) originalPrice = nm(tx(basePriceEl));
+        }
+      }
+
+      // 전략 1b: sale/discount 관련 클래스
+      if (!price) {
+        for (const sel of [
+          '[class*="sale-price"]:not([class*="original"])',
+          '[class*="salePrice"]:not([class*="original"])',
+          '[class*="discount-price"]',
+          '[class*="discountPrice"]',
+          '.price strong',
+          '.price em',
+        ]) {
+          const el = box.querySelector(sel);
+          if (el && !el.closest('#sh-panel')) {
+            const v = nm(tx(el));
+            if (v >= 100 && v < 1e8) { price = v; break; }
+          }
+        }
+      }
 
       // 전략 2: 개별 엘리먼트 순회하여 가격 역할 분석
       if (!price) {
@@ -597,23 +703,57 @@
       }
 
       // ══════════════════════════════════════════
-      // ▶ 평점 추출 (v5.6.0 — 12단계 전략 강화)
-      // 쿠팡 2026 DOM: rating 관련 클래스가 React hydration으로 랜덤화됨
-      // → 텍스트 패턴, style width, data 속성, aria 등 다각도로 탐색
+      // ▶ 평점 추출 (v6.3.0 — 16단계 전략 강화)
+      // 쿠팡 2026 DOM: React hydration으로 클래스 랜덤화
+      // → 복수의 선택자, 텍스트 패턴, style, data 속성, aria 등 다각도 탐색
+      // 추정값(4.0/4.5)은 최후의 최후 수단으로만 사용
       // ══════════════════════════════════════════
       let rating = 0;
+      let ratingIsEstimated = false; // 추정값 여부 플래그
+
+      // 전략 0: 쿠팡 2026 search-product 전용 선택자 (가장 정확)
+      // <div class="search-product__rating"> <em class="search-product__rating-score">4.5</em>
+      // <span class="search-product__rating-count">(1,234)</span> </div>
+      const ratingScoreEl = box.querySelector(
+        '.search-product__rating-score, [class*="rating-score"]:not([class*="count"]), ' +
+        '[class*="ratingScore"], [class*="RatingScore"]'
+      );
+      if (ratingScoreEl) {
+        const rm = tx(ratingScoreEl).match(/(\d+\.?\d*)/);
+        if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
+      }
 
       // 전략 1: em.rating 텍스트 (클래식)
-      const ratEl = box.querySelector('em.rating');
-      if (ratEl) {
-        const rm = tx(ratEl).match(/(\d+\.?\d*)/);
-        if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
+      if (!rating) {
+        const ratEl = box.querySelector('em.rating');
+        if (ratEl) {
+          const rm = tx(ratEl).match(/(\d+\.?\d*)/);
+          if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) rating = v; }
+        }
+      }
+
+      // 전략 1b: 쿠팡 다이나믹 클래스 패턴 — rating 컨테이너 내 첫 번째 숫자 자식
+      if (!rating) {
+        const ratingContainer = box.querySelector(
+          '[class*="rating"]:not([class*="count"]):not([class*="total"]):not([class*="bar"])'
+        );
+        if (ratingContainer) {
+          // 직접 자식에서 숫자만 가진 요소 탐색
+          for (const child of ratingContainer.querySelectorAll('em, span, strong, div')) {
+            if (child.children.length > 0) continue; // leaf 노드만
+            const t = tx(child).trim();
+            const rm = t.match(/^(\d+\.?\d*)$/);
+            if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) { rating = v; break; } }
+          }
+        }
       }
 
       // 전략 2: rating 관련 클래스의 숫자 텍스트
       if (!rating) {
         for (const el of box.querySelectorAll('[class*="rating"]:not([class*="count"]):not([class*="total"])')) {
+          if (el.closest('#sh-panel')) continue;
           const t = tx(el).trim();
+          // "4.5" 또는 "4" 형태
           const rm = t.match(/^(\d+\.?\d*)$/);
           if (rm) { const v = parseFloat(rm[1]); if (v > 0 && v <= 5) { rating = v; break; } }
           // "4.5점" 형태
@@ -622,19 +762,25 @@
         }
       }
 
-      // 전략 3: aria-label, title, data-rating 속성에서 추출
+      // 전략 3: aria-label, title, data-rating, data-score 속성에서 추출
       if (!rating) {
-        for (const el of box.querySelectorAll('[aria-label], [title], [data-rating]')) {
-          // data-rating 속성 (가장 직접적)
-          const dr = el.getAttribute('data-rating');
-          if (dr) { const v = parseFloat(dr); if (v > 0 && v <= 5) { rating = v; break; } }
+        for (const el of box.querySelectorAll('[aria-label], [title], [data-rating], [data-score], [data-star]')) {
+          if (el.closest('#sh-panel')) continue;
+          // data-rating / data-score / data-star 속성 (가장 직접적)
+          for (const attr of ['data-rating', 'data-score', 'data-star']) {
+            const dr = el.getAttribute(attr);
+            if (dr) { const v = parseFloat(dr); if (v > 0 && v <= 5) { rating = v; break; } }
+          }
+          if (rating) break;
 
           const label = (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '');
+          if (!label.trim()) continue;
           let rm = label.match(/만점에\s*(\d+\.?\d*)/);
           if (!rm) rm = label.match(/(\d+\.?\d*)\s*점/);
           if (!rm) rm = label.match(/(\d+\.?\d*)\s*out\s*of\s*5/i);
           if (!rm) rm = label.match(/별점\s*(\d+\.?\d*)/);
           if (!rm) rm = label.match(/(\d+\.?\d*)\s*\/\s*5/);
+          if (!rm) rm = label.match(/rating[:\s]+(\d+\.?\d*)/i);
           if (rm) {
             const v = parseFloat(rm[1]);
             if (v > 0 && v <= 5) { rating = v; break; }
@@ -645,8 +791,11 @@
       // 전략 4: style="width: XX%" 기반 별점 (쿠팡 2026 표준 방식)
       // 쿠팡은 <div class="...star..."><div style="width:90%"> 형태로 별점을 표시
       if (!rating) {
-        // 별점 컨테이너를 폭넓게 탐색
+        // 별점 컨테이너를 폭넓게 탐색 (순서: 정확한 것 먼저)
         const starSelectors = [
+          '.search-product__rating [style*="width"]',
+          '[class*="rating-star"] [style*="width"]',
+          '[class*="star-rating"] [style*="width"]',
           '[class*="star"]', '[class*="Star"]', '[class*="rating-star"]',
           '[class*="star-rating"]', '[class*="StarRating"]',
           '[class*="rating"] [style*="width"]',
@@ -674,13 +823,30 @@
         }
       }
 
-      // 전략 5: filled star 개수 (img/svg)
+      // 전략 5: filled star 개수 (img/svg) — 클래스 명 확장
       if (!rating) {
-        const starContainer = box.querySelector('[class*="star"], [class*="rating-star"], [class*="Star"]');
+        const starContainer = box.querySelector(
+          '[class*="star"], [class*="rating-star"], [class*="Star"], [class*="StarRating"]'
+        );
         if (starContainer) {
-          const filledStars = starContainer.querySelectorAll('[class*="fill"], [class*="active"], [class*="on"], [class*="full"]');
+          const filledStars = starContainer.querySelectorAll(
+            '[class*="fill"], [class*="active"], [class*="on"], [class*="full"], [class*="checked"]'
+          );
           if (filledStars.length > 0 && filledStars.length <= 5) {
             rating = filledStars.length;
+          }
+          // 반개짜리 별 처리 (half-star)
+          if (!rating) {
+            const allStars = starContainer.querySelectorAll('[class*="star"]');
+            if (allStars.length === 5) {
+              let count = 0;
+              for (const s of allStars) {
+                const cls = s.className || '';
+                if (/full|fill|active|on|checked/i.test(cls)) count += 1;
+                else if (/half/i.test(cls)) count += 0.5;
+              }
+              if (count > 0) rating = count;
+            }
           }
         }
       }
@@ -728,25 +894,75 @@
         }
       }
 
+      // 전략 7b: 가격이 아닌 범위의 소수점 숫자를 평점 후보로 더 넓게 탐색
+      if (!rating) {
+        for (const el of box.querySelectorAll('span, em, strong')) {
+          if (el.closest('#sh-panel')) continue;
+          if (el.children.length > 0) continue; // leaf 노드만
+          const t = tx(el).trim();
+          if (t.length > 4) continue;
+          const rm = t.match(/^(\d\.\d)$/);
+          if (rm) {
+            const v = parseFloat(rm[1]);
+            if (v >= 1.0 && v <= 5.0 && v !== price && v !== originalPrice) {
+              // 가격이나 할인율이 아닌지 확인
+              const sibText = tx(el.parentElement || el);
+              if (!/원|₩|%|적립|배송|할인/.test(sibText)) {
+                rating = v; break;
+              }
+            }
+          }
+        }
+      }
+
       // (리뷰수 추출 후 재시도용 — 전략 8~12는 아래에서 실행)
 
       // ══════════════════════════════════════════
-      // ▶ 리뷰수 추출 (v5.5.3)
+      // ▶ 리뷰수 추출 (v6.3.0 — 강화)
       // ══════════════════════════════════════════
       let reviewCount = 0;
+      let reviewParsed = false; // 리뷰수를 실제로 파싱했는지 여부
 
-      // 전략 1: span.rating-total-count 직접 조회
-      const revEl = box.querySelector('span.rating-total-count, .rating-total-count');
-      if (revEl) {
-        reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
+      // 전략 0: 쿠팡 2026 search-product 전용 선택자
+      const revScoreEl = box.querySelector(
+        '.search-product__rating-count, [class*="rating-count"], [class*="ratingCount"], [class*="RatingCount"]'
+      );
+      if (revScoreEl) {
+        const v = nm(tx(revScoreEl).replace(/[()]/g, ''));
+        if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; }
       }
 
-      // 전략 2: count/review 관련 클래스
+      // 전략 1: span.rating-total-count 직접 조회
       if (!reviewCount) {
-        for (const el of box.querySelectorAll('[class*="count"], [class*="review-count"]')) {
-          if (/rating-total-count/.test(el.className)) continue; // 이미 시도함
+        const revEl = box.querySelector('span.rating-total-count, .rating-total-count');
+        if (revEl) {
+          reviewCount = nm(tx(revEl).replace(/[()]/g, ''));
+          if (reviewCount > 0) reviewParsed = true;
+        }
+      }
+
+      // 전략 2: count/review 관련 클래스 (더 넓은 범위)
+      if (!reviewCount) {
+        for (const el of box.querySelectorAll(
+          '[class*="count"], [class*="review-count"], [class*="reviewCount"], [class*="ReviewCount"]'
+        )) {
+          if (/rating-total-count|rating-count/.test(el.className)) continue; // 이미 시도함
+          if (el.closest('#sh-panel')) continue;
           const v = nm(tx(el).replace(/[()]/g, ''));
-          if (v > 0 && v < 1e7) { reviewCount = v; break; }
+          if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; break; }
+        }
+      }
+
+      // 전략 2b: rating 컨테이너 안의 괄호 숫자
+      if (!reviewCount) {
+        const ratingArea = box.querySelector('[class*="rating"], [class*="review"]');
+        if (ratingArea) {
+          const t = tx(ratingArea);
+          const pm = t.match(/\(\s*([\d,]+)\s*\)/);
+          if (pm) {
+            const v = nm(pm[1]);
+            if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; }
+          }
         }
       }
 
@@ -757,12 +973,26 @@
         for (const pm of allParens) {
           const inner = pm[1].trim();
           // 단위가격 괄호 제외
-          const beforeParen = fullText.substring(0, fullText.indexOf(pm[0]));
+          const pmIdx = fullText.indexOf(pm[0]);
+          const beforeParen = fullText.substring(Math.max(0, pmIdx - 30), pmIdx);
           if (/\d+\s*(g|kg|ml|l|개|매|입)\s*당\s*$/i.test(beforeParen)) continue;
           if (/당$/.test(beforeParen.trim())) continue;
+          // 가격 관련 괄호 제외 (원, ₩ 근처)
+          const afterParen = fullText.substring(pmIdx + pm[0].length, pmIdx + pm[0].length + 10);
+          if (/원|₩/.test(afterParen) || /원|₩/.test(beforeParen.slice(-3))) continue;
 
           const v = nm(inner);
-          if (v > 0 && v < 1e7) { reviewCount = v; break; }
+          if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; break; }
+        }
+      }
+
+      // 전략 3b: "리뷰 N건" 패턴
+      if (!reviewCount) {
+        const fullText = tx(box);
+        const revMatch = fullText.match(/리뷰\s*([\d,]+)\s*건/);
+        if (revMatch) {
+          const v = nm(revMatch[1]);
+          if (v > 0 && v < 1e7) { reviewCount = v; reviewParsed = true; }
         }
       }
 
@@ -781,7 +1011,7 @@
           }
         }
 
-        // 전략 9: 전체 카드에서 N.N 패턴 중 1~5 범위 찾기 (마지막 수단)
+        // 전략 9: 전체 카드에서 N.N 패턴 중 1~5 범위 찾기
         if (!rating) {
           const fullText = tx(box);
           const nums = [...fullText.matchAll(/(\d\.\d)/g)].map(m => parseFloat(m[1]));
@@ -792,11 +1022,31 @@
           }
         }
 
-        // 전략 10: 별 이미지/SVG가 있으면 리뷰가 100개 이상이면 4.5, 아니면 4.0 추정
+        // 전략 9b: SVG 기반 별점 (채워진 비율)
+        if (!rating) {
+          const svgStars = box.querySelectorAll('svg[class*="star"], svg[class*="Star"]');
+          if (svgStars.length === 5) {
+            let filledCount = 0;
+            for (const svg of svgStars) {
+              const fill = svg.getAttribute('fill') || svg.querySelector('[fill]')?.getAttribute('fill') || '';
+              const cls = svg.className?.baseVal || svg.className || '';
+              if (/gold|yellow|#f.{4,5}|#ff|filled|active|full/i.test(fill + ' ' + cls)) filledCount++;
+              else if (/half/i.test(fill + ' ' + cls)) filledCount += 0.5;
+            }
+            if (filledCount > 0 && filledCount <= 5) rating = filledCount;
+          }
+        }
+
+        // 전략 10: 최후 수단 — 별 이미지/SVG가 있으면 추정 (리뷰 수에 비례)
         if (!rating) {
           const hasStars = box.querySelector('[class*="star"], [class*="rating"], img[alt*="별"], img[alt*="star"], svg[class*="star"]');
           if (hasStars) {
-            rating = reviewCount >= 100 ? 4.5 : 4.0;
+            ratingIsEstimated = true;
+            // 좀 더 세밀한 추정: 리뷰 수에 따라 차등
+            if (reviewCount >= 500) rating = 4.6;
+            else if (reviewCount >= 100) rating = 4.5;
+            else if (reviewCount >= 30) rating = 4.3;
+            else rating = 4.0;
           }
         }
       }
@@ -906,8 +1156,21 @@
 
       const href = (link.href || '').startsWith('http') ? link.href : 'https://www.coupang.com' + (link.getAttribute('href') || '');
 
+      // ══════════════════════════════════════════
+      // ▶ 신뢰도 점수 (confidence) — 파싱 품질 개별 아이템 레벨
+      // ══════════════════════════════════════════
+      let confidence = 0;
+      if (pid) confidence += 30;
+      if (title) confidence += 20;
+      if (href) confidence += 10;
+      if (price > 0) confidence += 15;
+      if (rating > 0 && !ratingIsEstimated) confidence += 10;
+      if (reviewParsed && reviewCount > 0) confidence += 10;
+      if (imageUrl) confidence += 5;
+
       items.push({
-        productId: pid, title, price, originalPrice, rating, reviewCount,
+        productId: pid, vendorItemId, title, price, originalPrice, rating, reviewCount,
+        ratingIsEstimated, reviewParsed, confidence,
         url: href, imageUrl,
         position: items.length + 1, query: q,
         isAd, isRocket, rankNum,
@@ -926,7 +1189,9 @@
       console.log(`%c[SH] v${VER} 파싱 완료: ${items.length}개 | 가격${pCnt} 평점${rCnt} 리뷰${rvCnt} 광고${adCnt} 로켓${rkCnt} 순위${rankCnt}`, 'color:#6366f1;font-weight:bold;');
       // 처음 5개 상품 상세 로그
       items.slice(0, 5).forEach((it, i) => {
-        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | 가격:${it.price.toLocaleString()}원 | ★${it.rating} | 리뷰:${it.reviewCount.toLocaleString()} | ${it.isAd?'AD':'일반'} | ${it.isRocket?'🚀':'-'} | rank=${it.rankNum}`);
+        const rFlag = it.ratingIsEstimated ? '(추정)' : '';
+        const rvFlag = it.reviewParsed ? '' : '(미파싱)';
+        console.log(`  [${i+1}] ${it.title.substring(0,30)}.. | 가격:${it.price.toLocaleString()}원 | ★${it.rating}${rFlag} | 리뷰:${it.reviewCount.toLocaleString()}${rvFlag} | ${it.isAd?'AD':'일반'} | ${it.isRocket?'🚀':'-'} | rank=${it.rankNum} | conf=${it.confidence}`);
       });
     }
     return items;
@@ -1268,6 +1533,30 @@
   let lastSig = '';
   let timer = null;
 
+  // ============================================================
+  //  파싱 품질 메트릭 계산 (v6.3 — 하이브리드 수집 시스템)
+  // ============================================================
+  function calcParseQuality(items) {
+    const total = items.length;
+    if (!total) return { priceRate: 0, ratingRate: 0, reviewRate: 0, overall: 0, estimatedRatingCount: 0 };
+    const priceOk = items.filter(i => i.price > 0).length;
+    // 평점: 추정값이 아닌 실제 파싱된 것만 카운트
+    const ratingOk = items.filter(i => i.rating > 0 && i.rating <= 5 && !i.ratingIsEstimated).length;
+    const ratingTotal = items.filter(i => i.rating > 0 && i.rating <= 5).length;
+    const estimatedRatingCount = items.filter(i => i.ratingIsEstimated).length;
+    // 리뷰: 실제로 DOM에서 파싱된 것만 카운트 (reviewCount === 0이지만 reviewParsed가 아닌 것은 미파싱)
+    const reviewOk = items.filter(i => i.reviewParsed || i.reviewCount > 0).length;
+    const priceRate = Math.round(priceOk / total * 100);
+    const ratingRate = Math.round(ratingOk / total * 100);
+    const reviewRate = Math.round(reviewOk / total * 100);
+    return {
+      priceRate, ratingRate, reviewRate,
+      overall: Math.round((priceRate + ratingRate + reviewRate) / 3),
+      estimatedRatingCount,
+      ratingTotalWithEstimate: ratingTotal,
+    };
+  }
+
   function doScan(force = false) {
     if (!location.href.includes('/np/search')) {
       if (panel) panel.style.display = 'none';
@@ -1286,7 +1575,12 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
-      console.log(`%c[SH] ✅ ${items.length}개 파싱 완료`, 'color:#16a34a;font-weight:bold;');
+      // 파싱 품질 로그
+      const pq = calcParseQuality(items);
+      console.log(`%c[SH] ✅ ${items.length}개 파싱 완료 | 품질: 가격${pq.priceRate}% 평점${pq.ratingRate}%(추정${pq.estimatedRatingCount}개) 리뷰${pq.reviewRate}% (전체 ${pq.overall}%)`, 'color:#16a34a;font-weight:bold;');
+      if (pq.ratingRate < 60) {
+        console.warn(`%c[SH] ⚠️ 평점 파싱률 저조 (${pq.ratingRate}%, 추정포함 ${pq.ratingTotalWithEstimate}개) — 쿠팡 DOM 변경 감지`, 'color:#dc2626;font-weight:bold;');
+      }
     }
 
     if (!panel) createPanel();
@@ -1295,7 +1589,35 @@
     if (isNew) {
       renderPanel(items);
       const clean = items.map(({ _box, ...c }) => c);
-      chrome.runtime.sendMessage({ type: 'SEARCH_RESULTS_PARSED', query: getQ(), items: clean }).catch(() => {});
+      const q = getQ();
+
+      // 기존 SEARCH_RESULTS_PARSED 유지 (하위호환)
+      chrome.runtime.sendMessage({ type: 'SEARCH_RESULTS_PARSED', query: q, items: clean }).catch(() => {});
+
+      // ★ 새 하이브리드 수집: SAVE_SEARCH_EVENT ★
+      // 개별 상품 데이터 + 파싱 품질 메트릭을 포함하여 서버에 전송
+      const prices = clean.map(i => i.price).filter(p => p > 0);
+      const ratings = clean.map(i => i.rating).filter(r => r > 0);
+      const reviews = clean.map(i => i.reviewCount).filter(r => r > 0);
+      const pq = calcParseQuality(clean);
+
+      chrome.runtime.sendMessage({
+        type: 'SAVE_SEARCH_EVENT',
+        keyword: q,
+        pageUrl: location.href,
+        totalItems: clean.length,
+        items: clean,
+        avgPrice: prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0,
+        avgRating: ratings.length ? +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : 0,
+        avgReview: reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0,
+        totalReviewSum: reviews.reduce((a, b) => a + b, 0),
+        adCount: clean.filter(i => i.isAd).length,
+        rocketCount: clean.filter(i => i.isRocket).length,
+        highReviewCount: clean.filter(i => i.reviewCount >= 100).length,
+        priceParseRate: pq.priceRate,
+        ratingParseRate: pq.ratingRate,
+        reviewParseRate: pq.reviewRate,
+      }).catch(() => {});
     }
   }
 
@@ -1327,4 +1649,142 @@
   setTimeout(doScan, 2500);
 
   chrome.runtime.sendMessage({ type: 'PAGE_DETECTED', pageType: 'search', url: location.href }).catch(() => {});
+
+  // ============================================================
+  //  v6.4: 자동 순회 수집기 — requestId 기반 파싱 핸들러
+  //  background.js가 탭을 이동시킨 후 START_PARSE_SEARCH를 보냄
+  //  → content.js가 DOM 파싱 후 SEARCH_PARSE_SUCCESS/FAILED 응답
+  // ============================================================
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type !== 'START_PARSE_SEARCH') return false;
+
+    const requestId = message.requestId;
+    const keyword = message.keyword || getQ();
+    const isAutoCollect = !!message.isAutoCollect;
+
+    console.log(`%c[SH-AC] 파싱 요청 수신: "${keyword}" (requestId=${requestId})`, 'color:#8b5cf6;font-weight:bold;');
+
+    // DOM이 준비될 때까지 대기하고 파싱 실행
+    (async function autoCollectParse() {
+      try {
+        // 상품 리스트 엘리먼트가 나타날 때까지 대기 (최대 15초)
+        const maxWait = 15000;
+        const start = Date.now();
+        let listFound = false;
+
+        while (Date.now() - start < maxWait) {
+          const list = document.querySelector('li[class*="search-product"], .search-product');
+          if (list) { listFound = true; break; }
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        if (!listFound) {
+          // 차단/비정상 페이지 감지
+          const bodyText = document.body?.textContent || '';
+          const isBlocked = /봇|robot|captcha|차단|접근.*불가/i.test(bodyText);
+          chrome.runtime.sendMessage({
+            type: 'SEARCH_PARSE_FAILED',
+            requestId,
+            keyword,
+            pageUrl: location.href,
+            error: {
+              code: isBlocked ? 'ACCESS_BLOCKED' : 'NO_PRODUCT_LIST',
+              message: isBlocked ? '쿠팡 접근이 차단되었습니다.' : '상품 리스트를 찾지 못했습니다.',
+            },
+          });
+          sendResponse({ ok: false });
+          return;
+        }
+
+        // lazy render 안정화 대기
+        await new Promise(r => setTimeout(r, 2000));
+
+        // DOM 파싱 실행 (기존 parseProducts 재사용)
+        const items = parseProducts();
+
+        if (!items.length) {
+          chrome.runtime.sendMessage({
+            type: 'SEARCH_PARSE_FAILED',
+            requestId,
+            keyword,
+            pageUrl: location.href,
+            error: {
+              code: 'EMPTY_RESULT',
+              message: '파싱된 상품이 없습니다.',
+            },
+          });
+          sendResponse({ ok: false });
+          return;
+        }
+
+        // 파싱 품질 계산
+        const clean = items.map(({ _box, ...c }) => c);
+        const pq = calcParseQuality(clean);
+        const prices = clean.map(i => i.price).filter(p => p > 0);
+        const ratings = clean.map(i => i.rating).filter(r => r > 0);
+        const reviews = clean.map(i => i.reviewCount).filter(r => r > 0);
+
+        console.log(`%c[SH-AC] ✅ "${keyword}" 파싱 완료: ${clean.length}개 | 품질: 가격${pq.priceRate}% 평점${pq.ratingRate}% 리뷰${pq.reviewRate}%`, 'color:#16a34a;font-weight:bold;');
+
+        // background에 성공 메시지 전송
+        chrome.runtime.sendMessage({
+          type: 'SEARCH_PARSE_SUCCESS',
+          requestId,
+          keyword,
+          pageUrl: location.href,
+          itemCount: clean.length,
+          isAutoCollect: true,
+          result: {
+            keyword,
+            page: 1,
+            productCount: clean.length,
+            collectedAt: new Date().toISOString(),
+            items: clean,
+          },
+          // 기존 하이브리드 수집 통합용 — 검색 이벤트 데이터
+          searchEventData: {
+            keyword,
+            pageUrl: location.href,
+            totalItems: clean.length,
+            items: clean.slice(0, 36),
+            avgPrice: prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0,
+            avgRating: ratings.length ? +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : 0,
+            avgReview: reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0,
+            totalReviewSum: reviews.reduce((a, b) => a + b, 0),
+            adCount: clean.filter(i => i.isAd).length,
+            rocketCount: clean.filter(i => i.isRocket).length,
+            highReviewCount: clean.filter(i => i.reviewCount >= 100).length,
+            priceParseRate: pq.priceRate,
+            ratingParseRate: pq.ratingRate,
+            reviewParseRate: pq.reviewRate,
+          },
+        });
+
+        // UI 패널도 업데이트
+        if (isAutoCollect) {
+          allItems = items;
+          if (!panel) createPanel();
+          panel.style.display = '';
+          renderPanel(items);
+        }
+
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.error('[SH-AC] 파싱 중 오류:', err);
+        chrome.runtime.sendMessage({
+          type: 'SEARCH_PARSE_FAILED',
+          requestId,
+          keyword,
+          pageUrl: location.href,
+          error: {
+            code: 'UNKNOWN',
+            message: err?.message || 'Unknown error',
+          },
+        });
+        sendResponse({ ok: false });
+      }
+    })();
+
+    return true; // async response
+  });
 })();

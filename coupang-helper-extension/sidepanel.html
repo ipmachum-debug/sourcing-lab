@@ -13,7 +13,7 @@
         <h1>🐢 소싱 헬퍼</h1>
         <div class="header-right">
           <span class="sync-status" id="syncStatus" title="서버 연결 상태">●</span>
-          <span class="version">v5.6.0</span>
+          <span class="version">v6.3.0</span>
         </div>
       </div>
       <p id="summary">쿠팡 검색 결과 페이지를 열면 자동 분석됩니다.</p>
@@ -25,6 +25,7 @@
       <button class="tab" data-tab="datasheet">📋 시트</button>
       <button class="tab" data-tab="candidates">⭐ 후보</button>
       <button class="tab" data-tab="ranking">📈 순위</button>
+      <button class="tab" data-tab="demand">🔥 수요</button>
       <button class="tab" data-tab="wing">🦅 WING</button>
       <button class="tab" data-tab="detail">🔍 상세</button>
       <button class="tab" data-tab="history">📋 이력</button>
@@ -166,6 +167,94 @@
           <span class="badge" id="rankDetailCount">0</span>
         </div>
         <div id="rankDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- ========== 검색수요 탭 (v6.3) ========== -->
+    <div class="tab-content" id="tab-demand">
+      <div class="section-header">
+        <h2>🔥 검색수요 분석</h2>
+        <div style="display:flex;gap:4px;align-items:center">
+          <div class="demand-toggle-wrap">
+            <label class="demand-toggle" title="배치 수집 ON/OFF">
+              <input type="checkbox" id="batchToggle" />
+              <span class="demand-slider"></span>
+            </label>
+            <span class="demand-toggle-label" id="batchToggleLabel">배치 OFF</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 배치 상태 카드 -->
+      <div class="analysis-card" id="demandStatusCard">
+        <div class="competition-header">
+          <span class="competition-label">배치 수집 상태</span>
+          <span class="competition-badge level-easy" id="demandStatusBadge">대기</span>
+        </div>
+        <p class="desc" id="demandStatusDesc">쿠팡 검색 시 자동으로 키워드가 등록됩니다.<br/><small style="color:#6366f1">💡 자동 배치는 <strong>배치 ON</strong> + <strong>쿠팡 탭 열림</strong> 상태에서만 실행됩니다.</small></p>
+        <div class="demand-last-run" id="demandLastRun" style="display:none">
+          <small>마지막 배치: <span id="demandLastRunTime">-</span></small>
+        </div>
+      </div>
+
+      <!-- 대시보드 통계 -->
+      <div class="stats-grid" id="demandStatsGrid" style="display:none">
+        <div class="stat-box"><div class="stat-value" id="demandStatKeywords">-</div><div class="stat-label">감시 키워드</div></div>
+        <div class="stat-box"><div class="stat-value" id="demandStatEvents">-</div><div class="stat-label">검색이벤트(7d)</div></div>
+        <div class="stat-box"><div class="stat-value" id="demandStatQuality">-</div><div class="stat-label">파싱 품질</div></div>
+        <div class="stat-box"><div class="stat-value" id="demandStatGrowth">-</div><div class="stat-label">성장 키워드</div></div>
+      </div>
+
+      <!-- 배치 모드 선택 -->
+      <div class="analysis-card demand-batch-controls" id="demandBatchControls" style="display:none">
+        <div class="demand-mode-row">
+          <label class="demand-radio"><input type="radio" name="batchMode" value="all" checked /> 일괄 (전체 키워드)</label>
+          <label class="demand-radio"><input type="radio" name="batchMode" value="selected" /> 선택 (유저 선택)</label>
+        </div>
+        <div class="demand-batch-size-row">
+          <label>배치 크기:</label>
+          <select id="batchSizeSelect">
+            <option value="5">5개씩</option>
+            <option value="10" selected>10개씩</option>
+            <option value="20">20개씩</option>
+            <option value="50">50개씩</option>
+          </select>
+          <button class="btn-sm btn-primary-sm" id="runBatchNowBtn">▶ 배치 실행</button>
+          <button class="btn-sm" id="stopBatchBtn" style="display:none;background:#dc2626;color:#fff">⏹ 중지</button>
+        </div>
+        <div class="demand-batch-progress" id="batchProgressBar" style="display:none">
+          <div class="demand-progress-fill" id="batchProgressFill" style="width:0%"></div>
+          <span class="demand-progress-text" id="batchProgressText">0/0</span>
+        </div>
+      </div>
+
+      <!-- 키워드 목록 -->
+      <div class="demand-kw-header" id="demandKwHeader" style="display:none">
+        <div class="demand-kw-sort">
+          <label>정렬:</label>
+          <select id="demandSortSelect">
+            <option value="compositeScore">종합점수</option>
+            <option value="lastSearched">최근검색</option>
+            <option value="reviewGrowth">리뷰증가</option>
+            <option value="priority">우선순위</option>
+          </select>
+        </div>
+        <div class="demand-kw-actions">
+          <label class="filter-check"><input type="checkbox" id="demandSelectAll" /> 전체선택</label>
+          <button class="btn-sm" id="demandRefreshBtn" title="목록 새로고침">🔄</button>
+        </div>
+      </div>
+
+      <div id="demandKeywordList" class="demand-kw-list"></div>
+      <p class="empty-msg" id="demandEmpty">아직 감시 키워드가 없습니다.<br/>쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.</p>
+
+      <!-- 선택 키워드 상세 -->
+      <div id="demandDetailCard" class="analysis-card" style="display:none">
+        <div class="section-header">
+          <h2 id="demandDetailTitle">-</h2>
+          <button class="btn-sm" id="demandDetailClose">✕</button>
+        </div>
+        <div id="demandDetailContent"></div>
       </div>
     </div>
 

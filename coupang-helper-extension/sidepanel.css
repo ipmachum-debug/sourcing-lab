@@ -2124,3 +2124,109 @@ header h1 {
 .ai-search-btn:hover { background: #f3f4f6; }
 .ai-search-btn.btn-1688 { border-color: #f97316; color: #ea580c; }
 .ai-search-btn.btn-ali { border-color: #ef4444; color: #dc2626; }
+
+/* ============================================================
+   검색수요 탭 (v6.3)
+   ============================================================ */
+
+/* 배치 토글 스위치 */
+.demand-toggle-wrap { display: flex; align-items: center; gap: 6px; }
+.demand-toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+.demand-toggle input { opacity: 0; width: 0; height: 0; }
+.demand-slider {
+  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+  background: #cbd5e1; border-radius: 22px; transition: .2s;
+}
+.demand-slider::before {
+  content: ''; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: .2s;
+}
+.demand-toggle input:checked + .demand-slider { background: #6366f1; }
+.demand-toggle input:checked + .demand-slider::before { transform: translateX(18px); }
+.demand-toggle-label { font-size: 11px; color: #64748b; font-weight: 600; }
+
+/* 마지막 실행 시간 */
+.demand-last-run { margin-top: 6px; color: #94a3b8; font-size: 10px; }
+
+/* 배치 모드 컨트롤 */
+.demand-batch-controls { padding: 10px 14px !important; }
+.demand-mode-row { display: flex; gap: 12px; margin-bottom: 8px; }
+.demand-radio { font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #475569; }
+.demand-radio input { margin: 0; }
+.demand-batch-size-row { display: flex; align-items: center; gap: 8px; }
+.demand-batch-size-row label { font-size: 11px; color: #64748b; }
+.demand-batch-size-row select { font-size: 11px; padding: 3px 6px; border-radius: 4px; border: 1px solid #d1d5db; }
+.demand-batch-progress {
+  margin-top: 8px; height: 20px; background: #e2e8f0; border-radius: 10px;
+  position: relative; overflow: hidden;
+}
+.demand-progress-fill {
+  height: 100%; background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 10px; transition: width .3s;
+}
+.demand-progress-text {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  font-size: 10px; font-weight: 700; color: #1e293b; line-height: 20px;
+}
+
+/* 키워드 목록 헤더 */
+.demand-kw-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid #e2e8f0;
+}
+.demand-kw-sort { display: flex; align-items: center; gap: 4px; }
+.demand-kw-sort label { font-size: 10px; color: #64748b; }
+.demand-kw-sort select { font-size: 10px; padding: 2px 4px; border-radius: 4px; border: 1px solid #d1d5db; }
+.demand-kw-actions { display: flex; align-items: center; gap: 6px; }
+
+/* 키워드 아이템 */
+.demand-kw-list { max-height: 400px; overflow-y: auto; }
+.demand-kw-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+  border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background .15s;
+}
+.demand-kw-item:hover { background: #f8fafc; }
+.demand-kw-item.selected { background: #ede9fe; }
+
+.demand-kw-check { flex-shrink: 0; }
+.demand-kw-check input { margin: 0; }
+
+.demand-kw-info { flex: 1; min-width: 0; }
+.demand-kw-name { font-size: 12px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demand-kw-meta { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+.demand-kw-tag {
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  background: #f1f5f9; color: #64748b; white-space: nowrap;
+}
+.demand-kw-tag.growth { background: #dcfce7; color: #16a34a; }
+.demand-kw-tag.hot { background: #fef3c7; color: #d97706; }
+.demand-kw-tag.score { background: #ede9fe; color: #7c3aed; }
+.demand-kw-tag.warn { background: #fee2e2; color: #dc2626; }
+
+.demand-kw-score {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; color: #fff;
+}
+.demand-kw-score.s-high { background: #6366f1; }
+.demand-kw-score.s-mid { background: #8b5cf6; }
+.demand-kw-score.s-low { background: #94a3b8; }
+
+.demand-kw-actions-mini { display: flex; gap: 4px; flex-shrink: 0; }
+.demand-kw-actions-mini button { font-size: 10px; padding: 2px 6px; }
+
+/* 키워드 상세 카드 */
+#demandDetailCard { margin-top: 8px; }
+.demand-detail-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0;
+}
+.demand-detail-item { text-align: center; padding: 6px; background: #f8fafc; border-radius: 6px; }
+.demand-detail-val { font-size: 14px; font-weight: 700; color: #1e293b; }
+.demand-detail-lbl { font-size: 9px; color: #94a3b8; }
+.demand-trend-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 0;
+  font-size: 11px; color: #475569;
+}
+.demand-trend-up { color: #16a34a; font-weight: 700; }
+.demand-trend-down { color: #dc2626; font-weight: 700; }
+.demand-trend-flat { color: #94a3b8; }

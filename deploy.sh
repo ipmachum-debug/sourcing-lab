@@ -33,6 +33,14 @@ if [ -f drizzle/0009_product_tracking.sql ]; then
   echo "  Applying 0009_product_tracking.sql..."
   mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0009_product_tracking.sql 2>&1 || echo "  (already applied or skipped)"
 fi
+if [ -f drizzle/0010_sales_estimation.sql ]; then
+  echo "  Applying 0010_sales_estimation.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0010_sales_estimation.sql 2>&1 || echo "  (already applied or skipped)"
+fi
+if [ -f drizzle/0011_hybrid_data_collection.sql ]; then
+  echo "  Applying 0011_hybrid_data_collection.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0011_hybrid_data_collection.sql 2>&1 || echo "  (already applied or skipped)"
+fi
 
 # 4. Build
 echo "[4/5] Building..."

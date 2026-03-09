@@ -600,3 +600,186 @@ export const extProductDailySnapshots = mysqlTable("ext_product_daily_snapshots"
 
 export type ExtProductDailySnapshot = typeof extProductDailySnapshots.$inferSelect;
 export type InsertExtProductDailySnapshot = typeof extProductDailySnapshots.$inferInsert;
+
+// ==================== Extension: 카테고리별 리뷰 작성률 (ext_category_review_rates) ====================
+// 카테고리마다 리뷰 작성 비율이 다름 → 판매량 역산에 사용
+export const extCategoryReviewRates = mysqlTable("ext_category_review_rates", {
+  id: int("id").autoincrement().primaryKey(),
+  categoryKey: varchar("category_key", { length: 100 }).notNull(),
+  categoryName: varchar("category_name", { length: 255 }).notNull(),
+  reviewRate: decimal("review_rate", { precision: 6, scale: 4 }).notNull().default("0.0200"),
+  confidence: mysqlEnum("confidence", ["low", "medium", "high"]).default("medium").notNull(),
+  sampleCount: int("sample_count").default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtCategoryReviewRate = typeof extCategoryReviewRates.$inferSelect;
+export type InsertExtCategoryReviewRate = typeof extCategoryReviewRates.$inferInsert;
+
+// ==================== Extension: 판매량 추정 결과 (ext_product_sales_estimates) ====================
+// 일별 배치로 계산된 판매량 추정 결과 저장
+export const extProductSalesEstimates = mysqlTable("ext_product_sales_estimates", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  trackingId: int("tracking_id").notNull(),              // ext_product_trackings FK
+  estimateDate: varchar("estimate_date", { length: 10 }).notNull(),  // YYYY-MM-DD
+
+  // 입력 지표
+  reviewDelta7d: int("review_delta_7d").default(0),
+  reviewDelta30d: int("review_delta_30d").default(0),
+  avgRank: decimal("avg_rank", { precision: 8, scale: 2 }).default("0"),
+  soldOutDays: int("sold_out_days").default(0),
+  priceChangeRate: decimal("price_change_rate", { precision: 5, scale: 4 }).default("0"),
+  currentPrice: int("current_price").default(0),
+  currentReviewCount: int("current_review_count").default(0),
+  currentRating: decimal("current_rating", { precision: 3, scale: 1 }).default("0"),
+
+  // 카테고리 리뷰율
+  categoryKey: varchar("category_key", { length: 100 }),
+  reviewRate: decimal("review_rate", { precision: 6, scale: 4 }).default("0.0200"),
+
+  // 추정 결과
+  estimatedDailySales: decimal("estimated_daily_sales", { precision: 10, scale: 2 }).default("0"),
+  estimatedMonthlySales: decimal("estimated_monthly_sales", { precision: 12, scale: 2 }).default("0"),
+  estimatedMonthlyRevenue: decimal("estimated_monthly_revenue", { precision: 14, scale: 0 }).default("0"),
+
+  // 부스트 팩터
+  baseDailySales: decimal("base_daily_sales", { precision: 10, scale: 2 }).default("0"),
+  rankBoost: decimal("rank_boost", { precision: 5, scale: 3 }).default("1.000"),
+  soldOutBoost: decimal("sold_out_boost", { precision: 5, scale: 3 }).default("1.000"),
+  priceBoost: decimal("price_boost", { precision: 5, scale: 3 }).default("1.000"),
+
+  // 판매력 스코어
+  salesPowerScore: decimal("sales_power_score", { precision: 6, scale: 2 }).default("0"),
+  salesGrade: mysqlEnum("sales_grade", ["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"]).default("MEDIUM"),
+
+  // 추세 지표
+  trendDirection: mysqlEnum("trend_direction", ["rising", "stable", "declining"]).default("stable"),
+  surgeFlag: boolean("surge_flag").default(false),
+
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtProductSalesEstimate = typeof extProductSalesEstimates.$inferSelect;
+export type InsertExtProductSalesEstimate = typeof extProductSalesEstimates.$inferInsert;
+
+// ==================== Extension: 검색 이벤트 로그 (ext_search_events) ====================
+// 사용자가 쿠팡에서 검색할 때마다 기록 — 리얼타임 데이터 수집의 핵심
+export const extSearchEvents = mysqlTable("ext_search_events", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  searchedAt: timestamp("searched_at", tsOpts).defaultNow().notNull(),
+  source: varchar("source", { length: 50 }).notNull().default("user_search"),
+  pageUrl: text("page_url"),
+  totalItems: int("total_items").notNull().default(0),
+  itemsJson: text("items_json"),
+  // 집계 통계
+  avgPrice: int("avg_price").default(0),
+  avgRating: decimal("avg_rating", { precision: 3, scale: 1 }).default("0"),
+  avgReview: int("avg_review").default(0),
+  totalReviewSum: int("total_review_sum").default(0),
+  adCount: int("ad_count").default(0),
+  rocketCount: int("rocket_count").default(0),
+  highReviewCount: int("high_review_count").default(0),
+  // 파싱 품질
+  priceParseRate: int("price_parse_rate").default(0),
+  ratingParseRate: int("rating_parse_rate").default(0),
+  reviewParseRate: int("review_parse_rate").default(0),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type ExtSearchEvent = typeof extSearchEvents.$inferSelect;
+export type InsertExtSearchEvent = typeof extSearchEvents.$inferInsert;
+
+// ==================== Extension: 감시 키워드 (ext_watch_keywords) ====================
+// 자동 등록 + 배치 수집 대상 관리
+export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  priority: int("priority").notNull().default(50),
+  isActive: boolean("is_active").notNull().default(true),
+  collectIntervalHours: int("collect_interval_hours").notNull().default(24),
+  // 상태 추적
+  totalSearchCount: int("total_search_count").default(0),
+  lastSearchedAt: timestamp("last_searched_at", tsOpts),
+  lastCollectedAt: timestamp("last_collected_at", tsOpts),
+  lastUserViewAt: timestamp("last_user_view_at", tsOpts),
+  // 최신 집계
+  latestTotalItems: int("latest_total_items").default(0),
+  latestAvgPrice: int("latest_avg_price").default(0),
+  latestAvgRating: decimal("latest_avg_rating", { precision: 3, scale: 1 }).default("0"),
+  latestAvgReview: int("latest_avg_review").default(0),
+  latestTotalReviewSum: int("latest_total_review_sum").default(0),
+  latestAdCount: int("latest_ad_count").default(0),
+  latestRocketCount: int("latest_rocket_count").default(0),
+  // 변동 추적
+  reviewGrowth1d: int("review_growth_1d").default(0),
+  reviewGrowth7d: int("review_growth_7d").default(0),
+  priceChange1d: int("price_change_1d").default(0),
+  compositeScore: int("composite_score").default(0),
+  // 타임스탬프
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtWatchKeyword = typeof extWatchKeywords.$inferSelect;
+export type InsertExtWatchKeyword = typeof extWatchKeywords.$inferInsert;
+
+// ==================== Extension: 키워드 일별 상태 (ext_keyword_daily_status) ====================
+// 키워드별 일별 집계 — 7일 이상 축적 후 판매량 추정 가능
+export const extKeywordDailyStatus = mysqlTable("ext_keyword_daily_status", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  statDate: varchar("stat_date", { length: 10 }).notNull(),
+  source: varchar("source", { length: 50 }).notNull().default("user_search"),
+  // 검색 결과 집계
+  totalItems: int("total_items").default(0),
+  avgPrice: int("avg_price").default(0),
+  minPrice: int("min_price").default(0),
+  maxPrice: int("max_price").default(0),
+  avgRating: decimal("avg_rating", { precision: 3, scale: 1 }).default("0"),
+  avgReview: int("avg_review").default(0),
+  totalReviewSum: int("total_review_sum").default(0),
+  medianReview: int("median_review").default(0),
+  // 상품 분포
+  adCount: int("ad_count").default(0),
+  adRatio: decimal("ad_ratio", { precision: 5, scale: 2 }).default("0"),
+  rocketCount: int("rocket_count").default(0),
+  rocketRatio: decimal("rocket_ratio", { precision: 5, scale: 2 }).default("0"),
+  highReviewCount: int("high_review_count").default(0),
+  newProductCount: int("new_product_count").default(0),
+  // 전일 대비 변동
+  reviewGrowth: int("review_growth").default(0),
+  priceChange: int("price_change").default(0),
+  itemCountChange: int("item_count_change").default(0),
+  rankChangeJson: text("rank_change_json"),
+  // 재고 상태
+  outOfStockCount: int("out_of_stock_count").default(0),
+  outOfStockRate: decimal("out_of_stock_rate", { precision: 5, scale: 2 }).default("0"),
+  // 판매량 추정
+  estimatedDailySales: int("estimated_daily_sales").default(0),
+  salesScore: int("sales_score").default(0),
+  demandScore: int("demand_score").default(0),
+  // 경쟁도
+  competitionScore: int("competition_score").default(0),
+  competitionLevel: varchar("competition_level", { length: 20 }).default("medium"),
+  // 파싱 품질
+  dataQualityScore: int("data_quality_score").default(0),
+  priceParseRate: int("price_parse_rate").default(0),
+  ratingParseRate: int("rating_parse_rate").default(0),
+  reviewParseRate: int("review_parse_rate").default(0),
+  // 상위 상품 스냅샷
+  topProductsJson: text("top_products_json"),
+  // 타임스탬프
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferSelect;
+export type InsertExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferInsert;
