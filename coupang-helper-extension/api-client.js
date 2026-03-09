@@ -1,6 +1,7 @@
 /* ============================================================
-   Coupang Sourcing Helper — Server API Client v7.1
+   Coupang Sourcing Helper — Server API Client v7.2
    lumiriz.kr 서버와 통신하는 API 클라이언트
+   v7.2: 셀러라이프 방식 다중 전략 수집 통합
    v7.1: tRPC SuperJSON 래핑(result.data.json) 자동 해제
    + AI 소싱 코치 + 하이브리드 수집 + 자동 순회 수집
    + 상세 페이지 확장 파싱 데이터 저장

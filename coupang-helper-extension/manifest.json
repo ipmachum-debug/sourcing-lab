@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "7.1.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v7.1 — 하이브리드수집(Background+Content) · V2 DOM자동감지 · 서버키워드자동수집 · 배치재설계(순차1개씩50~89초) · 검색수요분석 · 상세페이지정밀파싱 · AI분석 · WING · AliExpress",
+  "version": "7.2.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v7.2 — 셀러라이프방식다중전략수집(Background→DNR→Tab→HiddenTab폴링) · V2DOM듀얼파서 · 완전헤더위조 · 자동복구 · 마진계산기 · AI분석 · WING · AliExpress",
   "permissions": [
     "storage",
     "tabs",
