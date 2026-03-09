@@ -1,6 +1,6 @@
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { products, extSearchSnapshots } from "../../drizzle/schema";
+import { products, extSearchSnapshots, extKeywordDailyStats, extReviewAnalyses, extCandidates } from "../../drizzle/schema";
 import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -462,5 +462,349 @@ export const sourcingRouter = router({
         categories: categories.map(c => ({ category: c.category || "미분류", count: N(c.count) })),
         grades: grades.map(g => ({ grade: g.grade || "?", count: N(g.count) })),
       };
+    }),
+
+  /** AI 자동채우기 - 수집된 데이터를 기반으로 소싱 폼 자동 완성 */
+  aiAutoFill: protectedProcedure
+    .input(z.object({
+      productName: z.string().optional(),
+      keyword1: z.string().optional(),
+      keyword2: z.string().optional(),
+      keyword3: z.string().optional(),
+      category: z.string().optional(),
+      existingData: z.object({
+        thumbnailMemo: z.string().optional(),
+        detailPoint: z.string().optional(),
+        improvementNote: z.string().optional(),
+        developmentNote: z.string().optional(),
+        finalOpinion: z.string().optional(),
+        competitionLevel: z.string().optional(),
+        differentiationLevel: z.string().optional(),
+      }).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      const form: Record<string, any> = {};
+      const keywords = [input.keyword1, input.keyword2, input.keyword3].filter(Boolean) as string[];
+      const searchTerms = [...keywords];
+      if (input.productName) {
+        // Extract meaningful words from product name (remove common prefixes)
+        const cleanName = (input.productName || "").replace(/^\[.*?\]\s*/, "");
+        if (cleanName) searchTerms.push(cleanName);
+      }
+
+      let totalSnapshotData: { avgPrice: number; avgRating: number; avgReview: number; productCount: number; competitionScore: number; competitionLevel: string; } | null = null;
+      let keywordStatsData: { demandScore: number; keywordScore: number; salesEstimate: number; reviewGrowth: number; adRatio: number; rocketCount: number; }[] = [];
+      let reviewAnalysisData: any = null;
+      let relatedKeywords: string[] = [];
+
+      // 1. Search snapshots for market data
+      try {
+        for (const term of searchTerms) {
+          if (!term) continue;
+          const snapshots = await db.select().from(extSearchSnapshots)
+            .where(and(
+              eq(extSearchSnapshots.userId, ctx.user.id),
+              sql`${extSearchSnapshots.query} LIKE ${'%' + term + '%'}`,
+            ))
+            .orderBy(desc(extSearchSnapshots.createdAt))
+            .limit(5);
+
+          if (snapshots.length > 0) {
+            const latest = snapshots[0];
+            totalSnapshotData = {
+              avgPrice: N(latest.avgPrice),
+              avgRating: N(latest.avgRating),
+              avgReview: N(latest.avgReview),
+              productCount: N(latest.totalItems),
+              competitionScore: N(latest.competitionScore),
+              competitionLevel: latest.competitionLevel || "medium",
+            };
+
+            // Collect related keywords
+            const relatedSnaps = await db.select({ query: extSearchSnapshots.query })
+              .from(extSearchSnapshots)
+              .where(and(
+                eq(extSearchSnapshots.userId, ctx.user.id),
+                sql`${extSearchSnapshots.query} LIKE ${'%' + term + '%'}`,
+              ))
+              .groupBy(extSearchSnapshots.query)
+              .limit(10);
+            relatedKeywords = relatedSnaps.map(s => s.query).filter(q => !keywords.includes(q));
+            break;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // 2. Keyword daily stats for demand/competition data
+      try {
+        for (const term of searchTerms) {
+          if (!term) continue;
+          const stats = await db.select().from(extKeywordDailyStats)
+            .where(and(
+              eq(extKeywordDailyStats.userId, ctx.user.id),
+              sql`${extKeywordDailyStats.query} LIKE ${'%' + term + '%'}`,
+            ))
+            .orderBy(desc(extKeywordDailyStats.createdAt))
+            .limit(3);
+
+          if (stats.length > 0) {
+            keywordStatsData = stats.map(s => ({
+              demandScore: N(s.demandScore),
+              keywordScore: N(s.keywordScore),
+              salesEstimate: N(s.salesEstimate),
+              reviewGrowth: N(s.reviewGrowth),
+              adRatio: N(s.adRatio),
+              rocketCount: N(s.rocketCount),
+            }));
+            break;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // 3. Review analyses for customer insights
+      try {
+        for (const term of searchTerms) {
+          if (!term) continue;
+          const reviews = await db.select().from(extReviewAnalyses)
+            .where(and(
+              eq(extReviewAnalyses.userId, ctx.user.id),
+              sql`${extReviewAnalyses.query} LIKE ${'%' + term + '%'}`,
+            ))
+            .orderBy(desc(extReviewAnalyses.createdAt))
+            .limit(1);
+
+          if (reviews.length > 0) {
+            reviewAnalysisData = reviews[0];
+            break;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // ---- Build auto-fill form from collected data ----
+
+      // Fill in missing keywords from related data
+      if (!input.keyword2 && relatedKeywords.length >= 1) {
+        form.keyword2 = relatedKeywords[0];
+      }
+      if (!input.keyword3 && relatedKeywords.length >= 2) {
+        form.keyword3 = relatedKeywords[1];
+      }
+
+      // Competition level from snapshot data
+      if (totalSnapshotData) {
+        const cs = totalSnapshotData.competitionScore;
+        if (cs <= 25) form.competitionLevel = "low";
+        else if (cs <= 50) form.competitionLevel = "medium";
+        else if (cs <= 75) form.competitionLevel = "high";
+        else form.competitionLevel = "very_high";
+      }
+
+      // Differentiation inference
+      const avgDemand = keywordStatsData.length > 0 
+        ? keywordStatsData.reduce((a, b) => a + b.demandScore, 0) / keywordStatsData.length 
+        : 50;
+      const compScore = totalSnapshotData?.competitionScore ?? 50;
+      if (compScore < 40 && avgDemand > 50) form.differentiationLevel = "high";
+      else if (compScore < 60) form.differentiationLevel = "medium";
+      else form.differentiationLevel = "low";
+
+      // Category inference from keywords
+      if (!input.category || input.category === "") {
+        const allTerms = searchTerms.join(" ").toLowerCase();
+        const catMap: [string, string[]][] = [
+          ["주방용품", ["주방", "식기", "수저", "냄비", "프라이팬", "주걱", "수세미", "그릇", "접시"]],
+          ["생활용품", ["생활", "세제", "청소", "빨래", "수건", "티슈", "쓰레기"]],
+          ["욕실용품", ["욕실", "샤워", "비누", "치약", "칫솔", "목욕"]],
+          ["수납/정리", ["수납", "정리", "서랍", "선반", "행거", "옷걸이"]],
+          ["인테리어", ["인테리어", "쿠션", "커튼", "러그", "액자", "화분"]],
+          ["전자기기", ["전자", "충전", "케이블", "블루투스", "이어폰", "스피커"]],
+          ["반려동물", ["반려", "강아지", "고양이", "펫", "애완", "사료"]],
+          ["유아/아동", ["유아", "아기", "아동", "키즈", "젖병"]],
+          ["건강/뷰티", ["건강", "뷰티", "비타민", "영양", "마스크", "화장", "스킨"]],
+          ["스포츠/아웃도어", ["스포츠", "운동", "헬스", "요가", "등산"]],
+          ["캠핑", ["캠핑", "텐트", "버너", "랜턴"]],
+          ["자동차", ["자동차", "차량", "카", "세차"]],
+          ["패션소품", ["패션", "악세서리", "목걸이", "반지", "시계"]],
+          ["가방/파우치", ["가방", "파우치", "백팩", "크로스"]],
+        ];
+        for (const [cat, kws] of catMap) {
+          if (kws.some(k => allTerms.includes(k))) {
+            form.category = cat;
+            break;
+          }
+        }
+      }
+
+      // Target customer inference
+      if (!input.existingData?.thumbnailMemo || input.existingData.thumbnailMemo.length < 5) {
+        // Only fill if existing data is minimal
+      }
+
+      // Build thumbnailMemo (market analysis)
+      const memoLines: string[] = [];
+      if (totalSnapshotData) {
+        memoLines.push(`시장 데이터 분석:`);
+        memoLines.push(`- 평균가: ${totalSnapshotData.avgPrice.toLocaleString()}원`);
+        memoLines.push(`- 평균 평점: ${totalSnapshotData.avgRating.toFixed(1)}`);
+        memoLines.push(`- 평균 리뷰수: ${totalSnapshotData.avgReview.toFixed(0)}개`);
+        memoLines.push(`- 경쟁 상품수: ${totalSnapshotData.productCount}개`);
+        memoLines.push(`- 경쟁도 점수: ${totalSnapshotData.competitionScore}점 (${totalSnapshotData.competitionLevel})`);
+      }
+      if (keywordStatsData.length > 0) {
+        const ks = keywordStatsData[0];
+        memoLines.push(`\n키워드 통계:`);
+        memoLines.push(`- 수요점수: ${ks.demandScore}점`);
+        memoLines.push(`- 키워드점수: ${ks.keywordScore}점`);
+        memoLines.push(`- 광고비율: ${ks.adRatio}%`);
+        memoLines.push(`- 로켓배송: ${ks.rocketCount}개`);
+      }
+      if (memoLines.length > 0) {
+        form.thumbnailMemo = memoLines.join("\n");
+      }
+
+      // Build detailPoint (opportunity analysis)
+      const detailLines: string[] = [];
+      if (keywordStatsData.length > 0) {
+        const ks = keywordStatsData[0];
+        detailLines.push(`소싱 기회 분석:`);
+        detailLines.push(`- 추정 판매량: ${ks.salesEstimate}건/일`);
+        detailLines.push(`- 리뷰 증가세: ${ks.reviewGrowth > 0 ? `+${ks.reviewGrowth} (성장중)` : `${ks.reviewGrowth} (정체)`}`);
+        detailLines.push(`- 수요 대비 경쟁: ${avgDemand > compScore ? "수요 > 경쟁 (기회)" : "경쟁 > 수요 (주의)"}`);
+      }
+      if (reviewAnalysisData) {
+        try {
+          const opps = typeof reviewAnalysisData.opportunities === "string" 
+            ? JSON.parse(reviewAnalysisData.opportunities) 
+            : reviewAnalysisData.opportunities;
+          if (Array.isArray(opps) && opps.length > 0) {
+            detailLines.push(`\n리뷰 기반 기회:`);
+            opps.slice(0, 3).forEach((o: any) => {
+              detailLines.push(`- ${o.title || o}: ${o.description || ""}`);
+            });
+          }
+          const needs = typeof reviewAnalysisData.customerNeeds === "string"
+            ? JSON.parse(reviewAnalysisData.customerNeeds)
+            : reviewAnalysisData.customerNeeds;
+          if (Array.isArray(needs) && needs.length > 0) {
+            detailLines.push(`\n고객 니즈:`);
+            needs.slice(0, 3).forEach((n: any) => {
+              detailLines.push(`- ${n.need || n}: ${n.insight || ""}`);
+            });
+          }
+        } catch { /* JSON parse error */ }
+      }
+      if (detailLines.length > 0) {
+        form.detailPoint = detailLines.join("\n");
+      }
+
+      // Build improvementNote (weakness analysis)
+      const impLines: string[] = [];
+      if (reviewAnalysisData) {
+        try {
+          const pains = typeof reviewAnalysisData.painPoints === "string"
+            ? JSON.parse(reviewAnalysisData.painPoints)
+            : reviewAnalysisData.painPoints;
+          if (Array.isArray(pains) && pains.length > 0) {
+            impLines.push(`고객 불만 분석:`);
+            pains.slice(0, 5).forEach((p: any) => {
+              impLines.push(`- ${p.point || p}: ${p.detail || ""}`);
+            });
+          }
+          const complaints = typeof reviewAnalysisData.commonComplaints === "string"
+            ? JSON.parse(reviewAnalysisData.commonComplaints)
+            : reviewAnalysisData.commonComplaints;
+          if (Array.isArray(complaints) && complaints.length > 0) {
+            impLines.push(`\n주요 불만 TOP:`);
+            complaints.slice(0, 3).forEach((c: any) => {
+              impLines.push(`- ${typeof c === "string" ? c : c.complaint || JSON.stringify(c)}`);
+            });
+          }
+          const quality = typeof reviewAnalysisData.qualityConcerns === "string"
+            ? JSON.parse(reviewAnalysisData.qualityConcerns)
+            : reviewAnalysisData.qualityConcerns;
+          if (Array.isArray(quality) && quality.length > 0) {
+            impLines.push(`\n품질 우려사항:`);
+            quality.slice(0, 3).forEach((q: any) => {
+              impLines.push(`- ${typeof q === "string" ? q : JSON.stringify(q)}`);
+            });
+          }
+        } catch { /* JSON parse error */ }
+      }
+      if (impLines.length === 0 && totalSnapshotData) {
+        impLines.push(`경쟁도 ${totalSnapshotData.competitionScore}점 기준 보완 전략:`);
+        impLines.push(totalSnapshotData.competitionScore > 50 
+          ? `- 경쟁이 높으므로 차별화된 상세페이지와 리뷰 전략이 필요`
+          : `- 경쟁이 낮으므로 빠른 진입이 유리`);
+        impLines.push(`- 평균가 ${totalSnapshotData.avgPrice.toLocaleString()}원 대비 가격 경쟁력 확보 필요`);
+      }
+      if (impLines.length > 0) {
+        form.improvementNote = impLines.join("\n");
+      }
+
+      // Build developmentNote
+      const devLines: string[] = [];
+      if (reviewAnalysisData) {
+        try {
+          const recs = typeof reviewAnalysisData.recommendations === "string"
+            ? JSON.parse(reviewAnalysisData.recommendations)
+            : reviewAnalysisData.recommendations;
+          if (Array.isArray(recs) && recs.length > 0) {
+            devLines.push(`추천 액션:`);
+            recs.slice(0, 3).forEach((r: any) => {
+              devLines.push(`- ${r.action || r}: ${r.expectedImpact || ""}`);
+            });
+          }
+          const praises = typeof reviewAnalysisData.commonPraises === "string"
+            ? JSON.parse(reviewAnalysisData.commonPraises)
+            : reviewAnalysisData.commonPraises;
+          if (Array.isArray(praises) && praises.length > 0) {
+            devLines.push(`\n고객 칭찬 포인트 (강화 포인트):`);
+            praises.slice(0, 3).forEach((p: any) => {
+              devLines.push(`- ${typeof p === "string" ? p : JSON.stringify(p)}`);
+            });
+          }
+        } catch { /* JSON parse error */ }
+      }
+      if (devLines.length === 0 && keywordStatsData.length > 0) {
+        const ks = keywordStatsData[0];
+        devLines.push(`수요점수 ${ks.demandScore}점 기반 개발 방향:`);
+        devLines.push(`- 리뷰 증가 트렌드: ${ks.reviewGrowth > 0 ? '양호 (성장 중)' : '정체 (신중한 접근 필요)'}`);
+        devLines.push(`- 추정 판매량 ${ks.salesEstimate}건/일 기반 MOQ 설정 고려`);
+      }
+      if (devLines.length > 0) {
+        form.developmentNote = devLines.join("\n");
+      }
+
+      // Build finalOpinion
+      const opinionLines: string[] = [];
+      const kw = input.keyword1 || input.productName || "";
+      opinionLines.push(`"${kw}" 종합 판단:`);
+      if (totalSnapshotData) {
+        opinionLines.push(`- 경쟁도: ${totalSnapshotData.competitionScore}점 (${totalSnapshotData.competitionLevel})`);
+        opinionLines.push(`- 평균가: ${totalSnapshotData.avgPrice.toLocaleString()}원`);
+      }
+      if (keywordStatsData.length > 0) {
+        const ks = keywordStatsData[0];
+        opinionLines.push(`- 수요점수: ${ks.demandScore}점, 키워드점수: ${ks.keywordScore}점`);
+        opinionLines.push(ks.keywordScore >= 60 ? "=> 진입 가치 있음" : "=> 추가 분석 필요");
+      }
+      if (reviewAnalysisData) {
+        opinionLines.push(`- 리뷰 분석 완료: 고객 니즈/불만 데이터 반영`);
+      }
+      if (opinionLines.length > 1) {
+        form.finalOpinion = opinionLines.join("\n");
+      }
+
+      // Target customer
+      if (totalSnapshotData && totalSnapshotData.avgPrice > 0) {
+        if (totalSnapshotData.avgPrice >= 50000) form.targetCustomer = "프리미엄 고객층";
+        else if (totalSnapshotData.avgPrice >= 20000) form.targetCustomer = "30-40대 일반 소비자";
+        else form.targetCustomer = "가성비 추구 소비자";
+      }
+
+      return form;
     }),
 });

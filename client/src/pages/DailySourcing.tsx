@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Save, RotateCcw, AlertTriangle, Sparkles, Star, Target, Trophy, ShoppingBag, Factory, Plus, Trash2, ExternalLink } from "lucide-react";
+import { Save, RotateCcw, AlertTriangle, Sparkles, Star, Target, Trophy, ShoppingBag, Factory, Plus, Trash2, ExternalLink, Wand2, Loader2 } from "lucide-react";
 
 const TODAY = new Date().toISOString().split("T")[0];
 
@@ -122,6 +122,7 @@ function getGradeIcon(grade: string) {
 
 export default function DailySourcing() {
   const [form, setForm] = useState<FormData>(defaultForm);
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const utils = trpc.useUtils();
   const createMut = trpc.sourcing.create.useMutation({
     onSuccess: () => {
@@ -131,6 +132,43 @@ export default function DailySourcing() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const aiAutoFillMut = trpc.sourcing.aiAutoFill.useMutation({
+    onSuccess: (data) => {
+      setForm(prev => ({
+        ...prev,
+        ...Object.fromEntries(
+          Object.entries(data).filter(([_, v]) => v !== undefined && v !== null && v !== "")
+        ),
+      } as FormData));
+      setIsAiLoading(false);
+      toast.success("AI 자동 채우기 완료! 내용을 확인하세요.");
+    },
+    onError: (e) => {
+      setIsAiLoading(false);
+      toast.error(e.message);
+    },
+  });
+
+  const handleAiAutoFill = () => {
+    setIsAiLoading(true);
+    aiAutoFillMut.mutate({
+      productName: form.productName,
+      keyword1: form.keyword1,
+      keyword2: form.keyword2,
+      keyword3: form.keyword3,
+      category: form.category,
+      existingData: {
+        thumbnailMemo: form.thumbnailMemo,
+        detailPoint: form.detailPoint,
+        improvementNote: form.improvementNote,
+        developmentNote: form.developmentNote,
+        finalOpinion: form.finalOpinion,
+        competitionLevel: form.competitionLevel,
+        differentiationLevel: form.differentiationLevel,
+      },
+    });
+  };
 
   const score = calcPreviewScore(form);
   const grade = gradeOf(score);
@@ -153,6 +191,10 @@ export default function DailySourcing() {
             데일리 소싱
           </h1>
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleAiAutoFill} disabled={isAiLoading || (!form.productName && !form.keyword1)}
+              className="border-pink-200 text-pink-600 hover:bg-pink-50">
+              {isAiLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> AI 분석중...</> : <><Wand2 className="h-4 w-4 mr-1" /> AI 자동채우기</>}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setForm(defaultForm)} className="border-pink-200 text-pink-600 hover:bg-pink-50">
               <RotateCcw className="h-4 w-4 mr-1" /> 초기화
             </Button>

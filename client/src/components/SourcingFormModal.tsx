@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Save, RotateCcw, Sparkles, Star, Target, Trophy, AlertTriangle, Loader2 } from "lucide-react";
+import { Save, RotateCcw, Sparkles, Star, Target, Trophy, AlertTriangle, Loader2, Wand2 } from "lucide-react";
 
 const CATEGORIES = [
   "생활용품", "주방용품", "욕실용품", "수납/정리", "인테리어", "조명",
@@ -158,6 +158,43 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
     },
   });
 
+  const aiAutoFillMut = trpc.sourcing.aiAutoFill.useMutation({
+    onSuccess: (data) => {
+      setForm(prev => ({
+        ...prev,
+        ...Object.fromEntries(
+          Object.entries(data).filter(([_, v]) => v !== undefined && v !== null && v !== "")
+        ),
+      } as FormData));
+      setIsGenerating(false);
+      toast.success("AI 자동 채우기 완료! 내용을 확인하세요.");
+    },
+    onError: (e) => {
+      setIsGenerating(false);
+      toast.error(e.message);
+    },
+  });
+
+  const handleAiAutoFill = () => {
+    setIsGenerating(true);
+    aiAutoFillMut.mutate({
+      productName: form.productName,
+      keyword1: form.keyword1,
+      keyword2: form.keyword2,
+      keyword3: form.keyword3,
+      category: form.category,
+      existingData: {
+        thumbnailMemo: form.thumbnailMemo,
+        detailPoint: form.detailPoint,
+        improvementNote: form.improvementNote,
+        developmentNote: form.developmentNote,
+        finalOpinion: form.finalOpinion,
+        competitionLevel: form.competitionLevel,
+        differentiationLevel: form.differentiationLevel,
+      },
+    });
+  };
+
   // When modal opens with prefill data, auto-generate
   useEffect(() => {
     if (open && prefillData && !editProduct) {
@@ -228,6 +265,16 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
         <div className="grid gap-4 lg:grid-cols-3">
           {/* Left: Form fields */}
           <div className="lg:col-span-2 space-y-4">
+            {/* AI Auto-fill Button */}
+            <div className="flex items-center gap-2 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl p-3 border border-pink-100/50">
+              <Wand2 className="h-4 w-4 text-pink-500" />
+              <span className="text-xs text-pink-700 flex-1">수집된 데이터를 기반으로 AI가 폼을 자동으로 채워줍니다</span>
+              <Button size="sm" onClick={handleAiAutoFill} disabled={isGenerating || (!form.productName && !form.keyword1)}
+                className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white rounded-lg text-xs px-4">
+                {isGenerating ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> 분석중...</> : <><Sparkles className="h-3 w-3 mr-1" /> AI 자동채우기</>}
+              </Button>
+            </div>
+
             {/* Basic Info */}
             <Card>
               <CardHeader className="pb-2">
