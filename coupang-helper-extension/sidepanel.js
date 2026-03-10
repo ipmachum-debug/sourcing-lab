@@ -2514,9 +2514,29 @@ let selectedKeywordIds = new Set();
 let batchRunning = false;
 
 // 유틸: 메시지 전송 래퍼
-function sendMsg(msg) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, (resp) => resolve(resp));
+function sendMsg(msg, retries) {
+  if (typeof retries === 'undefined') retries = 2;
+  return new Promise(function(resolve) {
+    try {
+      chrome.runtime.sendMessage(msg, function(resp) {
+        if (chrome.runtime.lastError) {
+          console.warn('[sendMsg] runtime.lastError:', chrome.runtime.lastError.message, 'type:', msg.type);
+          if (retries > 0) {
+            console.log('[sendMsg] 재시도 (' + retries + '회 남음)...');
+            setTimeout(function() {
+              sendMsg(msg, retries - 1).then(resolve);
+            }, 500);
+          } else {
+            resolve({ ok: false, error: 'Service Worker 응답 없음: ' + chrome.runtime.lastError.message });
+          }
+          return;
+        }
+        resolve(resp || { ok: false, error: '응답 없음' });
+      });
+    } catch (e) {
+      console.error('[sendMsg] 예외:', e.message);
+      resolve({ ok: false, error: e.message });
+    }
   });
 }
 function formatDemandPrice(v) {
