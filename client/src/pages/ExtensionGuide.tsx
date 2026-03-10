@@ -11,8 +11,8 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "7.3.0";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.3.0.zip";
+const EXTENSION_VERSION = "7.3.1";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.3.1.zip";
 const EXTENSION_FILE_SIZE = "160KB";
 
 function AccordionSection({
@@ -146,7 +146,7 @@ export default function ExtensionGuide() {
             {/* 1. 설치 방법 */}
             <AccordionSection icon={Chrome} title="1. 설치 방법" defaultOpen={true}>
               <div className="space-y-4 mt-3">
-                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.3.0.zip 파일을 받습니다." />
+                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.3.1.zip 파일을 받습니다." />
                 <Step num={2} title="압축 해제" desc="다운로드한 zip 파일의 압축을 풀어줍니다." />
                 <Step num={3} title="Chrome 확장프로그램 페이지 열기" desc="Chrome 주소창에 chrome://extensions 입력 후 이동합니다." />
                 <Step num={4} title="개발자 모드 활성화" desc="우측 상단의 '개발자 모드' 토글을 켜세요." />
@@ -586,9 +586,18 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v7.3.0",
+                    version: "v7.3.1",
                     date: "2026-03-10",
                     badge: "Latest",
+                    changes: [
+                      "수집 시작 실패 오류 수정 (Service Worker 메시지 채널 타임아웃)",
+                      "sendMsg 재시도 로직 추가 (runtime.lastError 핸들링)",
+                      "startAutoCollect 비동기 반환 (await → fire-and-forget)",
+                    ],
+                  },
+                  {
+                    version: "v7.3.0",
+                    date: "2026-03-10",
                     changes: [
                       "★ 핵심 수정: 탭 내 DOMParser 기반 파싱 (리뷰/평점 100% 정상 수집)",
                       "Service Worker에서 DOMParser 미지원 → 탭 내 executeScript로 DOM 파싱 실행",

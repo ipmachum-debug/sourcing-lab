@@ -1578,7 +1578,8 @@ async function startAutoCollect(options = {}) {
       console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority})`);
     });
 
-    await runNextKeyword();
+    // ★ v7.3.1: 비동기 시작 — 즉시 반환 (message channel timeout 방지)
+    runNextKeyword();
     return { ok: true, queueLength: collector.queue.length };
   } catch (e) {
     console.error('[SH-AC] 큐 로드 실패:', e.message);
