@@ -197,6 +197,377 @@ const HybridParser = {
   },
 
   // ============================================================
+  //  ★★★ v7.3.0: 탭 내 DOMParser 기반 파싱 (Service Worker DOMParser 없음 해결) ★★★
+  //  탭(content script 컨텍스트)에서 직접 DOM 파싱 후 결과만 반환
+  // ============================================================
+  
+  // 탭 내에서 실행될 자체 완결형 파싱 함수 (DOMParser 사용 가능)
+  _inTabParseFunction() {
+    // 이 함수는 chrome.scripting.executeScript로 탭 안에서 실행됩니다
+    // 따라서 document, DOMParser 모두 사용 가능
+    return (keyword) => {
+      try {
+        const doc = document;
+        const _parseNumber = (str) => {
+          if (!str) return 0;
+          str = str.trim();
+          const priceMatch = str.match(/(\d{1,3}(?:,\d{3})+)\s*원?$/);
+          if (priceMatch) return parseInt(priceMatch[1].replace(/,/g, ''), 10) || 0;
+          const simpleMatch = str.match(/(\d+)\s*원?$/);
+          if (simpleMatch) return parseInt(simpleMatch[1], 10) || 0;
+          const commaMatch = str.match(/(\d{1,3}(?:,\d{3})+)/);
+          if (commaMatch) return parseInt(commaMatch[1].replace(/,/g, ''), 10) || 0;
+          return parseInt(str.replace(/[^0-9]/g, ''), 10) || 0;
+        };
+
+        // V2 파서 (2025~2026 React DOM)
+        const allCards = [...doc.querySelectorAll('#product-list > li[class^="ProductUnit_productUnit"]')];
+        let cards = allCards;
+        let isV2 = cards.length > 0;
+        
+        // V1 폴백
+        if (!isV2) {
+          cards = [...doc.querySelectorAll('#productList > li')];
+          if (!cards.length) cards = [...doc.querySelectorAll('li[class*="search-product"]')];
+        }
+        
+        if (!cards.length) {
+          return { html: doc.documentElement.outerHTML, parsedResult: null };
+        }
+
+        const items = [];
+        const seen = new Set();
+        let adCount = 0;
+        let totalProductCount = 0;
+        
+        const countInput = doc.querySelector('input[name="searchProductCount"]');
+        if (countInput) totalProductCount = parseInt(countInput.value) || 0;
+        if (!totalProductCount) {
+          const scripts = doc.querySelectorAll('script');
+          for (const script of scripts) {
+            const text = script.textContent || '';
+            const m = text.match(/searchProductCount['":\s]+(\d+)/);
+            if (m) { totalProductCount = parseInt(m[1]); break; }
+          }
+        }
+
+        for (const card of cards) {
+          if (items.length >= 72) break;
+
+          // 광고 판별
+          let isAd = false;
+          if (isV2) {
+            isAd = !!card.querySelector('[class*="AdMark_text"], [class*="AdMark_adMark"], [class*="ad-badge"], [class*="AdBadge"]');
+          } else {
+            if (card.querySelector('.ad-badge-text, .ad-badge, [class*="ad-badge"]')) {
+              isAd = true;
+            } else {
+              const texts = [...card.querySelectorAll('span, em, div')];
+              for (const el of texts) {
+                const t = el.textContent?.trim();
+                if (t && (t === 'AD' || t === '광고') && t.length <= 5) { isAd = true; break; }
+              }
+            }
+          }
+          if (isAd) { adCount++; continue; }
+
+          // 링크 & productId
+          const linkEl = card.querySelector('a[href*="/products/"]') || card.querySelector('a');
+          const href = linkEl?.getAttribute('href') || '';
+          const fullUrl = href.startsWith('http') ? href : 'https://www.coupang.com' + href;
+          const pidMatch = href.match(/\/products\/(\d+)/);
+          if (!pidMatch) continue;
+          const pid = pidMatch[1];
+          if (seen.has(pid)) continue;
+          seen.add(pid);
+
+          const vidMatch = href.match(/[?&]vendorItemId=(\d+)/i);
+          const vendorItemId = vidMatch ? vidMatch[1] : null;
+
+          // 상품명
+          let title = '';
+          if (isV2) {
+            const nameEl = card.querySelector('[class*="ProductUnit_productName"]')
+              || card.querySelector('[class*="ProductUnit_productInfo"] [class*="name"]')
+              || card.querySelector('[class*="productName"]');
+            title = nameEl?.textContent?.trim() || '';
+          } else {
+            const nameEl = card.querySelector('div.name, .name, [class*="name"]');
+            title = nameEl?.textContent?.trim() || card.querySelector('img')?.getAttribute('alt') || '';
+          }
+          if (!title || title.length < 2) continue;
+
+          // 가격
+          let price = 0, originalPrice = 0;
+          if (isV2) {
+            const priceEl = card.querySelector('[class*="Price_priceValue"]');
+            if (priceEl) { const p = _parseNumber(priceEl.textContent); if (p >= 100 && p < 1e8) price = p; }
+            if (!price) {
+              const priceArea = card.querySelector('[class*="PriceArea"], [class*="priceArea"], [class*="price-area"]');
+              if (priceArea) {
+                const spans = priceArea.querySelectorAll('span, em, strong, div');
+                for (const el of spans) {
+                  const t = el.textContent?.trim();
+                  if (t && (t.includes(',') || /\d{3,}/.test(t)) && !t.includes('%')) {
+                    const p = _parseNumber(t);
+                    if (p >= 100 && p < 100000000) { price = p; break; }
+                  }
+                }
+              }
+            }
+            if (!price) {
+              const allEls = card.querySelectorAll('strong, em, span, div');
+              for (const el of allEls) {
+                const t = el.textContent?.trim();
+                if (t && /^[\d,]+원?$/.test(t.replace(/\s/g, ''))) {
+                  const p = _parseNumber(t);
+                  if (p >= 1000 && p < 100000000) { price = p; break; }
+                }
+              }
+            }
+            const basePriceEl = card.querySelector('[class*="Price_basePrice"], [class*="OriginalPrice"], del, [class*="base-price"]');
+            if (basePriceEl) originalPrice = _parseNumber(basePriceEl.textContent);
+          } else {
+            const priceEl = card.querySelector('strong.price-value, .price-value, [class*="price-value"]');
+            if (priceEl) price = _parseNumber(priceEl.textContent);
+            const basePriceEl = card.querySelector('del.base-price, .base-price, del[class*="price"]');
+            if (basePriceEl) originalPrice = _parseNumber(basePriceEl.textContent);
+          }
+
+          // 평점
+          let rating = 0, ratingIsEstimated = false;
+          // aria-label 방식 (V2 핵심)
+          const ariaEls = card.querySelectorAll('[aria-label]');
+          for (const ariaEl of ariaEls) {
+            const ariaVal = ariaEl.getAttribute('aria-label') || '';
+            const rMatch = ariaVal.match(/([\d.]+)\s*점?\s*만점/) || ariaVal.match(/^([\d.]+)$/);
+            if (rMatch) {
+              const r = parseFloat(rMatch[1]);
+              if (r >= 1.0 && r <= 5.0) { rating = r; break; }
+            }
+          }
+          // ProductRating 클래스
+          if (!rating) {
+            const ratingContainer = card.querySelector('[class*="ProductRating_productRating"], [class*="ProductRating"], [class*="rating"]');
+            if (ratingContainer) {
+              const text = ratingContainer.textContent || '';
+              const rMatch = text.match(/([\d.]+)/);
+              if (rMatch) { const r = parseFloat(rMatch[1]); if (r >= 1.0 && r <= 5.0) rating = r; }
+            }
+          }
+          // star width
+          if (!rating) {
+            const starEl = card.querySelector('[class*="rating-star"] [style*="width"], .star .rating[style*="width"]');
+            if (starEl) {
+              const style = starEl.getAttribute('style') || '';
+              const wMatch = style.match(/width:\s*([\d.]+)%/);
+              if (wMatch) rating = Math.round(parseFloat(wMatch[1]) / 20 * 10) / 10;
+            }
+          }
+
+          // 리뷰수
+          let reviewCount = 0;
+          if (isV2) {
+            const reviewEl = card.querySelector('[class*="ProductRating_productRating"]');
+            if (reviewEl) {
+              const text = reviewEl.textContent || '';
+              const rMatch = text.match(/\((\d[\d,]*)\)/);
+              if (rMatch) reviewCount = _parseNumber(rMatch[1]);
+              if (!reviewCount) {
+                const nums = text.match(/\d[\d,]+/g);
+                if (nums && nums.length >= 2) reviewCount = _parseNumber(nums[1]);
+              }
+            }
+            if (!reviewCount) {
+              const allText = card.textContent || '';
+              const matches = allText.match(/\((\d[\d,]*)\)/g);
+              if (matches) {
+                for (const m of matches) {
+                  const n = _parseNumber(m);
+                  if (n > 0 && n < 10000000) { reviewCount = n; break; }
+                }
+              }
+            }
+          } else {
+            const reviewEl = card.querySelector('span.rating-total-count, .rating-total-count, [class*="rating-count"]');
+            if (reviewEl) reviewCount = _parseNumber(reviewEl.textContent.replace(/[()]/g, ''));
+          }
+
+          // 리뷰 있는데 평점 없으면 추정
+          if (!rating && reviewCount > 0) {
+            rating = reviewCount >= 500 ? 4.6 : reviewCount >= 100 ? 4.5 : reviewCount >= 30 ? 4.3 : 4.0;
+            ratingIsEstimated = true;
+          }
+
+          // 배송유형
+          let deliveryType = 'normalDelivery', deliveryLabel = '일반배송', isRocket = false;
+          if (isV2) {
+            const badgeEl = card.querySelector('[data-badge-id]');
+            const badgeId = badgeEl ? (badgeEl.getAttribute('data-badge-id') || '').toUpperCase() : '';
+            if (badgeId === 'ROCKET' || badgeId === 'TOMORROW' || badgeId === 'ROCKET_FRESH') {
+              deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true;
+            } else {
+              const html = card.innerHTML || '';
+              if (/로켓배송|rocket.*delivery/i.test(html)) { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; }
+              else if (/로켓직구|rocket.*global/i.test(html)) { deliveryType = 'rocketGlobal'; deliveryLabel = '로켓직구'; isRocket = true; }
+              else if (/판매자.*로켓|seller.*rocket/i.test(html)) { deliveryType = 'sellerRocketDelivery'; deliveryLabel = '판매자로켓'; isRocket = true; }
+              else if (/로켓그로스|rocket.*growth/i.test(html)) { deliveryType = 'rocketGrowth'; deliveryLabel = '로켓그로스'; isRocket = true; }
+              else if (/로켓프레시|rocket.*fresh/i.test(html)) { deliveryType = 'rocketFresh'; deliveryLabel = '로켓프레시'; isRocket = true; }
+            }
+          } else {
+            const html = card.innerHTML || '';
+            if (/로켓배송|rocket.*delivery/i.test(html)) { deliveryType = 'rocketDelivery'; deliveryLabel = '로켓배송'; isRocket = true; }
+          }
+
+          // 이미지
+          const imgEl = card.querySelector('[class*="productImage"] img, [class*="ProductUnit_productImage"] img, img');
+          let imageUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-img-src') || '';
+          if (imageUrl.includes('blank1x1') || imageUrl.includes('data:image')) {
+            imageUrl = imgEl?.getAttribute('data-img-src') || imgEl?.getAttribute('data-src') || '';
+          }
+
+          items.push({
+            productId: pid, vendorItemId, title, price, originalPrice,
+            rating, ratingIsEstimated, reviewCount,
+            isAd: false, isRocket,
+            deliveryType, deliveryLabel, imageUrl, url: fullUrl,
+            position: items.length + 1, query: keyword,
+          });
+        }
+
+        // 통계 계산
+        const MAX_PRICE = 100000000;
+        const prices = items.map(i => i.price).filter(p => p > 0 && p < MAX_PRICE);
+        const ratings = items.map(i => i.rating).filter(r => r > 0 && r <= 5);
+        const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
+        const stats = {
+          avgPrice: prices.length ? Math.min(Math.round(prices.reduce((a, b) => a + b, 0) / prices.length), MAX_PRICE) : 0,
+          minPrice: prices.length ? Math.min(...prices) : 0,
+          maxPrice: prices.length ? Math.min(Math.max(...prices), MAX_PRICE) : 0,
+          avgRating: ratings.length ? +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : 0,
+          avgReview: reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0,
+          totalReviewSum: reviews.reduce((a, b) => a + b, 0),
+          medianReview: reviews.length ? reviews.sort((a, b) => a - b)[Math.floor(reviews.length / 2)] : 0,
+          adCount: adCount,
+          rocketCount: items.filter(i => i.isRocket).length,
+          highReviewCount: items.filter(i => i.reviewCount >= 100).length,
+          newProductCount: items.filter(i => i.reviewCount < 10).length,
+          priceRate: items.length ? Math.round(prices.length / items.length * 100) : 0,
+          ratingRate: items.length ? Math.round(ratings.length / items.length * 100) : 0,
+          reviewRate: items.length ? Math.round(reviews.length / items.length * 100) : 0,
+        };
+
+        return {
+          html: doc.documentElement.outerHTML,
+          parsedResult: {
+            items, totalProductCount: totalProductCount || items.length,
+            adCount, domVersion: isV2 ? 'V2_TAB' : 'V1_TAB', stats,
+          },
+        };
+      } catch (e) {
+        // 파싱 실패시 HTML만 반환 (background에서 SSR/Regex 폴백 가능)
+        return { html: document.documentElement.outerHTML, parsedResult: null, error: e.message };
+      }
+    };
+  },
+
+  // ★ v7.3.0: tab_script 전략 — 탭 내에서 DOM 파싱 후 결과 반환
+  async getRenderedHTMLAndParse(tabId, keyword) {
+    try {
+      const parseFunc = this._inTabParseFunction();
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: parseFunc,
+        args: [keyword],
+      });
+      if (chrome.runtime.lastError) {
+        throw new Error(chrome.runtime.lastError.message);
+      }
+      const result = results?.[0]?.result;
+      if (result && result.parsedResult) {
+        console.log(`[HP] 🎯 탭 내 파싱 성공: ${result.parsedResult.items.length}개 (${result.parsedResult.domVersion}), 리뷰율 ${result.parsedResult.stats.reviewRate}%`);
+        return result; // { html, parsedResult }
+      }
+      // 파싱 결과 없으면 HTML만 반환
+      console.warn(`[HP] 탭 내 파싱 실패(${result?.error || 'unknown'}), HTML만 반환`);
+      return result?.html || '';
+    } catch (e) {
+      console.error('[HP] getRenderedHTMLAndParse 실패:', e.message);
+      // 폴백: HTML만 가져오기
+      return this.getRenderedHTML(tabId);
+    }
+  },
+
+  // ★ v7.3.0: hidden_tab_polling 전략 — 숨은 탭에서 DOM 파싱 후 결과 반환
+  async fetchViaHiddenTabAndParse(url, keyword, minSize = 10000, maxRetries = 10, retryInterval = 2000) {
+    let tabId = null;
+    try {
+      const tab = await chrome.tabs.create({ url, active: false });
+      tabId = tab.id;
+
+      // 페이지 로드 완료 대기
+      await new Promise((resolve) => {
+        let resolved = false;
+        const listener = (tid, changeInfo) => {
+          if (tid === tabId && changeInfo.status === 'complete') {
+            if (!resolved) { resolved = true; chrome.tabs.onUpdated.removeListener(listener); resolve(true); }
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => {
+          if (!resolved) { resolved = true; chrome.tabs.onUpdated.removeListener(listener); resolve(false); }
+        }, 30000);
+      });
+
+      // 추가 렌더링 대기 (JS가 리뷰 데이터 로드하는 시간)
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+
+      // 탭 내에서 파싱 실행
+      const parseFunc = this._inTabParseFunction();
+      let result = null;
+      let retries = 0;
+
+      const executeInTab = async () => {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: parseFunc,
+          args: [keyword],
+        });
+        return results?.[0]?.result;
+      };
+
+      result = await executeInTab();
+
+      // 결과가 부실하면 폴링 (HTML 크기 체크 + 리뷰 파싱률 체크)
+      while (retries < maxRetries) {
+        const htmlLen = result?.html?.length || 0;
+        const reviewRate = result?.parsedResult?.stats?.reviewRate || 0;
+        if (htmlLen >= minSize && reviewRate > 30) break; // 충분한 데이터
+        retries++;
+        console.log(`[HP] hidden_tab 폴링 ${retries}/${maxRetries}: HTML ${htmlLen}B, 리뷰율 ${reviewRate}%`);
+        await new Promise(r => setTimeout(r, retryInterval));
+        result = await executeInTab();
+      }
+
+      // 탭 정리
+      chrome.tabs.remove(tabId).catch(() => {});
+      tabId = null;
+
+      if (result?.parsedResult && result.parsedResult.items.length > 0) {
+        console.log(`[HP] 🎯 hidden_tab 파싱 성공: ${result.parsedResult.items.length}개 (${result.parsedResult.domVersion}), 리뷰율 ${result.parsedResult.stats.reviewRate}% (${retries}회 폴링)`);
+        return result; // { html, parsedResult }
+      }
+
+      // 파싱 실패시 HTML만 반환
+      console.warn(`[HP] hidden_tab 파싱 실패, HTML만 반환`);
+      return result?.html || '';
+    } catch (e) {
+      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+      throw e;
+    }
+  },
+
+  // ============================================================
   //  ★★★ 핵심: 다중 전략 HTML 수집 (셀러라이프 방식 통합) ★★★
   //  전략 1: Background fetch (k() 방식) — 가장 빠름
   //  전략 2: DNR 규칙 적용 후 fetch (cData-v3 방식)
@@ -231,7 +602,8 @@ const HybridParser = {
           });
           // 렌더링 안정화 대기
           await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
-          return this.getRenderedHTML(tabId);
+          // ★ v7.2.9: 탭 내에서 HTML + 파싱 결과 동시 수집
+          return this.getRenderedHTMLAndParse(tabId, keyword);
         },
       });
     }
@@ -239,7 +611,7 @@ const HybridParser = {
     // 2순위: Hidden Tab + 폴링 (JS 렌더링 보장, 느리지만 정확)
     strategies.push({
       name: 'hidden_tab_polling',
-      fn: () => this.fetchViaHiddenTab(searchUrl),
+      fn: () => this.fetchViaHiddenTabAndParse(searchUrl, keyword),
     });
 
     // 3순위: 직접 fetch (빠르지만 SSR만 → 리뷰 미포함 가능)
@@ -248,11 +620,21 @@ const HybridParser = {
       { name: 'dnr_fetch', fn: () => this.fetchWithDNR(searchUrl) },
     );
 
-    // 순차 시도
+    // ★ v7.3.0: 순차 시도 — tab 전략은 { html, parsedResult } 반환 가능
     for (const strategy of strategies) {
       try {
         console.log(`[HP] 전략 시도: ${strategy.name} — "${keyword}"`);
-        const html = await strategy.fn();
+        const rawResult = await strategy.fn();
+
+        // ★ v7.3.0: 탭 기반 전략은 { html, parsedResult } 객체 반환 가능
+        let html = '';
+        let parsedResult = null;
+        if (rawResult && typeof rawResult === 'object' && rawResult.html) {
+          html = rawResult.html;
+          parsedResult = rawResult.parsedResult || null;
+        } else if (typeof rawResult === 'string') {
+          html = rawResult;
+        }
 
         if (!html || html.length < 500) {
           console.warn(`[HP] ${strategy.name}: HTML 크기 부족 (${html?.length || 0}바이트)`);
@@ -265,9 +647,11 @@ const HybridParser = {
           continue;
         }
 
-        // ★ v7.2.8: 리뷰 품질 검증 — 렌더링 전략에서만 기대
-        // tab/hidden_tab 전략에서 HTML 잘 가져왔으면 바로 반환
-        // direct_fetch/dnr_fetch는 리뷰 없을 수 있지만, 다른 전략 모두 실패시 최후 수단
+        if (parsedResult && parsedResult.items && parsedResult.items.length > 0) {
+          console.log(`[HP] ✅ ${strategy.name} 성공 (탭 내 파싱): ${parsedResult.items.length}개, 리뷰율 ${parsedResult.stats?.reviewRate || 0}%, HTML ${(html.length / 1024).toFixed(1)}KB`);
+          return { html, strategy: strategy.name, parsedResult };
+        }
+
         console.log(`[HP] ✅ ${strategy.name} 성공: HTML ${(html.length / 1024).toFixed(1)}KB`);
         return { html, strategy: strategy.name };
       } catch (e) {
