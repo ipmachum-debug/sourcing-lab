@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "7.2.9",
-  "description": "쿠팡+알리 AI 소싱 코치 v7.2.9 — 수집전략순서수정(리뷰파싱율정상화) · reviewGrowth스냅샷날짜버그수정 · 수집완료자동통계갱신 · 셀러라이프방식다중전략수집",
+  "version": "7.3.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v7.3.0 — 탭내DOMParser파싱(리뷰100%정상수집) · 수집전략순서최적화 · reviewGrowth버그수정 · 수집완료자동통계갱신",
   "permissions": [
     "storage",
     "tabs",

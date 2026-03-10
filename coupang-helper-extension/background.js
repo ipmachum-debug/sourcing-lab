@@ -1753,6 +1753,8 @@ async function runNextKeyword() {
 
     const html = collectResult?.html || '';
     const strategy = collectResult?.strategy || 'NONE';
+    // ★ v7.2.9: tab 전략에서 탭 내 파싱된 결과가 있으면 직접 사용
+    const tabParsedResult = collectResult?.parsedResult || null;
 
     if (!html || html.length < 500) {
       console.warn(`[SH-AC] ❌ "${keyword}" HTML 수집 실패 (모든 전략, ${html.length}바이트)`);
@@ -1767,14 +1769,20 @@ async function runNextKeyword() {
       return;
     }
 
-    // 파싱
+    // ★ v7.2.9: 탭 내 파싱 결과가 있으면 그대로 사용 (DOMParser 활용된 정확한 결과)
     let result;
-    try {
-      result = HybridParser.parseSearchHTML(html, keyword);
-    } catch (parseErr) {
-      console.error(`[SH-AC] ❌ "${keyword}" parseSearchHTML 예외:`, parseErr.message, parseErr.stack);
-      await handleCollectFail(keyword, next.retryCount, 'PARSE_EXCEPTION', `파싱 예외: ${parseErr.message}`);
-      return;
+    if (tabParsedResult && tabParsedResult.items && tabParsedResult.items.length > 0) {
+      result = tabParsedResult;
+      console.log(`[SH-AC] 🎯 탭 내 파싱 결과 사용: ${result.items.length}개 (${strategy}/${result.domVersion || 'TAB_DOM'})`);
+    } else {
+      // 폴백: background에서 파싱 (SSR/Regex)
+      try {
+        result = HybridParser.parseSearchHTML(html, keyword);
+      } catch (parseErr) {
+        console.error(`[SH-AC] ❌ "${keyword}" parseSearchHTML 예외:`, parseErr.message, parseErr.stack);
+        await handleCollectFail(keyword, next.retryCount, 'PARSE_EXCEPTION', `파싱 예외: ${parseErr.message}`);
+        return;
+      }
     }
 
     if (!result.items.length) {
