@@ -1787,9 +1787,14 @@ export const extensionRouter = router({
             productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
           }
         } else if (prevSnapshotReviewSum !== null) {
-          reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
-          priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
-          productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
+          // ★ v7.2.8: 이전 스냅샷이 오늘이 아닌 경우에만 증가량 계산
+          const prevSnap = querySnapshots.length > 1 ? querySnapshots[1] : null;
+          const prevSnapDate = prevSnap?.createdAt ? String(prevSnap.createdAt).slice(0, 10) : '';
+          if (prevSnapDate && prevSnapDate !== todayStr) {
+            reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
+            priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
+            productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
+          }
         }
 
         const salesEstimate = reviewGrowth * 20;
@@ -4627,6 +4632,7 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
     let prevSnapshotReviewSum: number | null = null;
     let prevSnapshotAvgPrice: number | null = null;
     let prevSnapshotTotalItems: number | null = null;
+    let prevSnapshotCreatedAt: string | null = null;
     if (!prevStat) {
       const [prevSnapshot] = await db.select()
         .from(extSearchSnapshots)
@@ -4644,11 +4650,12 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
         prevSnapshotReviewSum = prevItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
         prevSnapshotAvgPrice = prevSnapshot.avgPrice || 0;
         prevSnapshotTotalItems = prevSnapshot.totalItems || 0;
+        prevSnapshotCreatedAt = prevSnapshot.createdAt ? String(prevSnapshot.createdAt).slice(0, 10) : null;
       }
     }
 
     // 리뷰 증가량 계산 (다단계 소스 활용)
-    // ★ v7.2.7 수정: 이전 데이터의 stat_date가 오늘이 아닌 경우에만 증가량 계산
+    // ★ v7.2.8 수정: prevSnapshot의 실제 생성일을 사용하여 정확한 날짜 비교
     // 같은 날 첫 수집 = 기준점이므로 증가량 0 (전날 대비만 의미있음)
     let reviewGrowth = 0;
     let priceChange = 0;
@@ -4664,10 +4671,10 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
       }
       // 같은 날이면 증가량 0 유지 (기준점 재설정)
     } else if (prevSnapshotReviewSum !== null) {
-      // 이전 스냅샷이 같은 날 생성된 경우 → 첫 수집 기준점이므로 증가량 0
-      const prevSnapshotDate = latest.createdAt ? latest.createdAt.slice(0, 10) : '';
-      // 이전 스냅샷은 항상 다른 시점이므로 날짜 다를 때만 비교
-      if (prevSnapshotDate !== todayStr) {
+      // ★ v7.2.8: prevSnapshot의 실제 생성일(prevSnapshotCreatedAt) 사용
+      // 이전 스냅샷이 오늘 생성 = 같은 날 재수집이므로 증가량 0
+      // 이전 스냅샷이 어제 이전 = 정상적인 전일대비 증가량 계산
+      if (prevSnapshotCreatedAt && prevSnapshotCreatedAt !== todayStr) {
         reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
         priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
         productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
