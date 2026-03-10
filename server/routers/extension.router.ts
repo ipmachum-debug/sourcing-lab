@@ -4209,12 +4209,28 @@ export const extensionRouter = router({
         ))
         .groupBy(extSearchEvents.source);
 
+      // 마지막 수집/통계 갱신 시각 (가장 최근 last_collected_at)
+      const [lastCollected] = await db.select({
+        lastAt: sql<string>`MAX(last_collected_at)`,
+      })
+        .from(extWatchKeywords)
+        .where(eq(extWatchKeywords.userId, userId));
+
+      // 마지막 daily_stats 갱신 시각
+      const [lastDailyStat] = await db.select({
+        lastAt: sql<string>`MAX(created_at)`,
+      })
+        .from(extKeywordDailyStats)
+        .where(eq(extKeywordDailyStats.userId, userId));
+
       return {
         collectedToday: N(todayStats?.collectedToday),
         totalActive: N(queueStats?.totalActive),
         neverCollected: N(queueStats?.neverCollected),
         staleKeywords: N(queueStats?.stale),
         sourceDist: sourceDist.map(s => ({ source: s.source, count: N(s.count) })),
+        lastCollectedAt: lastCollected?.lastAt || null,
+        lastStatsUpdatedAt: lastDailyStat?.lastAt || null,
       };
     }),
 });
