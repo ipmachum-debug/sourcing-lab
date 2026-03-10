@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "7.2.7";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.2.7.zip";
-const EXTENSION_FILE_SIZE = "155KB";
+const EXTENSION_VERSION = "7.2.8";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.2.8.zip";
+const EXTENSION_FILE_SIZE = "156KB";
 
 function AccordionSection({
   icon: Icon,
@@ -146,7 +146,7 @@ export default function ExtensionGuide() {
             {/* 1. 설치 방법 */}
             <AccordionSection icon={Chrome} title="1. 설치 방법" defaultOpen={true}>
               <div className="space-y-4 mt-3">
-                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.2.7.zip 파일을 받습니다." />
+                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.2.8.zip 파일을 받습니다." />
                 <Step num={2} title="압축 해제" desc="다운로드한 zip 파일의 압축을 풀어줍니다." />
                 <Step num={3} title="Chrome 확장프로그램 페이지 열기" desc="Chrome 주소창에 chrome://extensions 입력 후 이동합니다." />
                 <Step num={4} title="개발자 모드 활성화" desc="우측 상단의 '개발자 모드' 토글을 켜세요." />
@@ -585,6 +585,16 @@ export default function ExtensionGuide() {
             <AccordionSection icon={Clock} title="13. 📌 버전 기록">
               <div className="space-y-3 mt-3">
                 {[
+                  {
+                    version: "v7.2.8",
+                    date: "2026-03-10",
+                    changes: [
+                      "reviewGrowth 스냅샷 날짜 비교 버그 수정 (latest.createdAt → prevSnapshot.createdAt)",
+                      "같은 날 재수집 시 증가량 0 처리 정확성 개선 (양쪽 endpoint 모두 수정)",
+                      "키워드 자동 활성화 + 고아 키워드 동기화 유지",
+                      "기본 딜레이 15-25초, 상세 12-25초, 차단 2-4분",
+                    ],
+                  },
                   {
                     version: "v7.2.7",
                     date: "2026-03-10",
