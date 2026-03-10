@@ -240,6 +240,10 @@ class ApiClient {
     return this._call('extension.autoCollectStats', undefined, 'query');
   }
 
+  async autoCollectComplete(data = {}) {
+    return this._call('extension.autoCollectComplete', data, 'mutation');
+  }
+
   // ===== v6.5: 상세 페이지 확장 파싱 데이터 =====
   async saveDetailSnapshot(data) {
     return this._call('extension.saveDetailSnapshot', data, 'mutation');
