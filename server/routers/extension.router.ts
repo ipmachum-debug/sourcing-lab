@@ -1775,13 +1775,17 @@ export const extensionRouter = router({
         }
 
         // 리뷰 증가량 계산 (다단계 소스)
+        // ★ v7.2.7 수정: 이전 데이터가 오늘이 아닌 경우에만 증가량 계산
         let reviewGrowth = 0;
         let priceChange = 0;
         let productCountChange = 0;
         if (prevStat) {
-          reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
-          priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
-          productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+          const prevDate = String(prevStat.statDate || '');
+          if (prevDate !== todayStr) {
+            reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
+            priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
+            productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+          }
         } else if (prevSnapshotReviewSum !== null) {
           reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
           priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
@@ -1818,17 +1822,29 @@ export const extensionRouter = router({
         }
 
         // 키워드 점수 — 경쟁도 역수 + 수요 점수 반영
-        const avgReviewPerProduct = (latest.totalItems || 1) > 0 ? (latest.avgReview || 0) / Math.max(1, latest.totalItems || 1) : 0;
+        const avgReviewPerProduct = items.length > 0 ? totalReviewSum / items.length : 0;
         const competitionFactor = Math.max(0, 100 - (latest.competitionScore || 0)) / 100;
-        const keywordScore = Math.round(
-          Math.min(100,
-            reviewGrowth * 0.5 +
-            avgReviewPerProduct * 30 +
-            (1 - adRatio / 100) * 20 +
-            demandScore * 0.3 +
-            competitionFactor * 10
-          )
-        );
+        
+        // v7.2.7: 정규화된 키워드 점수 계산
+        let reviewGrowthScore = 0;
+        if (reviewGrowth >= 100) reviewGrowthScore = 25;
+        else if (reviewGrowth >= 50) reviewGrowthScore = 20;
+        else if (reviewGrowth >= 20) reviewGrowthScore = 15;
+        else if (reviewGrowth >= 10) reviewGrowthScore = 10;
+        else if (reviewGrowth >= 5) reviewGrowthScore = 7;
+        else if (reviewGrowth > 0) reviewGrowthScore = 3;
+        
+        let marketSizeScore = 0;
+        if (avgReviewPerProduct >= 500) marketSizeScore = 25;
+        else if (avgReviewPerProduct >= 200) marketSizeScore = 20;
+        else if (avgReviewPerProduct >= 100) marketSizeScore = 15;
+        else if (avgReviewPerProduct >= 50) marketSizeScore = 10;
+        else if (avgReviewPerProduct >= 20) marketSizeScore = 5;
+        
+        const competitionEaseScore = Math.round(competitionFactor * 15 + (1 - adRatio / 100) * 10);
+        const demandPart = Math.round(demandScore * 0.25);
+        
+        const keywordScore = Math.min(100, reviewGrowthScore + marketSizeScore + competitionEaseScore + demandPart);
 
         // upsert: 같은 날짜+키워드가 있으면 업데이트
         const [existing] = await db.select({ id: extKeywordDailyStats.id })
@@ -4125,8 +4141,38 @@ export const extensionRouter = router({
           try { await autoComputeKeywordDailyStat(userId, q, db); statsOk++; } catch { statsErr++; }
         }
       }
-      console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}`);
-      return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length };
+      // 3. 고아 키워드 자동 활성화 (ext_keyword_daily_stats에는 있지만 ext_watch_keywords에 없는 키워드)
+      let syncCount = 0;
+      try {
+        const orphanKws = await db.select({ query: extKeywordDailyStats.query })
+          .from(extKeywordDailyStats)
+          .where(eq(extKeywordDailyStats.userId, userId))
+          .groupBy(extKeywordDailyStats.query);
+
+        for (const { query: kw } of orphanKws) {
+          const [exists] = await db.select({ id: extWatchKeywords.id })
+            .from(extWatchKeywords)
+            .where(and(eq(extWatchKeywords.userId, userId), eq(extWatchKeywords.keyword, kw)))
+            .limit(1);
+          if (!exists) {
+            await db.insert(extWatchKeywords).values({
+              userId,
+              keyword: kw,
+              priority: 50,
+              isActive: true,
+              totalSearchCount: 1,
+              collectIntervalHours: 24,
+            });
+            syncCount++;
+          }
+        }
+        if (syncCount > 0) console.log(`[autoCollectComplete] 고아 키워드 ${syncCount}개 자동 등록`);
+      } catch (e) {
+        console.warn('[autoCollectComplete] 키워드 동기화 오류:', e);
+      }
+
+      console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}`);
+      return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount };
     }),
 
   // ===== 100개 단위 라운드 일괄 통계 계산 (웹 UI용) =====
@@ -4602,18 +4648,30 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
     }
 
     // 리뷰 증가량 계산 (다단계 소스 활용)
+    // ★ v7.2.7 수정: 이전 데이터의 stat_date가 오늘이 아닌 경우에만 증가량 계산
+    // 같은 날 첫 수집 = 기준점이므로 증가량 0 (전날 대비만 의미있음)
     let reviewGrowth = 0;
     let priceChange = 0;
     let productCountChange = 0;
 
     if (prevStat) {
-      reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
-      priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
-      productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+      const prevDate = String(prevStat.statDate || '');
+      // 이전 데이터가 오늘이 아닌 경우에만 증가량 계산 (전일 대비)
+      if (prevDate !== todayStr) {
+        reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
+        priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
+        productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+      }
+      // 같은 날이면 증가량 0 유지 (기준점 재설정)
     } else if (prevSnapshotReviewSum !== null) {
-      reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
-      priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
-      productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
+      // 이전 스냅샷이 같은 날 생성된 경우 → 첫 수집 기준점이므로 증가량 0
+      const prevSnapshotDate = latest.createdAt ? latest.createdAt.slice(0, 10) : '';
+      // 이전 스냅샷은 항상 다른 시점이므로 날짜 다를 때만 비교
+      if (prevSnapshotDate !== todayStr) {
+        reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
+        priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
+        productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
+      }
     }
 
     const salesEstimate = reviewGrowth * 20;
@@ -4645,16 +4703,35 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
       demandScore = Math.min(50, baselineDemand);
     }
 
-    // ★ 개선: 키워드 점수 — 경쟁도 역수 + 수요 점수 반영
-    const avgReviewPerProduct = (latest.totalItems || 1) > 0 ? (latest.avgReview || 0) / Math.max(1, latest.totalItems || 1) : 0;
+    // ★ v7.2.7 수정: 키워드 점수 — 정규화된 지표 합산 (100점 만점)
+    // 각 지표를 0~1 범위로 정규화 후 가중합산
+    const avgReviewPerProduct = items.length > 0 ? totalReviewSum / items.length : 0;
     const competitionFactor = Math.max(0, 100 - (latest.competitionScore || 0)) / 100;
-    const keywordScore = Math.round(Math.min(100,
-      reviewGrowth * 0.5 +
-      avgReviewPerProduct * 30 +
-      (1 - adRatio / 100) * 20 +
-      demandScore * 0.3 +
-      competitionFactor * 10
-    ));
+    
+    // 리뷰 증가 점수 (0~25점) - reviewGrowth 기반
+    let reviewGrowthScore = 0;
+    if (reviewGrowth >= 100) reviewGrowthScore = 25;
+    else if (reviewGrowth >= 50) reviewGrowthScore = 20;
+    else if (reviewGrowth >= 20) reviewGrowthScore = 15;
+    else if (reviewGrowth >= 10) reviewGrowthScore = 10;
+    else if (reviewGrowth >= 5) reviewGrowthScore = 7;
+    else if (reviewGrowth > 0) reviewGrowthScore = 3;
+    
+    // 시장 규모 점수 (0~25점) - 평균 리뷰 수 기반
+    let marketSizeScore = 0;
+    if (avgReviewPerProduct >= 500) marketSizeScore = 25;
+    else if (avgReviewPerProduct >= 200) marketSizeScore = 20;
+    else if (avgReviewPerProduct >= 100) marketSizeScore = 15;
+    else if (avgReviewPerProduct >= 50) marketSizeScore = 10;
+    else if (avgReviewPerProduct >= 20) marketSizeScore = 5;
+    
+    // 경쟁 용이성 점수 (0~25점) - 낮은 경쟁 + 낮은 광고 비율
+    const competitionEaseScore = Math.round(competitionFactor * 15 + (1 - adRatio / 100) * 10);
+    
+    // 수요 점수 (0~25점) - demandScore 기반 
+    const demandPart = Math.round(demandScore * 0.25);
+    
+    const keywordScore = Math.min(100, reviewGrowthScore + marketSizeScore + competitionEaseScore + demandPart);
 
     // upsert
     const [existing] = await db.select({ id: extKeywordDailyStats.id })

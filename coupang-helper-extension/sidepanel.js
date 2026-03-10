@@ -2956,7 +2956,7 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
   var targetKeywords = keywordList; // 항상 전체 키워드 대상
   var roundSize = batchSize > 0 ? batchSize : keywordList.length;
   var totalRounds = Math.ceil(targetKeywords.length / roundSize);
-  var estSec = 35; // 키워드당 평균 예상 시간 (25~45초)
+  var estSec = 20; // 키워드당 평균 예상 시간 (25~45초)
   var estMin = Math.ceil(targetKeywords.length * estSec / 60);
 
   var confirmMsg = '쿠팡 데이터를 수집합니다.\n\n' +
@@ -2964,7 +2964,7 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
   if (batchSize > 0) {
     confirmMsg += '🔄 라운드: ' + roundSize + '개씩 ' + totalRounds + '라운드\n';
   }
-  confirmMsg += '⏱️ 예상: 약 ' + estMin + '분 (키워드당 25~45초)\n' +
+  confirmMsg += '⏱️ 예상: 약 ' + estMin + '분 (키워드당 15~25초)\n' +
     '⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?';
 
   if (!confirm(confirmMsg)) return;
