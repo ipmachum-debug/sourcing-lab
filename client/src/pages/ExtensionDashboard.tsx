@@ -236,11 +236,16 @@ export default function ExtensionDashboard() {
   // Search Demand queries
   const keywordStatsList = trpc.extension.listKeywordStats.useQuery(
     { search: demandSearch || undefined, sortBy: demandSort, sortDir: "desc", limit: 100 },
-    { enabled: activeTab === "demand" || activeTab === "overview", refetchInterval: activeTab === "demand" ? 30000 : false }
+    { enabled: activeTab === "demand" || activeTab === "overview" }
   );
   const keywordStatsOverview = trpc.extension.keywordStatsOverview.useQuery(
-    undefined, { enabled: activeTab === "demand" || activeTab === "overview", refetchInterval: activeTab === "demand" ? 30000 : false }
+    undefined, { enabled: activeTab === "demand" || activeTab === "overview" }
   );
+  // v5.7: 자동수집 상태 (마지막 수집/통계 갱신 시각)
+  const autoCollectInfo = trpc.extension.autoCollectStats.useQuery(
+    undefined, { enabled: activeTab === "demand" }
+  );
+
   const keywordDailyStats = trpc.extension.getKeywordDailyStats.useQuery(
     { query: demandSelectedKw || "", days: demandDays },
     { enabled: !!demandSelectedKw && activeTab === "demand" }
@@ -940,12 +945,48 @@ export default function ExtensionDashboard() {
               </Card>
             )}
 
-            {/* 자동 처리 안내 */}
+            {/* 자동 처리 안내 + 새로고침 + v7.2.6 업데이트 안내 */}
             {!statsRunning && (
-              <div className="flex items-center gap-2 text-[10px] text-gray-400 px-1">
-                <CheckCircle className="w-3 h-3 text-green-500" />
-                확장프로그램 자동수집 완료 시 서버에서 통계가 자동 갱신됩니다. 수동 갱신이 필요하면 위 "통계 계산" 버튼을 클릭하세요.
-              </div>
+              <Card className="border-blue-100 bg-blue-50/30">
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex flex-col gap-2">
+                    {/* 마지막 갱신 시각 + 새로고침 */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[11px] text-gray-600">
+                        <Clock className="w-3.5 h-3.5 text-blue-500" />
+                        <span>
+                          마지막 수집: <b>{autoCollectInfo.data?.lastCollectedAt ? new Date(autoCollectInfo.data.lastCollectedAt).toLocaleString("ko-KR") : "-"}</b>
+                          {autoCollectInfo.data?.collectedToday ? ` (오늘 ${autoCollectInfo.data.collectedToday}건)` : ""}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-[10px] h-7 gap-1 border-blue-200 text-blue-600 hover:bg-blue-50"
+                        onClick={() => {
+                          keywordStatsList.refetch();
+                          keywordStatsOverview.refetch();
+                          autoCollectInfo.refetch();
+                          if (demandSelectedKw) keywordDailyStats.refetch();
+                          toast.success("데이터 갱신됨");
+                        }}>
+                        <Activity className="w-3 h-3" />
+                        새로고침
+                      </Button>
+                    </div>
+
+                    {/* v7.2.6 업데이트 안내 */}
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <Sparkles className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                      <div className="text-[10px] text-amber-800">
+                        <p className="font-semibold mb-0.5">확장프로그램 v7.2.6 업데이트 안내</p>
+                        <p>자동수집 완료 시 서버 통계가 <b>자동 갱신</b>됩니다. 확장프로그램을 v7.2.6으로 업데이트하면 수집 후 별도 작업 없이 이 페이지에 자동 반영됩니다.</p>
+                        <p className="mt-1 text-amber-600">업데이트 전에는 수집 후 위 "통계 계산" 또는 "새로고침" 버튼을 사용해주세요.</p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* 개요 카드 */}
