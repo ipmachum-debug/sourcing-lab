@@ -3539,11 +3539,12 @@ export const extensionRouter = router({
           ))
           .limit(1);
 
+        const INT_MAX = 2000000000;
         const statusData = {
           totalItems: agg.totalItems,
-          avgPrice: agg.avgPrice,
-          minPrice: agg.minPrice,
-          maxPrice: agg.maxPrice,
+          avgPrice: Math.min(agg.avgPrice, INT_MAX),
+          minPrice: Math.min(agg.minPrice, INT_MAX),
+          maxPrice: Math.min(agg.maxPrice, INT_MAX),
           avgRating: agg.avgRating.toFixed(1),
           avgReview: agg.avgReview,
           totalReviewSum: agg.totalReviewSum,
@@ -3608,9 +3609,9 @@ export const extensionRouter = router({
           const snapData = {
             query: input.keyword,
             totalItems: input.totalItems,
-            avgPrice: input.avgPrice,
+            avgPrice: Math.min(input.avgPrice, 100000000),
             avgRating: input.avgRating.toFixed(1),
-            avgReview: input.avgReview,
+            avgReview: Math.min(input.avgReview, 2000000000),
             highReviewRatio,
             adCount: input.adCount,
             competitionScore: compScore,

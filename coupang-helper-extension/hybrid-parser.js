@@ -275,29 +275,45 @@ const HybridParser = {
   //  2. HTML → 상품 데이터 파싱 (V1 + V2 자동 전환)
   // ============================================================
   parseSearchHTML(html, keyword) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const hasDOMParser = typeof DOMParser !== 'undefined';
+    let result;
 
-    // V2 먼저 시도 (2025~2026 신형 DOM)
-    let result = this.parseV2(doc, keyword);
-    if (result && result.items.length > 0) {
-      result.domVersion = 'V2';
-      console.log(`[HP] V2 DOM 파싱 성공: ${result.items.length}개 상품`);
-      return result;
+    // ★ DOMParser 사용 가능 시 (content script / sidepanel 컨텍스트)
+    if (hasDOMParser) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+
+      // V2 먼저 시도 (2025~2026 신형 DOM)
+      result = this.parseV2(doc, keyword);
+      if (result && result.items.length > 0) {
+        result.domVersion = 'V2';
+        console.log(`[HP] V2 DOM 파싱 성공: ${result.items.length}개 상품`);
+        return result;
+      }
+
+      // V1 폴백 (구형 DOM)
+      result = this.parseV1(doc, keyword);
+      if (result && result.items.length > 0) {
+        result.domVersion = 'V1';
+        console.log(`[HP] V1 DOM 파싱 성공: ${result.items.length}개 상품`);
+        return result;
+      }
+    } else {
+      console.log('[HP] Service Worker 컨텍스트 — DOMParser 없음, SSR/Regex 파싱 사용');
     }
 
-    // V1 폴백 (구형 DOM)
-    result = this.parseV1(doc, keyword);
-    if (result && result.items.length > 0) {
-      result.domVersion = 'V1';
-      console.log(`[HP] V1 DOM 파싱 성공: ${result.items.length}개 상품`);
-      return result;
-    }
-
-    // SSR JSON 최종 폴백
+    // SSR JSON (DOMParser 불필요)
     result = this.parseSSRJson(html, keyword);
     if (result && result.items.length > 0) {
       result.domVersion = 'SSR';
       console.log(`[HP] SSR JSON 파싱 성공: ${result.items.length}개 상품`);
+      return result;
+    }
+
+    // ★ Regex 기반 파싱 (Service Worker 호환, DOMParser 불필요)
+    result = this.parseRegex(html, keyword);
+    if (result && result.items.length > 0) {
+      result.domVersion = 'REGEX';
+      console.log(`[HP] Regex 파싱 성공: ${result.items.length}개 상품`);
       return result;
     }
 
@@ -705,6 +721,199 @@ const HybridParser = {
   },
 
   // ============================================================
+  //  Regex 파서 — Service Worker 호환 (DOMParser 불필요)
+  //  HTML 원문에서 정규식으로 상품 데이터 추출
+  // ============================================================
+  parseRegex(html, keyword) {
+    const items = [];
+    const seen = new Set();
+    let adCount = 0;
+
+    // 총 상품수 추출
+    let totalProductCount = 0;
+    const countMatch = html.match(/name="searchProductCount"[^>]*value="(\d+)"/)
+      || html.match(/searchProductCount["']\s*(?:value|content)\s*=\s*["'](\d+)/);
+    if (countMatch) totalProductCount = parseInt(countMatch[1]) || 0;
+
+    // 방법 1: V2 ProductUnit 기반 regex
+    // 각 상품 li 블록을 추출
+    const productBlocks = html.match(/<li[^>]*class="[^"]*ProductUnit_productUnit[^"]*"[\s\S]*?<\/li>/gi) || [];
+    
+    for (const block of productBlocks) {
+      if (items.length >= 72) break;
+
+      // 광고 체크
+      if (/AdMark_text|AdMark_adMark|ad-badge|AdBadge/i.test(block)) {
+        adCount++;
+        continue;
+      }
+
+      // 상품 ID
+      const pidMatch = block.match(/\/products\/(\d+)/);
+      if (!pidMatch) continue;
+      const pid = pidMatch[1];
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+
+      // vendorItemId
+      const vidMatch = block.match(/vendorItemId=(\d+)/i);
+      const vendorItemId = vidMatch ? vidMatch[1] : null;
+
+      // URL
+      const hrefMatch = block.match(/href="([^"]*\/products\/\d+[^"]*)"/);
+      const href = hrefMatch ? hrefMatch[1] : `/vp/products/${pid}`;
+      const fullUrl = href.startsWith('http') ? href : `https://www.coupang.com${href}`;
+
+      // 상품명 — ProductUnit_productName 내 텍스트 또는 title 속성
+      let title = '';
+      const titleMatch = block.match(/class="[^"]*productName[^"]*"[^>]*>([^<]+)</) 
+        || block.match(/title="([^"]{2,})"/);
+      if (titleMatch) title = titleMatch[1].trim();
+      // 더 넓은 패턴 시도
+      if (!title) {
+        const altMatch = block.match(/alt="([^"]{4,})"/);
+        if (altMatch) title = altMatch[1].trim();
+      }
+      if (!title || title.length < 2) continue;
+
+      // 가격 — "N,NNN원" 패턴 (할인율 등 숫자 방지)
+      let price = 0;
+      // 전략 1: Price_priceValue 클래스 내 가격
+      const priceClassMatch = block.match(/Price_priceValue[^"]*"[^>]*>([^<]*\d[\d,]+원?[^<]*)</i);
+      if (priceClassMatch) {
+        const pMatch = priceClassMatch[1].match(/(\d{1,3}(?:,\d{3})+)\s*원?/);
+        if (pMatch) { const p = parseInt(pMatch[1].replace(/,/g, ''), 10); if (p >= 100 && p < 1e8) price = p; }
+      }
+      // 전략 2: 일반 가격 패턴 (N,NNN원)
+      if (!price) {
+        const pricePatterns = block.match(/(\d{1,3}(?:,\d{3})+)\s*원/g) || [];
+        for (const pp of pricePatterns) {
+          const numMatch = pp.match(/(\d{1,3}(?:,\d{3})+)/);
+          if (numMatch) {
+            const p = parseInt(numMatch[1].replace(/,/g, ''), 10);
+            if (p >= 100 && p < 1e8) { price = p; break; }
+          }
+        }
+      }
+
+      // 평점 — aria-label 또는 텍스트 패턴
+      let rating = 0;
+      const ariaMatch = block.match(/aria-label="([^"]*\d[^"]*)"/g);
+      if (ariaMatch) {
+        for (const am of ariaMatch) {
+          const rm = am.match(/(\d\.\d)/);
+          if (rm) { const r = parseFloat(rm[1]); if (r >= 1 && r <= 5) { rating = r; break; } }
+        }
+      }
+      // 전략 2: ProductRating 내 텍스트
+      if (!rating) {
+        const ratingSection = block.match(/ProductRating[^"]*"[^>]*>([^<]*(?:<[^>]*>[^<]*)*)/i);
+        if (ratingSection) {
+          const rm = ratingSection[1].match(/(\d\.\d)/);
+          if (rm) { const r = parseFloat(rm[1]); if (r >= 1 && r <= 5) rating = r; }
+        }
+      }
+
+      // 리뷰수 — (N,NNN) 또는 (NNN) 패턴
+      let reviewCount = 0;
+      const reviewMatches = block.match(/\((\d[\d,]*)\)/g) || [];
+      for (const rm of reviewMatches) {
+        const nm = rm.match(/\((\d[\d,]*)\)/);
+        if (nm) {
+          const n = parseInt(nm[1].replace(/,/g, ''), 10);
+          if (n > 0 && n < 10000000) { reviewCount = n; break; }
+        }
+      }
+
+      // 리뷰는 있는데 평점이 없으면 추정
+      if (!rating && reviewCount > 0) {
+        rating = reviewCount >= 500 ? 4.6 : reviewCount >= 100 ? 4.5 : reviewCount >= 30 ? 4.3 : 4.0;
+      }
+
+      // 로켓배송 여부
+      const isRocket = /로켓배송|rocketDelivery|rocket|badge-id.*ROCKET/i.test(block);
+
+      // 이미지
+      let imageUrl = '';
+      const imgMatch = block.match(/(?:src|data-img-src)="(https?:\/\/[^"]*(?:coupangcdn|thumbnail)[^"]*)"/);
+      if (imgMatch) imageUrl = imgMatch[1];
+
+      items.push({
+        productId: pid,
+        vendorItemId,
+        title,
+        price,
+        originalPrice: 0,
+        rating,
+        ratingIsEstimated: (!rating && reviewCount > 0),
+        reviewCount,
+        isAd: false,
+        isRocket,
+        deliveryType: isRocket ? 'rocketDelivery' : 'normalDelivery',
+        deliveryLabel: isRocket ? '로켓배송' : '일반배송',
+        imageUrl,
+        url: fullUrl,
+        position: items.length + 1,
+        rankNum: 0,
+        arrivalDate: '',
+        query: keyword,
+      });
+    }
+
+    // 방법 2: V1 검색상품 블록
+    if (!items.length) {
+      const v1Blocks = html.match(/<li[^>]*class="[^"]*search-product[^"]*"[\s\S]*?<\/li>/gi) || [];
+      for (const block of v1Blocks) {
+        if (items.length >= 72) break;
+        if (/ad-badge|AdBadge|광고/i.test(block)) { adCount++; continue; }
+
+        const pidMatch = block.match(/\/products\/(\d+)/);
+        if (!pidMatch) continue;
+        const pid = pidMatch[1];
+        if (seen.has(pid)) continue;
+        seen.add(pid);
+
+        let title = '';
+        const nameMatch = block.match(/class="[^"]*name[^"]*"[^>]*>([^<]+)</) || block.match(/title="([^"]{2,})"/);
+        if (nameMatch) title = nameMatch[1].trim();
+        if (!title) { const altMatch = block.match(/alt="([^"]{4,})">/); if (altMatch) title = altMatch[1].trim(); }
+        if (!title || title.length < 2) continue;
+
+        let price = 0;
+        const pricePatterns = block.match(/(\d{1,3}(?:,\d{3})+)\s*원/g) || [];
+        for (const pp of pricePatterns) {
+          const numMatch = pp.match(/(\d{1,3}(?:,\d{3})+)/);
+          if (numMatch) { const p = parseInt(numMatch[1].replace(/,/g, ''), 10); if (p >= 100 && p < 1e8) { price = p; break; } }
+        }
+
+        let rating = 0;
+        const starMatch = block.match(/width:\s*([\d.]+)%/);
+        if (starMatch) rating = Math.round(parseFloat(starMatch[1]) / 20 * 10) / 10;
+
+        let reviewCount = 0;
+        const revMatches = block.match(/\((\d[\d,]*)\)/g) || [];
+        for (const rm of revMatches) {
+          const nm = rm.match(/\((\d[\d,]*)\)/);
+          if (nm) { const n = parseInt(nm[1].replace(/,/g, ''), 10); if (n > 0 && n < 10000000) { reviewCount = n; break; } }
+        }
+
+        const isRocket = /로켓배송|rocketDelivery|rocket/i.test(block);
+
+        items.push({
+          productId: pid, vendorItemId: null, title, price, originalPrice: 0,
+          rating, ratingIsEstimated: false, reviewCount, isAd: false, isRocket,
+          deliveryType: isRocket ? 'rocketDelivery' : 'normalDelivery',
+          deliveryLabel: isRocket ? '로켓배송' : '일반배송',
+          imageUrl: '', url: `https://www.coupang.com/vp/products/${pid}`,
+          position: items.length + 1, rankNum: 0, arrivalDate: '', query: keyword,
+        });
+      }
+    }
+
+    return { items, totalProductCount: totalProductCount || items.length, adCount, stats: this._calcStats(items) };
+  },
+
+  // ============================================================
   //  배송유형 분류 — V2 (셀러라이프 getProductDeliveryTypeV2 정밀 구현)
   // ============================================================
   _classifyDeliveryV2(card) {
@@ -857,19 +1066,41 @@ const HybridParser = {
         });
         if (!resp.ok) break;
         const html = await resp.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const reviewEls = doc.querySelectorAll('.sdp-review__article__list__review');
-        if (!reviewEls.length) break;
-        for (const el of reviewEls) {
-          const ratingEl = el.querySelector('.sdp-review__article__list__info__product-info__star-orange');
-          const ratingStyle = ratingEl?.getAttribute('style') || '';
-          const widthMatch = ratingStyle.match(/width:\s*([\d.]+)%/);
-          const rating = widthMatch ? Math.round(parseFloat(widthMatch[1]) / 20 * 10) / 10 : 0;
-          const headline = el.querySelector('.sdp-review__article__list__headline')?.textContent?.trim() || '';
-          const content = el.querySelector('.sdp-review__article__list__review__content')?.textContent?.trim() || '';
-          const date = el.querySelector('.sdp-review__article__list__info__product-info__reg-date')?.textContent?.trim() || '';
-          const userName = el.querySelector('.sdp-review__article__list__info__user__name')?.textContent?.trim() || '';
-          reviews.push({ rating, headline, content, date, userName, source: 'desktop' });
+        if (typeof DOMParser !== 'undefined') {
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const reviewEls = doc.querySelectorAll('.sdp-review__article__list__review');
+          if (!reviewEls.length) break;
+          for (const el of reviewEls) {
+            const ratingEl = el.querySelector('.sdp-review__article__list__info__product-info__star-orange');
+            const ratingStyle = ratingEl?.getAttribute('style') || '';
+            const widthMatch = ratingStyle.match(/width:\s*([\d.]+)%/);
+            const rating = widthMatch ? Math.round(parseFloat(widthMatch[1]) / 20 * 10) / 10 : 0;
+            const headline = el.querySelector('.sdp-review__article__list__headline')?.textContent?.trim() || '';
+            const content = el.querySelector('.sdp-review__article__list__review__content')?.textContent?.trim() || '';
+            const date = el.querySelector('.sdp-review__article__list__info__product-info__reg-date')?.textContent?.trim() || '';
+            const userName = el.querySelector('.sdp-review__article__list__info__user__name')?.textContent?.trim() || '';
+            reviews.push({ rating, headline, content, date, userName, source: 'desktop' });
+          }
+        } else {
+          // Service Worker 컨텍스트: regex로 리뷰 추출
+          const reviewBlocks = html.match(/class="[^"]*sdp-review__article__list__review[^"]*"[\s\S]*?<\/article>/gi) || [];
+          if (!reviewBlocks.length) break;
+          for (const block of reviewBlocks) {
+            const widthMatch = block.match(/star-orange[^>]*style="[^"]*width:\s*([\d.]+)%/);
+            const rating = widthMatch ? Math.round(parseFloat(widthMatch[1]) / 20 * 10) / 10 : 0;
+            const headMatch = block.match(/headline[^>]*>([^<]+)</);
+            const contentMatch = block.match(/review__content[^>]*>([^<]+)</);
+            const dateMatch = block.match(/reg-date[^>]*>([^<]+)</);
+            const nameMatch = block.match(/user__name[^>]*>([^<]+)</);
+            reviews.push({
+              rating,
+              headline: headMatch ? headMatch[1].trim() : '',
+              content: contentMatch ? contentMatch[1].trim() : '',
+              date: dateMatch ? dateMatch[1].trim() : '',
+              userName: nameMatch ? nameMatch[1].trim() : '',
+              source: 'desktop',
+            });
+          }
         }
         if (reviews.length >= 50) break;
         await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
@@ -992,7 +1223,9 @@ const HybridParser = {
   //  통계 계산 유틸
   // ============================================================
   _calcStats(items) {
-    const prices = items.map(i => i.price).filter(p => p > 0);
+    // 가격 상한 1억원 (INT 오버플로 방지)
+    const MAX_PRICE = 100000000;
+    const prices = items.map(i => i.price).filter(p => p > 0 && p < MAX_PRICE);
     const ratings = items.map(i => i.rating).filter(r => r > 0 && r <= 5);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
     const deliveryTypes = {};
@@ -1001,9 +1234,9 @@ const HybridParser = {
       deliveryTypes[dt] = (deliveryTypes[dt] || 0) + 1;
     }
     return {
-      avgPrice: prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0,
+      avgPrice: prices.length ? Math.min(Math.round(prices.reduce((a, b) => a + b, 0) / prices.length), MAX_PRICE) : 0,
       minPrice: prices.length ? Math.min(...prices) : 0,
-      maxPrice: prices.length ? Math.max(...prices) : 0,
+      maxPrice: prices.length ? Math.min(Math.max(...prices), MAX_PRICE) : 0,
       avgRating: ratings.length ? +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : 0,
       avgReview: reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0,
       totalReviewSum: reviews.reduce((a, b) => a + b, 0),
