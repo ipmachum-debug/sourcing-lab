@@ -2583,7 +2583,7 @@ async function loadDemandKeywords() {
   const sortSel = document.querySelector('#demandSortSelect');
   const sortBy = sortSel ? sortSel.value : 'compositeScore';
   try {
-    const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 100 } });
+    const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 200 } });
     if (!resp || !resp.ok || !resp.data || !resp.data.length) {
       document.querySelector('#demandEmpty').style.display = '';
       document.querySelector('#demandKwHeader').style.display = 'none';
@@ -2951,19 +2951,28 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     return;
   }
 
-  // batchSize가 0이면 전체, 아니면 slice
-  var targetKeywords = batchSize > 0 ? keywordList.slice(0, batchSize) : keywordList;
-  var estMin = Math.ceil(targetKeywords.length * 1);
-  var estMax = Math.ceil(targetKeywords.length * 1.5);
+  // v7.2.7: "수집수 N" = 전체 키워드를 N개씩 라운드로 수집
+  // batchSize가 0이면 전체를 한 번에, 아니면 N개씩 라운드
+  var targetKeywords = keywordList; // 항상 전체 키워드 대상
+  var roundSize = batchSize > 0 ? batchSize : keywordList.length;
+  var totalRounds = Math.ceil(targetKeywords.length / roundSize);
+  var estSec = 35; // 키워드당 평균 예상 시간 (25~45초)
+  var estMin = Math.ceil(targetKeywords.length * estSec / 60);
 
-  if (!confirm('쿠팡 데이터를 수집합니다.\n\n' +
-    '📋 대상: ' + targetKeywords.length + '개 키워드\n' +
-    '⏱️ 예상: 약 ' + estMin + '~' + estMax + '분 (키워드당 50~89초)\n' +
-    '⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?')) return;
+  var confirmMsg = '쿠팡 데이터를 수집합니다.\n\n' +
+    '📋 전체 대상: ' + targetKeywords.length + '개 키워드\n';
+  if (batchSize > 0) {
+    confirmMsg += '🔄 라운드: ' + roundSize + '개씩 ' + totalRounds + '라운드\n';
+  }
+  confirmMsg += '⏱️ 예상: 약 ' + estMin + '분 (키워드당 25~45초)\n' +
+    '⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?';
 
+  if (!confirm(confirmMsg)) return;
+
+  // 전체 키워드를 한 번에 전달하되 roundSize 정보도 함께 전달
   var resp = await sendMsg({
     type: 'START_AUTO_COLLECT',
-    payload: { limit: targetKeywords.length, collectDetail: collectDetail, keywords: targetKeywords },
+    payload: { limit: targetKeywords.length, collectDetail: collectDetail, keywords: targetKeywords, roundSize: roundSize },
   });
 
   if (resp && resp.ok) {
@@ -2971,7 +2980,10 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     document.querySelector('#autoCollectProgress').style.display = '';
     document.querySelector('#batchProgressBar').style.display = '';
     document.querySelector('#batchProgressFill').style.width = '0%';
-    document.querySelector('#batchProgressText').textContent = '0/' + targetKeywords.length + ' (수집 시작중...)';
+    var startMsg = '0/' + targetKeywords.length;
+    if (batchSize > 0) startMsg += ' (R1/' + totalRounds + ' - ' + roundSize + '개씩)';
+    startMsg += ' 수집 시작중...';
+    document.querySelector('#batchProgressText').textContent = startMsg;
     startAutoCollectPolling();
     pollAutoCollectState();
     // 완료 감지 폴링
@@ -2985,6 +2997,12 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
         var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
         document.querySelector('#batchProgressFill').style.width = pct + '%';
         var statusText = done + '/' + total;
+        // v7.2.7: 라운드 정보 표시
+        if (roundSize > 0 && roundSize < total) {
+          var currentRound = Math.floor(done / roundSize) + 1;
+          var maxRounds = Math.ceil(total / roundSize);
+          statusText += ' (R' + currentRound + '/' + maxRounds + ')';
+        }
         if (state.currentKeyword) statusText += ' "' + state.currentKeyword + '"';
         if (state.status === 'NAVIGATING') statusText += ' (이동중)';
         else if (state.status === 'PARSING') statusText += ' (파싱중)';

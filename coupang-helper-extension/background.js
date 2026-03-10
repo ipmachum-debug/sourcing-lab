@@ -1442,7 +1442,7 @@ const collector = {
 };
 
 // ---- 유틸 ----
-function randomDelay(min = 50000, max = 89000) {
+function randomDelay(min = 25000, max = 45000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
@@ -1830,7 +1830,7 @@ async function runNextKeyword() {
           if (!collector.running || collector._aborted) break;
           try {
             await collectDetailForItem(item, keyword);
-            await collectorSleep(randomDelay(20000, 40000));
+            await collectorSleep(randomDelay(12000, 25000));
           } catch (e) {
             console.warn(`[SH-AC] 상세 수집 실패: ${item.productId}`, e.message);
           }
@@ -1883,7 +1883,7 @@ async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
   // v7.2.2: 에러 유형별 최적화된 딜레이
   let delay;
   if (errorCode === 'ACCESS_BLOCKED') {
-    delay = randomDelay(180000, 360000); // 3~6분 (차단)
+    delay = randomDelay(120000, 240000); // 3~6분 (차단)
     console.log(`[SH-AC] ⛔ 접근 차단 — ${Math.round(delay/1000)}초 대기`);
     // 탭 재생성 (차단된 세션 갱신)
     if (collector.currentTabId) {
