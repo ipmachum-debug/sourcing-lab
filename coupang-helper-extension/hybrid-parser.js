@@ -207,12 +207,12 @@ const HybridParser = {
     const { tabId, page = 1, listSize = 36 } = options;
     const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&page=${page}&listSize=${listSize}`;
     
-    const strategies = [
-      { name: 'direct_fetch', fn: () => this.fetchCoupangDirect(searchUrl) },
-      { name: 'dnr_fetch', fn: () => this.fetchWithDNR(searchUrl) },
-    ];
+    // ★ v7.2.8: 전략 순서 변경 — 렌더링된 HTML(리뷰 포함) 우선
+    // direct_fetch/dnr_fetch는 SSR HTML만 가져와서 rating/reviewCount가 0 (JS 동적로딩 미반영)
+    // tab_script/hidden_tab은 JavaScript 렌더링 후 HTML → 리뷰 데이터 포함
+    const strategies = [];
 
-    // 탭이 있으면 탭 기반 전략 추가
+    // 1순위: 탭이 있으면 탭 기반 수집 (가장 정확, JS 렌더링 완료)
     if (tabId) {
       strategies.push({
         name: 'tab_script',
@@ -236,11 +236,17 @@ const HybridParser = {
       });
     }
 
-    // 최종 폴백: Hidden Tab + 폴링
+    // 2순위: Hidden Tab + 폴링 (JS 렌더링 보장, 느리지만 정확)
     strategies.push({
       name: 'hidden_tab_polling',
       fn: () => this.fetchViaHiddenTab(searchUrl),
     });
+
+    // 3순위: 직접 fetch (빠르지만 SSR만 → 리뷰 미포함 가능)
+    strategies.push(
+      { name: 'direct_fetch', fn: () => this.fetchCoupangDirect(searchUrl) },
+      { name: 'dnr_fetch', fn: () => this.fetchWithDNR(searchUrl) },
+    );
 
     // 순차 시도
     for (const strategy of strategies) {
@@ -259,6 +265,9 @@ const HybridParser = {
           continue;
         }
 
+        // ★ v7.2.8: 리뷰 품질 검증 — 렌더링 전략에서만 기대
+        // tab/hidden_tab 전략에서 HTML 잘 가져왔으면 바로 반환
+        // direct_fetch/dnr_fetch는 리뷰 없을 수 있지만, 다른 전략 모두 실패시 최후 수단
         console.log(`[HP] ✅ ${strategy.name} 성공: HTML ${(html.length / 1024).toFixed(1)}KB`);
         return { html, strategy: strategy.name };
       } catch (e) {
