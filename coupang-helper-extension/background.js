@@ -1442,7 +1442,7 @@ const collector = {
 };
 
 // ---- 유틸 ----
-function randomDelay(min = 25000, max = 45000) {
+function randomDelay(min = 15000, max = 25000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
