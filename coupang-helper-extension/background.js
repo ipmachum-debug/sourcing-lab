@@ -1569,6 +1569,7 @@ async function startAutoCollect(options = {}) {
     collector.successCount = 0;
     collector.failCount = 0;
     collector.skipCount = 0;
+    collector._collectedKeywords = [];
     collector.lastError = null;
     collector.startedAt = new Date().toISOString();
 
@@ -1695,7 +1696,27 @@ async function runNextKeyword() {
       priority: 1,
     });
 
-    try { await apiClient.runDailyBatchCollection(); } catch (_) {}
+    // v7.2.5: 수집 완료 → 서버 자동 통계 처리 (autoCollectComplete)
+    try {
+      const completeResult = await apiClient.autoCollectComplete({
+        successCount: collector.successCount,
+        failCount: collector.failCount,
+        skipCount: collector.skipCount,
+        keywords: collector._collectedKeywords || [],
+      });
+      console.log(`[SH-AC] 🔄 서버 자동 통계 처리 완료: stats=${completeResult?.result?.data?.statsComputed || 0}, batch=${completeResult?.result?.data?.batchUpdated || 0}`);
+      
+      chrome.notifications.create(`auto-stats-done-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: '✅ 서버 통계 자동 갱신 완료',
+        message: `${completeResult?.result?.data?.statsComputed || 0}개 키워드 통계 자동 처리됨`,
+        priority: 0,
+      });
+    } catch (e) {
+      console.warn('[SH-AC] autoCollectComplete 실패, fallback to runDailyBatchCollection:', e.message);
+      try { await apiClient.runDailyBatchCollection(); } catch (_) {}
+    }
     return;
   }
 
@@ -1766,6 +1787,8 @@ async function runNextKeyword() {
     console.log(`[SH-AC] ✅ "${keyword}" 수집 성공: ${result.items.length}개 (${strategy}/${result.domVersion}) | 가격${result.stats.priceRate}% 평점${result.stats.ratingRate}% 리뷰${result.stats.reviewRate}%`);
 
     collector.successCount++;
+    if (!collector._collectedKeywords) collector._collectedKeywords = [];
+    collector._collectedKeywords.push(keyword);
     collector.current = null;
     collector._consecutiveErrors = 0; // 연속 에러 리셋
 

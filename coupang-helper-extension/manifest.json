@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "7.2.5",
-  "description": "쿠팡+알리 AI 소싱 코치 v7.2.2 — 자동수집에러수정+딜레이최적화 · 셀러라이프방식다중전략수집 · V2DOM듀얼파서 · 완전헤더위조 · 마진계산기 · AI분석",
+  "version": "7.2.6",
+  "description": "쿠팡+알리 AI 소싱 코치 v7.2.6 — 수집완료자동통계갱신+배치실행제거 · 셀러라이프방식다중전략수집 · V2DOM듀얼파서 · 완전헤더위조 · 마진계산기 · AI분석",
   "permissions": [
     "storage",
     "tabs",

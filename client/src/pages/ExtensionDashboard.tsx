@@ -83,12 +83,10 @@ export default function ExtensionDashboard() {
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSort, setDemandSort] = useState<"keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price">("keyword_score");
   const [selectedDeleteKws, setSelectedDeleteKws] = useState<Set<string>>(new Set());
-  const [selectedBatchKws, setSelectedBatchKws] = useState<Set<string>>(new Set());
-  const [batchRunning, setBatchRunning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, batchNum: 0 });
-  const [batchMode, setBatchMode] = useState<'all' | 'selected'>('all');
-  const [batchSize, setBatchSize] = useState(1);
-  const batchStoppedRef = useRef(false);
+  // v5.7: 100개 단위 라운드 자동 통계 처리
+  const [statsRunning, setStatsRunning] = useState(false);
+  const [statsProgress, setStatsProgress] = useState({ current: 0, total: 0, round: 0, totalRounds: 0 });
+  const statsStoppedRef = useRef(false);
   // Sourcing modal state
   const [sourcingModalOpen, setSourcingModalOpen] = useState(false);
   const [sourcingPrefillData, setSourcingPrefillData] = useState<Record<string, any> | undefined>(undefined);
@@ -238,10 +236,10 @@ export default function ExtensionDashboard() {
   // Search Demand queries
   const keywordStatsList = trpc.extension.listKeywordStats.useQuery(
     { search: demandSearch || undefined, sortBy: demandSort, sortDir: "desc", limit: 100 },
-    { enabled: activeTab === "demand" || activeTab === "overview" }
+    { enabled: activeTab === "demand" || activeTab === "overview", refetchInterval: activeTab === "demand" ? 30000 : false }
   );
   const keywordStatsOverview = trpc.extension.keywordStatsOverview.useQuery(
-    undefined, { enabled: activeTab === "demand" || activeTab === "overview" }
+    undefined, { enabled: activeTab === "demand" || activeTab === "overview", refetchInterval: activeTab === "demand" ? 30000 : false }
   );
   const keywordDailyStats = trpc.extension.getKeywordDailyStats.useQuery(
     { query: demandSelectedKw || "", days: demandDays },
@@ -288,77 +286,53 @@ export default function ExtensionDashboard() {
     onError: (err: any) => toast.error(err.message || "분석 실패"),
   });
 
-  const computeStats = trpc.extension.computeKeywordDailyStats.useMutation({
-    onSuccess: (data) => {
-      keywordStatsList.refetch();
-      keywordStatsOverview.refetch();
-      if (demandSelectedKw) keywordDailyStats.refetch();
-      toast.success(`${data.computed}개 키워드 통계 계산 완료 (${data.date})`);
-    },
-    onError: (err: any) => toast.error(err.message || "통계 계산 실패"),
-  });
-  // 배치 실행 함수 - computeKeywordDailyStats를 키워드별로 분할 호출
-  const handleRunBatch = useCallback(async () => {
-    if (batchRunning) return;
-    setBatchRunning(true);
-    batchStoppedRef.current = false;
+  // v5.7: bulkComputeStats — 100개 단위 라운드 자동 통계 처리
+  const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
 
-    // 대상 키워드 목록 결정
-    const allKws: string[] = (keywordStatsList.data || []).map((k: any) => k.query);
-    const targetKws = batchMode === 'selected'
-      ? Array.from(selectedBatchKws)
-      : allKws;
-
-    if (targetKws.length === 0) {
-      toast.error(batchMode === 'selected' ? '배치할 키워드를 체크하세요' : '처리할 키워드가 없습니다');
-      setBatchRunning(false);
-      return;
-    }
-
-    const total = targetKws.length;
-    let processed = 0;
-    let batchNum = 0;
-    setBatchProgress({ current: 0, total, batchNum: 0 });
+  const handleAutoStats = useCallback(async () => {
+    if (statsRunning) return;
+    setStatsRunning(true);
+    statsStoppedRef.current = false;
+    setStatsProgress({ current: 0, total: 0, round: 0, totalRounds: 0 });
 
     try {
-      // batchSize씩 나눠서 처리
-      for (let i = 0; i < total; i += batchSize) {
-        if (batchStoppedRef.current) {
-          toast.info(`배치 중지됨 (${processed}/${total} 처리됨)`);
+      let offset = 0;
+      const limit = 100;
+      let hasMore = true;
+
+      while (hasMore) {
+        if (statsStoppedRef.current) {
+          toast.info("통계 처리 중지됨");
           break;
         }
-        batchNum++;
-        const chunk = targetKws.slice(i, i + batchSize);
-        setBatchProgress({ current: i, total, batchNum });
 
-        // 각 키워드에 대해 computeKeywordDailyStats 호출
-        for (const query of chunk) {
-          if (batchStoppedRef.current) break;
-          try {
-            await computeStats.mutateAsync({ query });
-            processed++;
-          } catch {
-            // 개별 키워드 에러는 건너뜀
-          }
-          setBatchProgress(prev => ({ ...prev, current: Math.min(i + chunk.indexOf(query) + 1, total) }));
-        }
+        const result = await bulkCompute.mutateAsync({ offset, limit });
+        setStatsProgress({
+          current: result.offset + result.computed,
+          total: result.total,
+          round: result.round,
+          totalRounds: result.totalRounds,
+        });
+
+        hasMore = result.hasMore;
+        offset = result.nextOffset;
       }
 
-      if (!batchStoppedRef.current) {
-        toast.success(`배치 완료! 총 ${processed}/${total}건 통계 갱신됨`);
+      if (!statsStoppedRef.current) {
+        toast.success("전체 통계 갱신 완료!");
       }
     } catch (err: any) {
-      toast.error(`배치 오류: ${err.message}`);
+      toast.error(`통계 계산 오류: ${err.message}`);
     } finally {
-      setBatchRunning(false);
+      setStatsRunning(false);
       keywordStatsList.refetch();
       keywordStatsOverview.refetch();
       if (demandSelectedKw) keywordDailyStats.refetch();
     }
-  }, [batchRunning, batchMode, batchSize, selectedBatchKws, keywordStatsList.data]);
+  }, [statsRunning]);
 
-  const handleStopBatch = useCallback(() => {
-    batchStoppedRef.current = true;
+  const handleStopStats = useCallback(() => {
+    statsStoppedRef.current = true;
   }, []);
 
   const deleteKeyword = trpc.extension.deleteKeyword.useMutation({
@@ -913,12 +887,19 @@ export default function ExtensionDashboard() {
                 <p className="text-xs text-gray-500 mt-1">쿠팡 검색 데이터 기반 · 리뷰 증가량으로 판매량 추정 · 키워드별 경쟁·수요 분석</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
-                  disabled={computeStats.isPending}
-                  onClick={() => computeStats.mutate({})}>
-                  <Zap className="w-3 h-3" />
-                  {computeStats.isPending ? "계산중..." : "통계 계산"}
-                </Button>
+                {!statsRunning ? (
+                  <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
+                    onClick={handleAutoStats}>
+                    <Zap className="w-3 h-3" />
+                    통계 계산
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="destructive" className="text-xs gap-1.5"
+                    onClick={handleStopStats}>
+                    <Square className="w-3 h-3" fill="currentColor" />
+                    중지
+                  </Button>
+                )}
                 {selectedDeleteKws.size > 0 && (
                   <Button variant="destructive" size="sm" className="text-xs gap-1"
                     onClick={() => {
@@ -931,114 +912,41 @@ export default function ExtensionDashboard() {
               </div>
             </div>
 
-            {/* ===== 배치 수집 컨트롤 ===== */}
-            <Card className="border-orange-200 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
-              <CardContent className="pt-4 pb-4">
-                <div className="flex flex-col gap-3">
-                  {/* 1행: 배치 설정 */}
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-4">
+            {/* ===== 통계 처리 상태 (라운드 진행 시 표시) ===== */}
+            {statsRunning && (
+              <Card className="border-orange-200 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Settings2 className="w-4 h-4 text-orange-500" />
-                        <span className="text-xs font-semibold text-gray-700">통계 갱신 (서버)</span>
-                      </div>
-
-                      {/* 배치 모드 */}
-                      <div className="flex items-center gap-1.5 bg-white rounded-lg px-2 py-1 border">
-                        <button
-                          className={`px-2.5 py-1 text-[10px] rounded-md transition font-medium ${batchMode === 'all' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
-                          onClick={() => setBatchMode('all')}>
-                          일괄 (전체)
-                        </button>
-                        <button
-                          className={`px-2.5 py-1 text-[10px] rounded-md transition font-medium ${batchMode === 'selected' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
-                          onClick={() => setBatchMode('selected')}>
-                          선택 ({selectedBatchKws.size}개)
-                        </button>
-                      </div>
-
-                      {/* 선택 모드일 때 전체선택/해제 */}
-                      {batchMode === 'selected' && (
-                        <button
-                          className="text-[10px] text-orange-600 hover:text-orange-800 underline"
-                          onClick={() => {
-                            if (selectedBatchKws.size === (keywordStatsList.data?.length || 0)) {
-                              setSelectedBatchKws(new Set());
-                            } else {
-                              setSelectedBatchKws(new Set((keywordStatsList.data || []).map((k: any) => k.query)));
-                            }
-                          }}>
-                          {selectedBatchKws.size === (keywordStatsList.data?.length || 0) ? '전체 해제' : '전체 선택'}
-                        </button>
-                      )}
-
-                      {/* 배치 크기 */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-gray-500">배치 크기:</span>
-                        <select
-                          value={batchSize}
-                          onChange={(e) => setBatchSize(Number(e.target.value))}
-                          className="text-[10px] border rounded px-1.5 py-1 bg-white">
-                          <option value={1}>1개</option>
-                          <option value={2}>2개</option>
-                          <option value={3}>3개</option>
-                          <option value={5}>5개</option>
-                          <option value={10}>10개</option>
-                          <option value={20}>20개</option>
-                          <option value={30}>30개</option>
-                          <option value={50}>50개</option>
-                          <option value={100}>전체</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* 실행/중지 버튼 */}
-                    <div className="flex items-center gap-2">
-                      {!batchRunning ? (
-                        <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
-                          onClick={handleRunBatch}
-                          disabled={batchMode === 'selected' && selectedBatchKws.size === 0}>
-                          <Play className="w-3 h-3" fill="currentColor" />
-                          배치 실행
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="destructive" className="text-xs gap-1.5"
-                          onClick={handleStopBatch}>
-                          <Square className="w-3 h-3" fill="currentColor" />
-                          중지
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 2행: 프로그레스 (배치 실행 중일 때만) */}
-                  {batchRunning && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-gray-500 flex items-center gap-1">
-                          <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
-                          배치 #{batchProgress.batchNum} 실행중...
-                        </span>
-                        <span className="font-medium text-orange-600">
-                          {batchProgress.current}/{batchProgress.total}
+                        <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+                        <span className="text-xs font-semibold text-gray-700">
+                          통계 자동 갱신 중... (100개 단위 라운드)
                         </span>
                       </div>
-                      <Progress
-                        value={batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}
-                        className="h-2"
-                      />
+                      <span className="text-xs font-medium text-orange-600">
+                        라운드 {statsProgress.round}/{statsProgress.totalRounds} | {statsProgress.current}/{statsProgress.total}
+                      </span>
                     </div>
-                  )}
-
-                  {/* 배치 모드 안내 */}
-                  <div className="text-[10px] text-gray-400">
-                    {batchMode === 'all'
-                      ? `전체 키워드(${(keywordStatsList.data?.length || 0)}개)를 ${batchSize}개씩 나눠서 통계를 갱신합니다. (실제 수집은 확장프로그램에서)`
-                      : `체크한 키워드만 ${batchSize}개씩 나눠서 배치 수집합니다. 좌측 테이블에서 키워드를 선택하세요.`}
+                    <Progress
+                      value={statsProgress.total > 0 ? (statsProgress.current / statsProgress.total) * 100 : 0}
+                      className="h-2"
+                    />
+                    <p className="text-[10px] text-gray-400">
+                      100개씩 순차 처리 중입니다. 확장프로그램 자동수집 완료 시 서버에서 자동 갱신됩니다.
+                    </p>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 자동 처리 안내 */}
+            {!statsRunning && (
+              <div className="flex items-center gap-2 text-[10px] text-gray-400 px-1">
+                <CheckCircle className="w-3 h-3 text-green-500" />
+                확장프로그램 자동수집 완료 시 서버에서 통계가 자동 갱신됩니다. 수동 갱신이 필요하면 위 "통계 계산" 버튼을 클릭하세요.
+              </div>
+            )}
 
             {/* 개요 카드 */}
             {keywordStatsOverview.data && (
@@ -1091,20 +999,7 @@ export default function ExtensionDashboard() {
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b bg-gray-50 text-gray-500 text-[10px]">
-                            {batchMode === 'selected' && (
-                              <th className="p-2 text-center w-8" title="배치 선택">
-                                <input type="checkbox"
-                                  className="accent-orange-500"
-                                  checked={selectedBatchKws.size > 0 && selectedBatchKws.size === (keywordStatsList.data?.length || 0)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedBatchKws(new Set((keywordStatsList.data || []).map((k: any) => k.query)));
-                                    } else {
-                                      setSelectedBatchKws(new Set());
-                                    }
-                                  }} />
-                              </th>
-                            )}
+
                             <th className="p-2 text-center w-8" title="삭제 선택">
                               <input type="checkbox"
                                 checked={selectedDeleteKws.size > 0 && selectedDeleteKws.size === (keywordStatsList.data?.length || 0)}
@@ -1143,17 +1038,7 @@ export default function ExtensionDashboard() {
                                 <tr key={kw.id}
                                   className={`border-b cursor-pointer transition ${isSelected ? 'bg-orange-50 ring-1 ring-orange-200' : 'hover:bg-gray-50'}`}
                                   onClick={() => setDemandSelectedKw(kw.query)}>
-                                  {batchMode === 'selected' && (
-                                    <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
-                                      <input type="checkbox" className="accent-orange-500"
-                                        checked={selectedBatchKws.has(kw.query)}
-                                        onChange={() => {
-                                          const next = new Set(selectedBatchKws);
-                                          if (next.has(kw.query)) next.delete(kw.query); else next.add(kw.query);
-                                          setSelectedBatchKws(next);
-                                        }} />
-                                    </td>
-                                  )}
+
                                   <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
                                     <input type="checkbox" checked={isChecked}
                                       onChange={() => {
