@@ -190,8 +190,8 @@ export async function computeDailyAggregation(
   const totalItems = items.length || N(latest.totalItems);
 
   // 상세 통계 계산 (개별 상품 레벨)
-  const prices = items.map((i: any) => N(i.price)).filter((p: number) => p > 0);
-  const ratings = items.map((i: any) => N(i.rating)).filter((r: number) => r > 0);
+  const prices = items.map((i: any) => N(i.price)).filter((p: number) => p > 0 && p < 100000000);
+  const ratings = items.map((i: any) => N(i.rating)).filter((r: number) => r > 0 && r <= 5);
   const reviews = items.map((i: any) => N(i.reviewCount)).filter((r: number) => r > 0);
 
   const INT_MAX = 2147483647; // MySQL INT 최대값

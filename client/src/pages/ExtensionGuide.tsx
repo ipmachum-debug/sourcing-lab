@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 const EXTENSION_VERSION = "7.0.0";
-const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.2.4.zip";
+const EXTENSION_ZIP_URL = "/coupang-helper-extension-v7.2.5.zip";
 const EXTENSION_FILE_SIZE = "143KB";
 
 function AccordionSection({
@@ -146,7 +146,7 @@ export default function ExtensionGuide() {
             {/* 1. 설치 방법 */}
             <AccordionSection icon={Chrome} title="1. 설치 방법" defaultOpen={true}>
               <div className="space-y-4 mt-3">
-                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.2.4.zip 파일을 받습니다." />
+                <Step num={1} title="확장프로그램 파일 다운로드" desc="위의 다운로드 버튼을 클릭하여 coupang-helper-extension-v7.2.5.zip 파일을 받습니다." />
                 <Step num={2} title="압축 해제" desc="다운로드한 zip 파일의 압축을 풀어줍니다." />
                 <Step num={3} title="Chrome 확장프로그램 페이지 열기" desc="Chrome 주소창에 chrome://extensions 입력 후 이동합니다." />
                 <Step num={4} title="개발자 모드 활성화" desc="우측 상단의 '개발자 모드' 토글을 켜세요." />
@@ -586,7 +586,7 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v7.2.4",
+                    version: "v7.2.5",
                     date: "2026-03-10",
                     badge: "Latest",
                     changes: [
