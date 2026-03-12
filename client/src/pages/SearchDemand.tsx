@@ -387,8 +387,8 @@ export default function SearchDemand() {
             </Card>
           </div>
 
-          {/* 우측: 선택된 키워드 상세 */}
-          <div className="space-y-4">
+          {/* 우측: 선택된 키워드 상세 (스크롤 시 따라옴) */}
+          <div className="space-y-4 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             {demandSelectedKw ? (
               <>
                 <Card className="border-orange-200">
