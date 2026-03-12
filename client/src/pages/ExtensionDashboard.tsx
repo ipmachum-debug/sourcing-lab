@@ -565,7 +565,7 @@ export default function ExtensionDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 space-y-6">
+      <div className="space-y-4">
         {/* 페이지 헤더 */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>

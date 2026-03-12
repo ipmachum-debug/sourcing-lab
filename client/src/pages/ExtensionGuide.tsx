@@ -76,7 +76,7 @@ function GradeBadge({ grade, label, className }: { grade: string; label: string;
 export default function ExtensionGuide() {
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto">
+      <div className="space-y-4 max-w-4xl mx-auto">
         {/* 히어로 섹션 */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white p-8 md:p-10">
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />

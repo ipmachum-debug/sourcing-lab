@@ -7,8 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Search, Gem, TrendingUp, ShieldCheck, AlertTriangle, Sparkles,
-  ArrowUpRight, Filter, BarChart3, Star,
+  ArrowUpRight, Filter, BarChart3, Star, Loader2, Lightbulb,
+  AlertCircle, Zap, ThumbsUp, ThumbsDown, Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,6 +62,28 @@ export default function NicheFinder() {
   const [minSales, setMinSales] = useState(0);
   const [sortBy, setSortBy] = useState<SortKey>("opportunity");
   const [priceRange, setPriceRange] = useState<"all" | "low" | "mid" | "high">("all");
+
+  // AI 리포트 모달
+  const [reportQuery, setReportQuery] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+
+  const reviewAnalysis = trpc.extension.getReviewAnalysis.useQuery(
+    { query: reportQuery!, limit: 1 },
+    { enabled: !!reportQuery },
+  );
+
+  const analyzeMut = trpc.extension.analyzeReviews.useMutation({
+    onSuccess: () => {
+      reviewAnalysis.refetch();
+      toast.success("AI 분석 완료");
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const openReport = (query: string) => {
+    setReportQuery(query);
+    setReportOpen(true);
+  };
 
   const keywordStatsList = trpc.extension.listKeywordStats.useQuery(
     { sortBy: "demand_score", sortDir: "desc", limit: 500 },
@@ -241,10 +270,16 @@ export default function NicheFinder() {
                       </div>
                     </div>
 
-                    <div className="flex justify-between mt-2 text-[10px] text-gray-500">
+                    <div className="flex justify-between items-center mt-2 text-[10px] text-gray-500">
                       <span>상품수: {kw.productCount || 0}</span>
                       <span>평균가: {formatPrice(kw.avgPrice)}</span>
                       <span>리뷰+: <span className="text-green-600 font-medium">{kw.reviewGrowth > 0 ? `+${kw.reviewGrowth}` : "0"}</span></span>
+                      <button
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 hover:bg-purple-100 transition text-[9px] font-medium"
+                        onClick={() => openReport(kw.query)}
+                      >
+                        <Brain className="w-3 h-3" /> AI
+                      </button>
                     </div>
                   </CardContent>
                 </Card>
@@ -259,6 +294,164 @@ export default function NicheFinder() {
           </p>
         )}
       </div>
+
+      {/* AI 리포트 모달 */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Brain className="w-5 h-5 text-purple-600" />
+              AI 리뷰 분석 — "{reportQuery}"
+            </DialogTitle>
+          </DialogHeader>
+
+          {(() => {
+            const analysis = reviewAnalysis.data?.[0];
+            const loading = reviewAnalysis.isLoading;
+            const analyzing = analyzeMut.isPending;
+
+            if (loading) return (
+              <div className="flex items-center justify-center py-12 text-gray-400">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" /> 불러오는 중...
+              </div>
+            );
+
+            if (!analysis) return (
+              <div className="text-center py-10">
+                <AlertCircle className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                <p className="text-sm text-gray-500 mb-1">아직 분석 데이터가 없습니다</p>
+                <p className="text-[10px] text-gray-400 mb-4">
+                  크롬 익스텐션에서 수집한 검색 데이터를 기반으로 AI가 분석합니다
+                </p>
+                <Button
+                  size="sm"
+                  className="gap-1"
+                  disabled={analyzing}
+                  onClick={() => reportQuery && analyzeMut.mutate({ query: reportQuery })}
+                >
+                  {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  {analyzing ? "분석 중..." : "AI 분석 실행"}
+                </Button>
+              </div>
+            );
+
+            return (
+              <div className="space-y-4">
+                {/* 요약 */}
+                <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3">
+                  <div className="flex items-center gap-1 text-xs font-semibold text-purple-700 mb-1">
+                    <Lightbulb className="w-3.5 h-3.5" /> 종합 요약
+                    {analysis.aiPowered && (
+                      <Badge className="text-[8px] ml-1 bg-purple-100 text-purple-700 border-purple-200">AI</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-700 leading-relaxed">{analysis.summaryText}</p>
+                  <div className="flex gap-3 mt-2 text-[10px] text-gray-500">
+                    <span>분석 상품: {analysis.totalProductsAnalyzed}개</span>
+                    <span>평균 평점: {analysis.avgRating}</span>
+                    <span>평균 리뷰: {analysis.avgReviewCount}개</span>
+                  </div>
+                </div>
+
+                {/* 기회 요인 */}
+                {analysis.opportunities?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-green-700">
+                      <Zap className="w-3.5 h-3.5" /> 기회 요인
+                    </h4>
+                    <div className="space-y-1.5">
+                      {analysis.opportunities.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-green-50 rounded p-2 text-xs text-gray-700">
+                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 고객 불만 (Pain Points) */}
+                {analysis.painPoints?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-red-700">
+                      <AlertTriangle className="w-3.5 h-3.5" /> 고객 불만 포인트
+                    </h4>
+                    <div className="space-y-1.5">
+                      {analysis.painPoints.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-red-50 rounded p-2 text-xs text-gray-700">
+                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 칭찬 / 불만 2단 */}
+                <div className="grid grid-cols-2 gap-3">
+                  {analysis.commonPraises?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-blue-700">
+                        <ThumbsUp className="w-3.5 h-3.5" /> 공통 칭찬
+                      </h4>
+                      <div className="space-y-1">
+                        {analysis.commonPraises.map((item: any, idx: number) => (
+                          <div key={idx} className="bg-blue-50 rounded p-1.5 text-[11px] text-gray-700">
+                            {typeof item === "string" ? item : item.text || JSON.stringify(item)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {analysis.commonComplaints?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-orange-700">
+                        <ThumbsDown className="w-3.5 h-3.5" /> 공통 불만
+                      </h4>
+                      <div className="space-y-1">
+                        {analysis.commonComplaints.map((item: any, idx: number) => (
+                          <div key={idx} className="bg-orange-50 rounded p-1.5 text-[11px] text-gray-700">
+                            {typeof item === "string" ? item : item.text || JSON.stringify(item)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 추천 사항 */}
+                {analysis.recommendations?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-indigo-700">
+                      <Star className="w-3.5 h-3.5" /> 소싱 추천
+                    </h4>
+                    <div className="space-y-1.5">
+                      {analysis.recommendations.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-indigo-50 rounded p-2 text-xs text-gray-700 flex items-start gap-1.5">
+                          <span className="text-indigo-500 font-bold shrink-0">{idx + 1}.</span>
+                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 재분석 버튼 */}
+                <div className="flex justify-end pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs gap-1"
+                    disabled={analyzing}
+                    onClick={() => reportQuery && analyzeMut.mutate({ query: reportQuery })}
+                  >
+                    {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                    {analyzing ? "분석 중..." : "재분석"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
