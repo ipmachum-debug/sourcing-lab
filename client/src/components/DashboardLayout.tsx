@@ -22,7 +22,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
-  Activity, Target, Search,
+  Activity, Target, Search, Calculator, Gem,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -40,6 +40,8 @@ type MenuItem = {
 const menuItems: MenuItem[] = [
   // 소싱
   { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", group: "소싱" },
+  { icon: Gem, label: "니치 파인더", path: "/niche-finder", emoji: "💎", group: "소싱" },
+  { icon: Calculator, label: "마진 계산기", path: "/margin", emoji: "💰", group: "소싱" },
   { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", group: "소싱" },
   { icon: Package, label: "전체 상품", path: "/products", emoji: "📦", group: "소싱" },
   { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪", group: "소싱" },
