@@ -22,10 +22,10 @@
     <!-- ========== 탭 네비게이션 ========== -->
     <nav class="tabs">
       <button class="tab active" data-tab="analysis">📊 분석</button>
+      <button class="tab" data-tab="demand">🔥 수집</button>
       <button class="tab" data-tab="datasheet">📋 시트</button>
       <button class="tab" data-tab="candidates">⭐ 후보</button>
       <button class="tab" data-tab="ranking">📈 순위</button>
-      <button class="tab" data-tab="demand">🔥 수요</button>
       <button class="tab" data-tab="wing">🦅 WING</button>
       <button class="tab" data-tab="detail">🔍 상세</button>
       <button class="tab" data-tab="history">📋 이력</button>
@@ -173,7 +173,7 @@
     <!-- ========== 검색수요 탭 (v7.2) ========== -->
     <div class="tab-content" id="tab-demand">
       <div class="section-header">
-        <h2>🔥 검색수요 분석</h2>
+        <h2>🔥 자동 수집</h2>
         <div style="display:flex;gap:4px;align-items:center">
           <div class="demand-toggle-wrap">
             <label class="demand-toggle" title="배치 수집 ON/OFF">
@@ -217,6 +217,7 @@
         <div class="demand-batch-size-row">
           <label>라운드 단위:</label>
           <select id="batchSizeSelect">
+            <option value="1">1개씩</option>
             <option value="2" selected>2개씩</option>
             <option value="3">3개씩</option>
             <option value="5">5개씩</option>
@@ -252,8 +253,7 @@
         <div class="demand-kw-sort">
           <label>정렬:</label>
           <select id="demandSortSelect">
-            <option value="keywordScore">종합점수</option>
-            <option value="compositeScore">활성도</option>
+            <option value="compositeScore">종합점수</option>
             <option value="lastSearched">최근검색</option>
             <option value="reviewGrowth">리뷰증가</option>
             <option value="priority">우선순위</option>
@@ -872,7 +872,7 @@
 
         <!-- 버전 정보 -->
         <div class="guide-footer">
-          <p>🐢 Coupang Sourcing Helper v7.3.3</p>
+          <p>🐢 Coupang Sourcing Helper v5.5.7</p>
           <p>문의: lumiriz.kr</p>
         </div>
 

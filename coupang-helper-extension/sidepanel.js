@@ -2601,7 +2601,7 @@ async function loadDemandDashboard() {
 
 async function loadDemandKeywords() {
   const sortSel = document.querySelector('#demandSortSelect');
-  const sortBy = sortSel ? sortSel.value : 'keywordScore';
+  const sortBy = sortSel ? sortSel.value : 'compositeScore';
   try {
     const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 200 } });
     if (!resp || !resp.ok || !resp.data || !resp.data.length) {
@@ -2624,14 +2624,11 @@ function renderDemandKeywords(keywords) {
     const el = document.createElement('div');
     el.className = 'demand-kw-item' + (selectedKeywordIds.has(kw.id) ? ' selected' : '');
     el.dataset.kwId = kw.id;
-    // v7.3.2: keywordScore (서버 검색수요와 동일)
-    const score = kw.keywordScore || kw.compositeScore || 0;
-    const scoreClass = score >= 60 ? 's-high' : score >= 30 ? 's-mid' : 's-low';
+    const scoreClass = kw.compositeScore >= 60 ? 's-high' : kw.compositeScore >= 30 ? 's-mid' : 's-low';
     let tags = '';
-    if ((kw.dailyReviewGrowth || kw.reviewGrowth7d || 0) > 0) tags += '<span class="demand-kw-tag growth">+' + (kw.dailyReviewGrowth || kw.reviewGrowth7d) + ' 리뷰</span>';
+    if (kw.reviewGrowth7d > 0) tags += '<span class="demand-kw-tag growth">+' + kw.reviewGrowth7d + ' 리뷰</span>';
     if (kw.totalSearchCount >= 5) tags += '<span class="demand-kw-tag hot">🔥 ' + kw.totalSearchCount + '회</span>';
-    if (score >= 60) tags += '<span class="demand-kw-tag score">⭐ TOP</span>';
-    if ((kw.demandScore || 0) >= 60) tags += '<span class="demand-kw-tag" style="background:#dcfce7;color:#166534">📈 수요 ' + kw.demandScore + '</span>';
+    if (kw.compositeScore >= 60) tags += '<span class="demand-kw-tag score">⭐ TOP</span>';
     if (kw.latestAvgPrice > 0) tags += '<span class="demand-kw-tag">' + formatDemandPrice(kw.latestAvgPrice) + '</span>';
     const lastStr = kw.lastSearchedAt ? timeAgo(kw.lastSearchedAt) : '-';
 
@@ -2640,7 +2637,7 @@ function renderDemandKeywords(keywords) {
         '<div class="demand-kw-name">' + escHtml(kw.keyword) + '</div>' +
         '<div class="demand-kw-meta">' + tags + '<span class="demand-kw-tag">' + lastStr + '</span></div>' +
       '</div>' +
-      '<div class="demand-kw-score ' + scoreClass + '">' + score + '</div>' +
+      '<div class="demand-kw-score ' + scoreClass + '">' + kw.compositeScore + '</div>' +
       '<div class="demand-kw-actions-mini">' +
         '<button class="btn-sm" data-action="detail" data-keyword="' + escHtml(kw.keyword) + '" title="상세">📊</button>' +
         '<button class="btn-sm" data-action="delete" data-kw-id="' + kw.id + '" title="삭제">🗑</button>' +
@@ -2824,7 +2821,7 @@ function updateAutoCollectUI(state) {
     'RUNNING': { text: '수집중', cls: 'level-medium' },
     'NAVIGATING': { text: '이동중', cls: 'level-medium' },
     'PARSING': { text: '파싱중', cls: 'level-medium' },
-    'WAITING_NEXT': { text: '재시도 대기', cls: 'level-easy' },
+    'WAITING_NEXT': { text: '대기중', cls: 'level-easy' },
     'COLLECTING_DETAIL': { text: '상세수집', cls: 'level-medium' },
     'PAUSED': { text: '일시정지', cls: 'level-hard' },
     'STOPPED': { text: '중단됨', cls: 'level-hard' },
@@ -2958,8 +2955,14 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       document.querySelector('#batchProgressBar').style.display = '';
       document.querySelector('#batchProgressFill').style.width = '0%';
       document.querySelector('#batchProgressText').textContent = '서버 키워드 수집중...';
+      // v7.4: 즉시 UI 반영 (워밍업 중에도 수집중 표시)
+      updateAutoCollectUI({
+        status: 'RUNNING', running: true, paused: false,
+        queueLength: resp.queueLength || 0, currentKeyword: null,
+        successCount: 0, failCount: 0, skipCount: 0,
+        totalQueued: resp.queueLength || 0, lastError: null, progress: 0,
+      });
       startAutoCollectPolling();
-      pollAutoCollectState();
     } else {
       // v7.2: Already running 에러 시 강제 리셋 옵션
       var errMsg1 = resp ? resp.error : '';
@@ -3007,8 +3010,14 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     if (batchSize > 0) startMsg += ' (R1/' + totalRounds + ' - ' + roundSize + '개씩)';
     startMsg += ' 수집 시작중...';
     document.querySelector('#batchProgressText').textContent = startMsg;
+    // v7.4: 즉시 UI 반영 (워밍업 중에도 수집중 표시)
+    updateAutoCollectUI({
+      status: 'RUNNING', running: true, paused: false,
+      queueLength: resp.queueLength || targetKeywords.length, currentKeyword: null,
+      successCount: 0, failCount: 0, skipCount: 0,
+      totalQueued: resp.queueLength || targetKeywords.length, lastError: null, progress: 0,
+    });
     startAutoCollectPolling();
-    pollAutoCollectState();
     // 완료 감지 폴링
     var completePollId = setInterval(async function() {
       try {

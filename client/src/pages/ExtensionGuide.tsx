@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "7.4.0";
+const EXTENSION_VERSION = "7.4.1";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "165KB";
 
@@ -586,9 +586,23 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v7.4.0",
+                    version: "v7.4.1",
                     date: "2026-03-12",
                     badge: "Latest",
+                    changes: [
+                      "인간 행동 모방 딜레이 전면 개편 (봇 탐지 회피 강화)",
+                      "지수분포 + 피로도 + 시간대 가중치 + 지터 적용",
+                      "상세 수집 딜레이: humanDetailDelay() 지수분포 (5~35초)",
+                      "에러 딜레이: errorDelay() 지수 백오프",
+                      "좀비 감지: 키워드 수 × 40초 × 1.5 동적 임계값",
+                      "재귀 호출 → scheduleNextKeyword() (setTimeout 기반)",
+                      "수요탭 → 수집탭 이름/순서 변경, 배치 1개씩 옵션 추가",
+                      "수집 시작 후 UI 즉시 반영 (updateAutoCollectUI)",
+                    ],
+                  },
+                  {
+                    version: "v7.4.0",
+                    date: "2026-03-12",
                     changes: [
                       "확장프로그램 v7.4.0 릴리스",
                       "수집 시작 오류 수정 (Service Worker 메시지 타임아웃 해결)",
