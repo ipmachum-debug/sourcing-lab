@@ -722,10 +722,11 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
   reviewGrowth7d: int("review_growth_7d").default(0),
   priceChange1d: int("price_change_1d").default(0),
   compositeScore: int("composite_score").default(0),
-  // 적응형 스케줄링
+  // 적응형 수집 스케줄러 (v7.3.4)
   nextCollectAt: timestamp("next_collect_at", tsOpts),
   adaptiveIntervalHours: int("adaptive_interval_hours"),
-  volatilityScore: int("volatility_score").default(0),
+  volatilityScore: int("volatility_score").notNull().default(0),
+  priorityScore: int("priority_score").default(0),
   // 타임스탬프
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
@@ -787,3 +788,54 @@ export const extKeywordDailyStatus = mysqlTable("ext_keyword_daily_status", {
 
 export type ExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferSelect;
 export type InsertExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferInsert;
+
+// ==================== Extension: 키워드 메트릭 (ext_keyword_metrics) ====================
+// EMA 스무딩 + 판매 추정 + 급등 탐지 결과 저장
+export const extKeywordMetrics = mysqlTable("ext_keyword_metrics", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  metricDate: varchar("metric_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  // 리뷰 델타
+  reviewDelta: int("review_delta").notNull().default(0),
+  reviewDeltaEma7: decimal("review_delta_ema7", { precision: 14, scale: 4 }).default("0"),
+  reviewDeltaEma30: decimal("review_delta_ema30", { precision: 14, scale: 4 }).default("0"),
+  // 판매 추정
+  salesEstimate: int("sales_estimate").notNull().default(0),
+  salesEstimateEma7: decimal("sales_estimate_ema7", { precision: 14, scale: 4 }).default("0"),
+  salesEstimateEma30: decimal("sales_estimate_ema30", { precision: 14, scale: 4 }).default("0"),
+  // 비율 지표
+  adRatio: decimal("ad_ratio", { precision: 8, scale: 4 }).default("0"),
+  newProductRatio: decimal("new_product_ratio", { precision: 8, scale: 4 }).default("0"),
+  priceSpread: int("price_spread").default(0),
+  // 급등 탐지
+  rollingMean30: decimal("rolling_mean_30", { precision: 14, scale: 4 }).default("0"),
+  rollingStd30: decimal("rolling_std_30", { precision: 14, scale: 4 }).default("0"),
+  spikeScore: decimal("spike_score", { precision: 14, scale: 4 }).default("0"),
+  alertLevel: mysqlEnum("alert_level", ["normal", "spike", "explosion"]).default("normal").notNull(),
+  // 타임스탬프
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtKeywordMetric = typeof extKeywordMetrics.$inferSelect;
+export type InsertExtKeywordMetric = typeof extKeywordMetrics.$inferInsert;
+
+// ==================== Extension: 키워드 알림 (ext_keyword_alerts) ====================
+// 급등/폭발/가격 붕괴/경쟁 폭증 알람 기록
+export const extKeywordAlerts = mysqlTable("ext_keyword_alerts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  alertDate: varchar("alert_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  alertType: mysqlEnum("alert_type", [
+    "sales_spike", "sales_explosion", "price_drop", "competition_jump",
+  ]).notNull(),
+  alertScore: decimal("alert_score", { precision: 14, scale: 4 }).default("0"),
+  message: varchar("message", { length: 500 }),
+  isRead: boolean("is_read").default(false).notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type ExtKeywordAlert = typeof extKeywordAlerts.$inferSelect;
+export type InsertExtKeywordAlert = typeof extKeywordAlerts.$inferInsert;

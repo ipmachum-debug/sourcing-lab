@@ -1,5 +1,8 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.2.5
+   Coupang Sourcing Helper — Background Service Worker v7.3.3
+   v7.3.3: 종합점수 통합(서버=확장프로그램) + 실패키워드 우선재수집 + 버전표기정상화
+   v7.3.1: 수집시작오류수정(SW메시지타임아웃) + sendMsg 재시도
+   v7.3.0: 탭내 DOMParser 파싱(리뷰100%정상수집)
    v7.2.5: Service Worker DOMParser 파싱오류 수정 + Regex 파서 추가 + 가격 오버플로 방지
    v7.2.3: 검색시 통계 자동 산출 + saveSearchEvent 데이터 동기화
    v7.2.2: 자동 수집 UNKNOWN 에러 수정 + 딜레이 최적화 + 상태 관리 강화

@@ -2601,7 +2601,7 @@ async function loadDemandDashboard() {
 
 async function loadDemandKeywords() {
   const sortSel = document.querySelector('#demandSortSelect');
-  const sortBy = sortSel ? sortSel.value : 'compositeScore';
+  const sortBy = sortSel ? sortSel.value : 'keywordScore';
   try {
     const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 200 } });
     if (!resp || !resp.ok || !resp.data || !resp.data.length) {
@@ -2624,11 +2624,14 @@ function renderDemandKeywords(keywords) {
     const el = document.createElement('div');
     el.className = 'demand-kw-item' + (selectedKeywordIds.has(kw.id) ? ' selected' : '');
     el.dataset.kwId = kw.id;
-    const scoreClass = kw.compositeScore >= 60 ? 's-high' : kw.compositeScore >= 30 ? 's-mid' : 's-low';
+    // v7.3.2: keywordScore (서버 검색수요와 동일)
+    const score = kw.keywordScore || kw.compositeScore || 0;
+    const scoreClass = score >= 60 ? 's-high' : score >= 30 ? 's-mid' : 's-low';
     let tags = '';
-    if (kw.reviewGrowth7d > 0) tags += '<span class="demand-kw-tag growth">+' + kw.reviewGrowth7d + ' 리뷰</span>';
+    if ((kw.dailyReviewGrowth || kw.reviewGrowth7d || 0) > 0) tags += '<span class="demand-kw-tag growth">+' + (kw.dailyReviewGrowth || kw.reviewGrowth7d) + ' 리뷰</span>';
     if (kw.totalSearchCount >= 5) tags += '<span class="demand-kw-tag hot">🔥 ' + kw.totalSearchCount + '회</span>';
-    if (kw.compositeScore >= 60) tags += '<span class="demand-kw-tag score">⭐ TOP</span>';
+    if (score >= 60) tags += '<span class="demand-kw-tag score">⭐ TOP</span>';
+    if ((kw.demandScore || 0) >= 60) tags += '<span class="demand-kw-tag" style="background:#dcfce7;color:#166534">📈 수요 ' + kw.demandScore + '</span>';
     if (kw.latestAvgPrice > 0) tags += '<span class="demand-kw-tag">' + formatDemandPrice(kw.latestAvgPrice) + '</span>';
     const lastStr = kw.lastSearchedAt ? timeAgo(kw.lastSearchedAt) : '-';
 
@@ -2637,7 +2640,7 @@ function renderDemandKeywords(keywords) {
         '<div class="demand-kw-name">' + escHtml(kw.keyword) + '</div>' +
         '<div class="demand-kw-meta">' + tags + '<span class="demand-kw-tag">' + lastStr + '</span></div>' +
       '</div>' +
-      '<div class="demand-kw-score ' + scoreClass + '">' + kw.compositeScore + '</div>' +
+      '<div class="demand-kw-score ' + scoreClass + '">' + score + '</div>' +
       '<div class="demand-kw-actions-mini">' +
         '<button class="btn-sm" data-action="detail" data-keyword="' + escHtml(kw.keyword) + '" title="상세">📊</button>' +
         '<button class="btn-sm" data-action="delete" data-kw-id="' + kw.id + '" title="삭제">🗑</button>' +

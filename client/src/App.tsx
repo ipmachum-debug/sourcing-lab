@@ -23,6 +23,9 @@ import SourcingHelper from "./pages/SourcingHelper";
 import ExtensionDashboard from "./pages/ExtensionDashboard";
 import ExtensionGuide from "./pages/ExtensionGuide";
 import Manual from "./pages/Manual";
+import SearchDemand from "./pages/SearchDemand";
+import MarginCalculator from "./pages/MarginCalculator";
+import NicheFinder from "./pages/NicheFinder";
 
 function Router() {
   return (
@@ -44,6 +47,9 @@ function Router() {
       <Route path="/user-management" component={UserManagement} />
       <Route path="/settings/accounts" component={AccountSettings} />
       <Route path="/coupang" component={CoupangManager} />
+      <Route path="/demand" component={SearchDemand} />
+      <Route path="/margin" component={MarginCalculator} />
+      <Route path="/niche-finder" component={NicheFinder} />
       <Route path="/sourcing-helper" component={SourcingHelper} />
       <Route path="/extension" component={ExtensionDashboard} />
       <Route path="/extension-guide" component={ExtensionGuide} />
