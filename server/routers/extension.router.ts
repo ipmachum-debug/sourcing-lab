@@ -1959,7 +1959,7 @@ export const extensionRouter = router({
   // 키워드별 최신 일별 통계 요약 (대시보드 전체 키워드 목록)
   listKeywordStats: protectedProcedure
     .input(z.object({
-      limit: z.number().int().min(1).max(200).default(100),
+      limit: z.number().int().min(1).max(500).default(100),
       sortBy: z.enum(["keyword_score", "demand_score", "review_growth", "sales_estimate", "competition_score", "avg_price", "query"]).default("keyword_score"),
       sortDir: z.enum(["asc", "desc"]).default("desc"),
       search: z.string().optional(),
