@@ -21,28 +21,45 @@ import {
 import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
-  FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3
+  FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
+  Activity, Target, Search,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 
-const menuItems = [
-  { icon: LayoutDashboard, label: "대시보드", path: "/dashboard", emoji: "🏠" },
-  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝" },
-  { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰" },
-  { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️" },
-  { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢" },
-  { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "📊" },
-  { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "📦" },
-  { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖" },
-  { icon: Package, label: "전체 상품", path: "/products", emoji: "📦" },
-  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪" },
-  { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅" },
-  { icon: User, label: "내 프로필", path: "/profile", emoji: "👤" },
-  { icon: Settings, label: "계정 설정", path: "/settings/accounts", emoji: "⚙️" },
-  { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥" },
+type MenuItem = {
+  icon: any;
+  label: string;
+  path: string;
+  emoji: string;
+  superAdminOnly?: boolean;
+  group?: string;
+};
+
+const menuItems: MenuItem[] = [
+  // 소싱
+  { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", group: "소싱" },
+  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", group: "소싱" },
+  { icon: Package, label: "전체 상품", path: "/products", emoji: "📦", group: "소싱" },
+  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪", group: "소싱" },
+  // 시장 분석
+  { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "🔬", group: "시장 분석" },
+  { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢", group: "시장 분석" },
+  // 판매 관리
+  { icon: LayoutDashboard, label: "대시보드", path: "/dashboard", emoji: "🏠", group: "판매 관리" },
+  { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰", group: "판매 관리" },
+  { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️", group: "판매 관리" },
+  { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅", group: "판매 관리" },
+  // 도구
+  { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "🧩", group: "도구" },
+  { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖", group: "도구" },
+  { icon: User, label: "내 프로필", path: "/profile", emoji: "👤", group: "도구" },
+  { icon: Settings, label: "계정 설정", path: "/settings/accounts", emoji: "⚙️", group: "도구" },
+  { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", group: "도구" },
 ];
+
+const menuGroups = ["소싱", "시장 분석", "판매 관리", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 260;
@@ -154,33 +171,47 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           {/* Menu items */}
           <SidebarContent className="gap-0 pt-2">
             <SidebarMenu className="px-2 py-1">
-              {menuItems
-                .filter(item => !item.superAdminOnly || user?.isSuperAdmin)
-                .map((item) => {
-                  const isActive = location === item.path;
-                  return (
-                    <SidebarMenuItem key={item.path}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => setLocation(item.path)}
-                        tooltip={item.label}
-                        className={`h-10 transition-all font-normal rounded-xl my-0.5 ${
-                          isActive 
-                            ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-medium border border-pink-100/60" 
-                            : "hover:bg-pink-50/50"
-                        }`}
-                      >
-                        <item.icon className={`h-4 w-4 transition-all ${
-                          isActive ? "text-pink-500" : "text-muted-foreground"
-                        }`} />
-                        <span className="flex items-center gap-2">
-                          {!isCollapsed && <span className="text-sm">{item.emoji}</span>}
-                          {item.label}
-                        </span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+              {menuGroups.map(group => {
+                const groupItems = menuItems
+                  .filter(item => item.group === group)
+                  .filter(item => !item.superAdminOnly || user?.isSuperAdmin);
+                if (!groupItems.length) return null;
+                return (
+                  <div key={group}>
+                    {!isCollapsed && (
+                      <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 pt-3 pb-1">
+                        {group}
+                      </div>
+                    )}
+                    {isCollapsed && <div className="h-2" />}
+                    {groupItems.map(item => {
+                      const isActive = location === item.path;
+                      return (
+                        <SidebarMenuItem key={item.path}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            onClick={() => setLocation(item.path)}
+                            tooltip={item.label}
+                            className={`h-10 transition-all font-normal rounded-xl my-0.5 ${
+                              isActive
+                                ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-medium border border-pink-100/60"
+                                : "hover:bg-pink-50/50"
+                            }`}
+                          >
+                            <item.icon className={`h-4 w-4 transition-all ${
+                              isActive ? "text-pink-500" : "text-muted-foreground"
+                            }`} />
+                            <span className="flex items-center gap-2">
+                              {!isCollapsed && <span className="text-sm">{item.emoji}</span>}
+                              {item.label}
+                            </span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </SidebarMenu>
           </SidebarContent>
 
