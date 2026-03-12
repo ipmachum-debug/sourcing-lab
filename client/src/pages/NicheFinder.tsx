@@ -17,6 +17,7 @@ import {
   Filter, Star, Loader2, Lightbulb, Plus,
   AlertCircle, Zap, ThumbsUp, ThumbsDown, Brain,
   Eye, EyeOff, Flame, Target, BarChart3, Trash2,
+  Database, RefreshCw, Settings, Wand2, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,7 +27,7 @@ function formatPrice(n: number | null | undefined) {
 }
 
 type SortKey = "opportunity" | "demand_score" | "sales_estimate" | "competition_score" | "avg_price";
-type MainTab = "opportunity" | "discovery";
+type MainTab = "opportunity" | "discovery" | "data_mgmt";
 type DiscoveryTab = "trending" | "blue_ocean" | "hidden" | "high_margin" | "overheated";
 
 function calcOpportunityScore(kw: any): number {
@@ -152,6 +153,40 @@ export default function NicheFinder() {
     },
   });
 
+  // 데이터 관리 API
+  const dbStats = trpc.keywordDiscovery.dbStats.useQuery(
+    undefined,
+    { enabled: mainTab === "data_mgmt" },
+  );
+
+  const autoCleanupMut = trpc.keywordDiscovery.autoCleanup.useMutation({
+    onSuccess: res => {
+      toast.success(`정리 완료: 지표 ${res.deletedMetrics}개, 키워드 ${res.deletedKeywords}개 삭제`);
+      dbStats.refetch();
+      discoveryOverview.refetch();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const autoExpandMut = trpc.keywordDiscovery.autoExpandExtensionKeywords.useMutation({
+    onSuccess: res => {
+      toast.success(`${res.message} (추가 ${res.inserted}개 / 중복 ${res.skipped}개)`);
+      dbStats.refetch();
+      discoveryOverview.refetch();
+      discoveryList.refetch();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const bulkRefreshMut = trpc.keywordDiscovery.bulkRefreshNaverData.useMutation({
+    onSuccess: res => {
+      toast.success(`${res.refreshed}/${res.total}개 키워드 네이버 데이터 갱신 완료`);
+      dbStats.refetch();
+      discoveryList.refetch();
+    },
+    onError: e => toast.error(e.message),
+  });
+
   // 기회 분석 계산
   const opportunities = useMemo(() => {
     if (!keywordStatsList.data) return [];
@@ -228,6 +263,12 @@ export default function NicheFinder() {
             onClick={() => setMainTab("discovery")}
           >
             <Search className="w-3.5 h-3.5 inline mr-1" /> 키워드 채굴 (네이버+쿠팡)
+          </button>
+          <button
+            className={`flex-1 py-2 px-3 rounded-md text-xs font-medium transition ${mainTab === "data_mgmt" ? "bg-white shadow text-orange-700" : "text-gray-500 hover:text-gray-700"}`}
+            onClick={() => setMainTab("data_mgmt")}
+          >
+            <Database className="w-3.5 h-3.5 inline mr-1" /> 데이터 관리
           </button>
         </div>
 
@@ -617,6 +658,224 @@ export default function NicheFinder() {
                 })}
               </div>
             )}
+          </>
+        )}
+        {/* ======== 데이터 관리 탭 (신규) ======== */}
+        {mainTab === "data_mgmt" && (
+          <>
+            {/* DB 통계 요약 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card>
+                <CardContent className="pt-3 pb-3 text-center">
+                  <div className="text-2xl font-bold text-indigo-600">{dbStats.data?.keywordMaster.total || 0}</div>
+                  <div className="text-[10px] text-gray-500">키워드 마스터</div>
+                  <div className="flex justify-center gap-2 mt-1 text-[9px] text-gray-400">
+                    <span>네이버 {dbStats.data?.keywordMaster.naverCount || 0}</span>
+                    <span>익스텐션 {dbStats.data?.keywordMaster.extensionCount || 0}</span>
+                    <span>수동 {dbStats.data?.keywordMaster.manualCount || 0}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-3 pb-3 text-center">
+                  <div className="text-2xl font-bold text-blue-600">{dbStats.data?.dailyMetrics.total || 0}</div>
+                  <div className="text-[10px] text-gray-500">일별 지표 레코드</div>
+                  <div className="text-[9px] text-gray-400 mt-1">{dbStats.data?.dailyMetrics.uniqueDates || 0}일 데이터</div>
+                </CardContent>
+              </Card>
+              <Card className={`${(dbStats.data?.dailyMetrics.oldCount || 0) > 0 ? "border-orange-200 bg-orange-50/30" : ""}`}>
+                <CardContent className="pt-3 pb-3 text-center">
+                  <div className={`text-2xl font-bold ${(dbStats.data?.dailyMetrics.oldCount || 0) > 0 ? "text-orange-600" : "text-green-600"}`}>
+                    {dbStats.data?.dailyMetrics.oldCount || 0}
+                  </div>
+                  <div className="text-[10px] text-gray-500">30일+ 오래된 지표</div>
+                  {(dbStats.data?.dailyMetrics.oldCount || 0) > 0 && (
+                    <div className="text-[9px] text-orange-500 mt-1">정리 권장</div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card className={`${(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 ? "border-purple-200 bg-purple-50/30" : ""}`}>
+                <CardContent className="pt-3 pb-3 text-center">
+                  <div className={`text-2xl font-bold ${(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 ? "text-purple-600" : "text-green-600"}`}>
+                    {dbStats.data?.unmatchedExtensionKeywords || 0}
+                  </div>
+                  <div className="text-[10px] text-gray-500">미확장 익스텐션 키워드</div>
+                  {(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 && (
+                    <div className="text-[9px] text-purple-500 mt-1">네이버 확장 가능</div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 자동화 기능 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              {/* 익스텐션 → 네이버 자동 확장 */}
+              <Card className="border-purple-200">
+                <CardContent className="pt-3 pb-3">
+                  <div className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
+                    <Wand2 className="w-3.5 h-3.5" /> 익스텐션 키워드 자동 확장
+                  </div>
+                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
+                    크롬 익스텐션에서 수집된 키워드를 자동으로 네이버 API에 조회하여
+                    연관 키워드 + 검색량 데이터를 수집합니다.
+                    <br />
+                    <strong>현재 미확장: {dbStats.data?.unmatchedExtensionKeywords || 0}개</strong>
+                  </p>
+                  <Button
+                    size="sm"
+                    className="w-full h-8 text-xs gap-1 bg-purple-600 hover:bg-purple-700"
+                    disabled={autoExpandMut.isPending || (dbStats.data?.unmatchedExtensionKeywords || 0) === 0}
+                    onClick={() => autoExpandMut.mutate()}
+                  >
+                    {autoExpandMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                    {autoExpandMut.isPending ? "확장 중... (최대 50개)" : "일괄 확장 실행"}
+                  </Button>
+                  <p className="text-[9px] text-gray-400 mt-1.5">
+                    한번에 최대 50개 키워드 처리 / 네이버 API 호출 포함
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 네이버 데이터 일괄 갱신 */}
+              <Card className="border-blue-200">
+                <CardContent className="pt-3 pb-3">
+                  <div className="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1">
+                    <RefreshCw className="w-3.5 h-3.5" /> 네이버 검색량 일괄 갱신
+                  </div>
+                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
+                    keyword_master에 등록된 키워드 중 오늘 네이버 데이터가 없는
+                    키워드의 검색량/CPC/경쟁도를 일괄 갱신합니다.
+                    <br />
+                    <strong>키워드 총: {dbStats.data?.keywordMaster.total || 0}개</strong>
+                  </p>
+                  <Button
+                    size="sm"
+                    className="w-full h-8 text-xs gap-1"
+                    disabled={bulkRefreshMut.isPending || (dbStats.data?.keywordMaster.total || 0) === 0}
+                    onClick={() => bulkRefreshMut.mutate()}
+                  >
+                    {bulkRefreshMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    {bulkRefreshMut.isPending ? "갱신 중... (최대 100개)" : "네이버 데이터 갱신"}
+                  </Button>
+                  <p className="text-[9px] text-gray-400 mt-1.5">
+                    한번에 최대 100개 / 키워드가 많으면 여러번 실행
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 데이터 정리 */}
+              <Card className="border-orange-200">
+                <CardContent className="pt-3 pb-3">
+                  <div className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
+                    <Trash2 className="w-3.5 h-3.5" /> 오래된 데이터 정리
+                  </div>
+                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
+                    30일 이전 일별 지표를 삭제하여 DB 용량을 관리합니다.
+                    <br />
+                    <strong className="text-orange-600">삭제 대상: {dbStats.data?.dailyMetrics.oldCount || 0}개 지표</strong>
+                  </p>
+                  <div className="space-y-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-8 text-xs gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                      disabled={autoCleanupMut.isPending}
+                      onClick={() => autoCleanupMut.mutate({ retentionDays: 30, deleteZeroScore: false, deleteInactive: false })}
+                    >
+                      {autoCleanupMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      오래된 지표만 정리 (30일+)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-8 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
+                      disabled={autoCleanupMut.isPending}
+                      onClick={() => {
+                        if (confirm("점수 0인 키워드와 관련 지표를 모두 삭제합니다. 계속하시겠습니까?")) {
+                          autoCleanupMut.mutate({ retentionDays: 30, deleteZeroScore: true, deleteInactive: true });
+                        }
+                      }}
+                    >
+                      {autoCleanupMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      전체 정리 (오래된 지표 + 점수0 키워드)
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 워크플로우 가이드 */}
+            <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
+              <CardContent className="pt-4 pb-4">
+                <h3 className="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-1.5">
+                  <Lightbulb className="w-4 h-4" /> 사용 가이드 — 이렇게 쓰세요!
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">1단계: 키워드 수집</h4>
+                    <div className="space-y-1 text-[10px] text-gray-600">
+                      <p>• <strong>크롬 익스텐션</strong>: 쿠팡에서 검색하면 자동 수집됨</p>
+                      <p>• <strong>수동 추가</strong>: "키워드 채굴" 탭 → 수동 키워드 추가</p>
+                      <p>• <strong>네이버 확장</strong>: 시드 키워드 입력 → 연관키워드 자동 수집</p>
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">2단계: 네이버 데이터 매칭</h4>
+                    <div className="space-y-1 text-[10px] text-gray-600">
+                      <p>• <strong className="text-purple-600">자동 확장</strong>: 이 페이지에서 "일괄 확장" 클릭</p>
+                      <p>→ 익스텐션 키워드가 자동으로 네이버 검색량 데이터와 매칭</p>
+                      <p>→ 하나하나 수동 입력할 필요 없음!</p>
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">3단계: 점수 계산</h4>
+                    <div className="space-y-1 text-[10px] text-gray-600">
+                      <p>• "키워드 채굴" 탭 → <strong>"전체 점수 계산"</strong> 클릭</p>
+                      <p>→ 7종 알고리즘(블루오션/급상승/숨은아이템 등)이 자동 점수화</p>
+                      <p>→ 서브탭에서 카테고리별 키워드 확인</p>
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">4단계: 데이터 관리</h4>
+                    <div className="space-y-1 text-[10px] text-gray-600">
+                      <p>• <strong className="text-orange-600">자동 정리</strong>: 30일+ 오래된 데이터 삭제</p>
+                      <p>• 점수 0인 키워드 일괄 정리 가능</p>
+                      <p>• 데이터가 계속 쌓이면 여기서 정리!</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 p-2 bg-white/60 rounded-lg">
+                  <p className="text-[10px] text-indigo-600 font-medium">
+                    Q: 자동 삭제되나요? → <strong>아닙니다. 데이터는 계속 쌓입니다.</strong> "데이터 관리" 탭에서 주기적으로 정리해주세요.
+                  </p>
+                  <p className="text-[10px] text-indigo-600 font-medium mt-1">
+                    Q: 크롬 수집 키워드는 자동 매칭되나요? → <strong>"일괄 확장" 버튼으로 한번에 처리 가능합니다.</strong> 수동으로 하나씩 할 필요 없습니다.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 기존 ext_keyword_daily_stats 통계 */}
+            <Card>
+              <CardContent className="pt-3 pb-3">
+                <div className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                  <BarChart3 className="w-3.5 h-3.5" /> 기존 익스텐션 데이터 (ext_keyword_daily_stats)
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-gray-50 rounded p-2 text-center">
+                    <div className="text-lg font-bold text-gray-600">{dbStats.data?.extKeywordStats.total || 0}</div>
+                    <div className="text-[9px] text-gray-400">총 레코드</div>
+                  </div>
+                  <div className="bg-gray-50 rounded p-2 text-center">
+                    <div className="text-lg font-bold text-gray-600">{dbStats.data?.extKeywordStats.uniqueKeywords || 0}</div>
+                    <div className="text-[9px] text-gray-400">고유 키워드</div>
+                  </div>
+                </div>
+                <p className="text-[9px] text-gray-400 mt-2">
+                  "기회 분석" 탭은 이 데이터를 사용합니다. "키워드 채굴" 탭은 keyword_master + keyword_daily_metrics를 사용합니다.
+                </p>
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
