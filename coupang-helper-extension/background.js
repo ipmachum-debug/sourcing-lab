@@ -1,17 +1,21 @@
 /* ============================================================
-   Coupang Sourcing Helper — Background Service Worker v7.3.3
-   v7.3.3: 종합점수 통합(서버=확장프로그램) + 실패키워드 우선재수집 + 버전표기정상화
-   v7.3.1: 수집시작오류수정(SW메시지타임아웃) + sendMsg 재시도
-   v7.3.0: 탭내 DOMParser 파싱(리뷰100%정상수집)
+   Coupang Sourcing Helper — Background Service Worker v7.4.1
+   v7.4.1: 인간 행동 모방 딜레이 전면 개편 (봇 탐지 회피 강화)
+         - 지수 분포 딜레이: 짧은 간격 70%, 긴 간격 30% (실제 사람 클릭 패턴)
+         - 세션 피로도: 10번째 요청부터 딜레이 3%씩 증가 (최대 2배)
+         - 시간대 가중치: 새벽 ×1.8, 피크 ×0.85 (KST 기준)
+         - 마이크로 지터: 모든 딜레이에 ±5~15% 랜덤 변동
+         - 재시도 큐 분산: 실패 키워드를 큐 중간에 삽입 (연속 동일 URL 방지)
+         - 에러 딜레이 지수 백오프: 재시도마다 1.5배 증가
+         - 상세 수집 딜레이: humanDetailDelay (검색→상세 자연스러운 패턴)
+         - 좀비 감지 동적 임계값: 키워드 수 기반 (30분 고정값 제거)
+         - 재귀→setTimeout 루프: Service Worker 메모리 안전
+         - resetCollector 완전 초기화
    v7.2.5: Service Worker DOMParser 파싱오류 수정 + Regex 파서 추가 + 가격 오버플로 방지
    v7.2.3: 검색시 통계 자동 산출 + saveSearchEvent 데이터 동기화
    v7.2.2: 자동 수집 UNKNOWN 에러 수정 + 딜레이 최적화 + 상태 관리 강화
    v7.2.1: 마진 계산기 셀러라이프 방식 전면 반영 + API 통신 강화
    v7.2: 셀러라이프 수집방식 전면 반영 (대개편)
-         - 다중 전략 수집 (Background fetch → DNR fetch → Tab → Hidden Tab 폴링)
-         - 'Already running' 상태 관리 버그 수정
-         - 자동 복구 및 에러 처리 강화
-         - 셀러라이프 k()/cDataTab2 방식 통합
    v7.1: tRPC SuperJSON 응답 해제 수정
    v7.0: 하이브리드 수집 아키텍처 대개편
    ============================================================ */
@@ -44,7 +48,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v7.2.2 — multi-strategy architecture (SellerLife)`);
+    console.log(`[SH] Extension ${details.reason}d — v7.4.1 — human-behavior delay + anti-bot evasion`);
   }
 });
 
@@ -1417,15 +1421,21 @@ async function autoRunDailyBatch() {
 
 
 // ============================================================
-//  v7.2: 하이브리드 자동 수집기 (셀러라이프 방식 전면 반영)
-//  
-//  핵심 변경사항 (v7.0 대비):
-//  1. 다중 전략 수집 (Direct fetch → DNR fetch → Tab → Hidden Tab 폴링)
-//  2. 'Already running' 상태 버그 수정 — 확실한 초기화
-//  3. 강화된 에러 복구 (2회 재시도, 전략 변경)
-//  4. 셀러라이프 cDataTab2 방식 폴링 (최종 폴백)
-//  5. 수집 실패 시 탭 재생성 로직
-//  6. 안전한 상태 전환 (무한루프 방지)
+//  v7.4: 하이브리드 자동 수집기 (인간 행동 모방 + 봇 탐지 회피)
+//
+//  딜레이 전략 (v7.4 신규):
+//  1. 지수 분포: exponentialRandom() — 짧은 간격 자주, 긴 간격 가끔
+//  2. 세션 피로도: getSessionFatigueMultiplier() — 수집 진행 시 점진 감속
+//  3. 시간대 가중치: getTimeOfDayMultiplier() — KST 새벽/피크 차등
+//  4. 마이크로 지터: addJitter() — 모든 딜레이에 ±5~15% 변동
+//  5. 재시도 큐 분산: 실패 키워드를 2~5번째에 삽입 (연속 동일 URL 방지)
+//  6. 에러 딜레이: errorDelay() — 에러 유형별 지수 백오프
+//
+//  수집 전략 (v7.2 유지):
+//  1. Background fetch (k() 방식) — 가장 빠름
+//  2. DNR 규칙 적용 fetch (cData-v3 방식)
+//  3. 기존 탭 executeScript (cData-coupang 방식)
+//  4. Hidden Tab + 폴링 (cDataTab2 방식) — 가장 확실
 // ============================================================
 
 const collector = {
@@ -1446,32 +1456,138 @@ const collector = {
   _consecutiveErrors: 0,  // v7.2: 연속 에러 카운터
 };
 
-// ---- 유틸 ----
+// ============================================================
+//  v7.4: 인간 행동 모방 딜레이 시스템
+//  - 지수 분포: 짧은 간격 70%, 긴 간격 30% (실제 사람 클릭 패턴)
+//  - 세션 피로도: 요청 누적 시 딜레이 점진적 증가
+//  - 시간대 가중치: 새벽엔 느리게, 피크타임엔 빠르게
+//  - 마이크로 지터: 모든 딜레이에 ±5~15% 랜덤 변동
+// ============================================================
+
+// ---- 기본 유틸 (폴백 전용) ----
 function randomDelay(min = 15000, max = 25000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// ---- 인간 행동 딜레이 생성기 (서버 delayConfig 기반) ----
-// 버스트 + 긴 휴식 패턴으로 봇 탐지 회피
-function humanDelay(config, indexInBurst) {
-  if (!config) return randomDelay();
-  const isBurstBreak = config.burstSize > 0 && indexInBurst > 0 && indexInBurst % config.burstSize === 0;
-  if (isBurstBreak) {
-    // 버스트 완료 → 긴 휴식 (사람이 다른 일 하다 돌아오는 패턴)
-    return randomDelay(config.burstPauseMinMs, config.burstPauseMaxMs);
-  }
-  // 버스트 내 — 정규분포에 가까운 랜덤 (Box-Muller)
-  const u1 = Math.random(), u2 = Math.random();
-  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-  const mean = (config.baseDelayMs + config.maxDelayMs) / 2;
-  const stddev = (config.maxDelayMs - config.baseDelayMs) / 4;
-  const delay = Math.round(mean + z * stddev);
-  return Math.max(config.baseDelayMs, Math.min(config.maxDelayMs, delay));
+// ---- 지수 분포 랜덤 (핵심) ----
+// mean 기준 지수 분포: 짧은 값이 자주, 긴 값이 가끔 나오는 자연스러운 패턴
+function exponentialRandom(mean) {
+  // -ln(U) * mean, U ∈ (0, 1)
+  const u = Math.random();
+  // u가 0에 너무 가까우면 극단값 방지
+  return -Math.log(Math.max(u, 0.001)) * mean;
 }
 
-// v7.2.2: 에러 유형별 짧은 딜레이 (비차단 에러용)
-function shortDelay(min = 5000, max = 15000) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+// ---- 시간대 가중치 (KST 기준) ----
+function getTimeOfDayMultiplier() {
+  // KST = UTC + 9
+  const kstHour = (new Date().getUTCHours() + 9) % 24;
+  // 새벽 1~5시: 트래픽 매우 적음 → 딜레이 크게 (눈에 띄므로)
+  if (kstHour >= 1 && kstHour <= 5) return 1.8;
+  // 아침 6~8시: 트래픽 증가 시작
+  if (kstHour >= 6 && kstHour <= 8) return 1.3;
+  // 피크타임 9~12시, 19~23시: 트래픽 많음 → 딜레이 줄여도 안 띔
+  if ((kstHour >= 9 && kstHour <= 12) || (kstHour >= 19 && kstHour <= 23)) return 0.85;
+  // 오후 13~18시: 보통
+  if (kstHour >= 13 && kstHour <= 18) return 1.0;
+  // 자정~1시, 나머지
+  return 1.5;
+}
+
+// ---- 세션 피로도 계수 ----
+// 사람은 시간이 지날수록 느려짐: 10번째 요청부터 요청당 3%씩 증가, 최대 2배
+function getSessionFatigueMultiplier(requestIndex) {
+  if (requestIndex < 10) return 1.0;
+  const fatigue = 1.0 + (requestIndex - 10) * 0.03;
+  return Math.min(fatigue, 2.0);
+}
+
+// ---- 마이크로 지터: 모든 딜레이에 ±5~15% 랜덤 변동 ----
+function addJitter(delayMs) {
+  const jitterPercent = 0.05 + Math.random() * 0.10; // 5~15%
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  return Math.round(delayMs * (1 + direction * jitterPercent));
+}
+
+// ---- 인간 행동 딜레이 생성기 (v7.4: 지수분포 + 피로도 + 시간대) ----
+function humanDelay(config, indexInBurst) {
+  if (!config) return addJitter(randomDelay());
+
+  const burstSize = config.burstSize || 5;
+  const isBurstBreak = burstSize > 0 && indexInBurst > 0 && indexInBurst % burstSize === 0;
+
+  let delay;
+
+  if (isBurstBreak) {
+    // 버스트 완료 → 긴 휴식 (사람이 다른 일 하다 돌아오는 패턴)
+    // 긴 휴식도 지수 분포: 평균 = (min + max) / 2, 하한 min, 상한 max
+    const pauseMin = config.burstPauseMinMs || 60000;
+    const pauseMax = config.burstPauseMaxMs || 180000;
+    const pauseMean = (pauseMin + pauseMax) / 2;
+    delay = exponentialRandom(pauseMean * 0.7); // 지수분포 mean을 약간 낮게 → 짧은 휴식이 더 빈번
+    delay = Math.max(pauseMin, Math.min(pauseMax * 1.2, delay)); // 상한 약간 여유
+    console.log(`[SH-DELAY] 🛋️ 버스트 휴식: ${Math.round(delay/1000)}초 (버스트 #${Math.floor(indexInBurst / burstSize)})`);
+  } else {
+    // 버스트 내 — 지수 분포 (짧은 간격이 70%, 긴 간격이 30%)
+    const baseMs = config.baseDelayMs || 15000;
+    const maxMs = config.maxDelayMs || 35000;
+    const expMean = (baseMs + maxMs) / 3; // 지수분포 mean을 낮게 잡아서 짧은 값 빈번
+    delay = exponentialRandom(expMean);
+    delay = Math.max(baseMs, Math.min(maxMs, delay));
+  }
+
+  // 세션 피로도 적용
+  delay *= getSessionFatigueMultiplier(indexInBurst);
+
+  // 시간대 가중치 적용
+  delay *= getTimeOfDayMultiplier();
+
+  // 마이크로 지터
+  delay = addJitter(delay);
+
+  return Math.round(delay);
+}
+
+// ---- 상세 수집용 인간 딜레이 (검색→상세 전환 패턴) ----
+// 사람이 검색 결과 → 상세 페이지로 가는 패턴: 빠르게 클릭(5~8초) 또는 좀 읽다 클릭(15~30초)
+function humanDetailDelay(detailIndex) {
+  const baseMean = 8000; // 8초 기준 지수분포
+  let delay = exponentialRandom(baseMean);
+  delay = Math.max(5000, Math.min(35000, delay)); // 5~35초 범위
+  // 2번째, 3번째 상세는 점점 느려짐 (사람은 첫 번째를 가장 빨리 클릭)
+  delay *= (1 + detailIndex * 0.15);
+  delay *= getTimeOfDayMultiplier();
+  return Math.round(addJitter(delay));
+}
+
+// ---- 에러 후 딜레이 (지수 백오프 기반) ----
+function errorDelay(errorCode, retryCount) {
+  if (errorCode === 'ACCESS_BLOCKED') {
+    // 차단: 지수 분포, 평균 3분, 최소 2분, 최대 8분
+    let delay = exponentialRandom(180000);
+    delay = Math.max(120000, Math.min(480000, delay));
+    // 재시도 횟수에 따라 지수 백오프
+    delay *= Math.pow(1.5, retryCount);
+    return Math.round(addJitter(delay));
+  }
+  if (errorCode === 'ALL_STRATEGIES_FAILED' || errorCode === 'FETCH_EXCEPTION' || errorCode === 'NETWORK_ERROR') {
+    // 네트워크: 지수 백오프 10초 → 20초 → 40초
+    const base = 10000 * Math.pow(2, retryCount);
+    return Math.round(addJitter(Math.min(base, 120000)));
+  }
+  if (errorCode === 'EMPTY_RESULT' || errorCode === 'PARSE_EXCEPTION') {
+    // 파싱: 15~30초 지수분포
+    let delay = exponentialRandom(15000);
+    return Math.round(addJitter(Math.max(10000, Math.min(40000, delay))));
+  }
+  if (errorCode === 'TAB_ERROR') {
+    // 탭: 짧은 딜레이 5~15초
+    let delay = exponentialRandom(8000);
+    return Math.round(addJitter(Math.max(5000, Math.min(20000, delay))));
+  }
+  // 기타: 10~30초
+  let delay = exponentialRandom(15000);
+  return Math.round(addJitter(Math.max(8000, Math.min(40000, delay))));
 }
 
 function collectorSleep(ms) {
@@ -1480,7 +1596,7 @@ function collectorSleep(ms) {
   });
 }
 
-// v7.2: 수집기 상태 완전 초기화 (강제 리셋)
+// v7.4: 수집기 상태 완전 초기화 (모든 내부 상태 포함)
 function resetCollector() {
   if (collector._delayTimeoutId) { clearTimeout(collector._delayTimeoutId); collector._delayTimeoutId = null; }
   collector.running = false;
@@ -1490,7 +1606,15 @@ function resetCollector() {
   collector.current = null;
   collector.queue = [];
   collector._consecutiveErrors = 0;
+  collector._collectedKeywords = [];
+  collector._delayConfig = null;
+  collector._burstIndex = 0;
   console.log('[SH-AC] 수집기 상태 리셋 완료');
+}
+
+// v7.4: 재귀 대신 setTimeout 기반 루프 (스택 안전)
+function scheduleNextKeyword() {
+  setTimeout(() => runNextKeyword(), 0);
 }
 
 function getCollectorState() {
@@ -1516,13 +1640,13 @@ function getCollectorState() {
 
 // ---- 자동 수집 시작 (v7.2: 'Already running' 버그 수정) ----
 async function startAutoCollect(options = {}) {
-  // v7.2: 강화된 상태 체크 — STOPPED/에러 상태에서도 재시작 가능
+  // v7.4: 강화된 상태 체크 — 좀비 임계값을 키워드 수 기반 동적 계산
   if (collector.running && !collector.paused) {
-    // 실제로 실행 중인지 확인 (좀비 상태 방지)
     const elapsed = collector.startedAt ? (Date.now() - new Date(collector.startedAt).getTime()) : 0;
-    if (elapsed > 30 * 60 * 1000) {
-      // 30분 이상 경과 — 좀비 상태로 판단, 강제 리셋
-      console.warn('[SH-AC] ⚠️ 좀비 상태 감지 (30분+), 강제 리셋');
+    // 키워드당 평균 40초(딜레이+수집+상세) × 큐 크기 × 1.5배 여유 + 최소 10분
+    const estimatedMs = Math.max(10 * 60 * 1000, collector.totalQueued * 40000 * 1.5);
+    if (elapsed > estimatedMs) {
+      console.warn(`[SH-AC] ⚠️ 좀비 상태 감지 (${Math.round(elapsed/60000)}분 > 예상 ${Math.round(estimatedMs/60000)}분), 강제 리셋`);
       resetCollector();
     } else if (collector.current === null && collector.queue.length === 0) {
       // 큐가 비어있고 현재 작업도 없음 — 실질적으로 중단된 상태
@@ -1869,19 +1993,21 @@ async function runNextKeyword() {
 
     try { await apiClient.markKeywordCollected({ keyword }); } catch (e) { console.warn('[SH-AC] markKeywordCollected 실패:', e.message); }
 
-    // 상세 페이지 상위 3개 보강
+    // 상세 페이지 상위 3개 보강 (v7.4: humanDetailDelay로 자연스러운 패턴)
     if (collector.collectDetail && result.items.length) {
       const topItems = result.items.filter(i => i.productId && !i.isAd).slice(0, 3);
       if (topItems.length > 0) {
         console.log(`[SH-AC] 📋 상위 ${topItems.length}개 상세 수집...`);
         collector.status = 'COLLECTING_DETAIL';
-        for (const item of topItems) {
+        for (let di = 0; di < topItems.length; di++) {
           if (!collector.running || collector._aborted) break;
           try {
-            await collectDetailForItem(item, keyword);
-            await collectorSleep(randomDelay(12000, 25000));
+            await collectDetailForItem(topItems[di], keyword);
+            const detDelay = humanDetailDelay(di);
+            console.log(`[SH-AC] 📄 상세 ${di+1}/${topItems.length} 완료, ${Math.round(detDelay/1000)}초 대기`);
+            await collectorSleep(detDelay);
           } catch (e) {
-            console.warn(`[SH-AC] 상세 수집 실패: ${item.productId}`, e.message);
+            console.warn(`[SH-AC] 상세 수집 실패: ${topItems[di].productId}`, e.message);
           }
         }
       }
@@ -1891,12 +2017,14 @@ async function runNextKeyword() {
     if (!collector.running || collector._aborted) return;
     collector._burstIndex = (collector._burstIndex || 0) + 1;
     const delay = humanDelay(collector._delayConfig, collector._burstIndex);
-    const isBurst = collector._delayConfig?.burstSize > 0 && collector._burstIndex % collector._delayConfig.burstSize === 0;
-    console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기${isBurst ? ' (버스트 휴식 🛋️)' : ''}...`);
+    const burstSize = collector._delayConfig?.burstSize || 5;
+    const isBurst = burstSize > 0 && collector._burstIndex % burstSize === 0;
+    console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기${isBurst ? ' (버스트 휴식 🛋️)' : ''} [피로도:×${getSessionFatigueMultiplier(collector._burstIndex).toFixed(2)} 시간대:×${getTimeOfDayMultiplier().toFixed(2)}]`);
     collector.status = 'WAITING_NEXT';
     await collectorSleep(delay);
 
-    await runNextKeyword();
+    // v7.4: 재귀 대신 루프 (스택 안전)
+    scheduleNextKeyword();
 
   } catch (e) {
     // v7.2.2: 더 상세한 에러 진단
@@ -1910,18 +2038,23 @@ async function runNextKeyword() {
   }
 }
 
-// ---- 수집 실패 처리 (v7.2.2: 에러 유형별 최적 딜레이) ----
+// ---- 수집 실패 처리 (v7.4: 큐 분산 + 지수 백오프 + 에러별 딜레이) ----
 async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
   console.warn(`[SH-AC] ❌ "${keyword}" 실패 [${retryCount}/3]: ${errorCode} — ${errorMessage}`);
   collector.lastError = `${keyword}: ${errorCode}`;
   collector._consecutiveErrors++;
 
-  // v7.2.2: 3회 재시도 (더 적극적인 복구)
   const maxRetry = 3;
   if (retryCount < maxRetry) {
-    // 재시도 시 큐 앞쪽에 추가 (빠른 재시도)
-    collector.queue.unshift({ keyword, priority: 0, retryCount: retryCount + 1 });
-    console.log(`[SH-AC] 🔄 "${keyword}" 재시도 큐 추가 (${retryCount + 1}/${maxRetry})`);
+    // v7.4: 큐 중간에 분산 삽입 (같은 URL 연속 요청 방지)
+    // 다른 키워드 2~5개를 먼저 처리한 후 재시도하도록 배치
+    const retryItem = { keyword, priority: 0, retryCount: retryCount + 1, selectionReason: 'retry' };
+    const insertAt = Math.min(
+      2 + Math.floor(Math.random() * 4), // 2~5번째 위치
+      collector.queue.length               // 큐가 짧으면 끝에
+    );
+    collector.queue.splice(insertAt, 0, retryItem);
+    console.log(`[SH-AC] 🔄 "${keyword}" 재시도 큐 ${insertAt}번째 삽입 (${retryCount + 1}/${maxRetry}) — 분산 배치`);
   } else {
     collector.failCount++;
     try { await apiClient.markKeywordFailed({ keyword, errorCode, errorMessage }); } catch (_) {}
@@ -1931,35 +2064,29 @@ async function handleCollectFail(keyword, retryCount, errorCode, errorMessage) {
 
   if (!collector.running || collector._aborted) return;
 
-  // v7.2.2: 에러 유형별 최적화된 딜레이
-  let delay;
-  if (errorCode === 'ACCESS_BLOCKED') {
-    delay = randomDelay(120000, 240000); // 3~6분 (차단)
-    console.log(`[SH-AC] ⛔ 접근 차단 — ${Math.round(delay/1000)}초 대기`);
-    // 탭 재생성 (차단된 세션 갱신)
-    if (collector.currentTabId) {
-      try { chrome.tabs.remove(collector.currentTabId); } catch (_) {}
-      collector.currentTabId = null;
-    }
-  } else if (errorCode === 'ALL_STRATEGIES_FAILED' || errorCode === 'FETCH_EXCEPTION' || errorCode === 'NETWORK_ERROR') {
-    delay = shortDelay(8000, 20000); // 8~20초 (네트워크/수집 실패 → 빠른 재시도)
-    console.log(`[SH-AC] 🌐 수집 실패 — ${Math.round(delay/1000)}초 후 재시도`);
-  } else if (errorCode === 'EMPTY_RESULT' || errorCode === 'PARSE_EXCEPTION') {
-    delay = shortDelay(10000, 25000); // 10~25초 (파싱 문제 → 곧 재시도)
-    console.log(`[SH-AC] 📄 파싱 실패 — ${Math.round(delay/1000)}초 후 재시도`);
-  } else if (errorCode === 'TAB_ERROR') {
-    delay = shortDelay(5000, 12000); // 5~12초 (탭 문제 → 빠른 재시도)
-    console.log(`[SH-AC] 🔧 탭 오류 — ${Math.round(delay/1000)}초 후 재시도`);
-    // 탭 ID 리셋하여 다음에 새 탭 생성
+  // v7.4: 에러 유형별 지수 백오프 딜레이
+  const delay = errorDelay(errorCode, retryCount);
+  const emoji = errorCode === 'ACCESS_BLOCKED' ? '⛔' :
+    errorCode.includes('NETWORK') || errorCode.includes('FETCH') || errorCode.includes('STRATEGIES') ? '🌐' :
+    errorCode.includes('PARSE') || errorCode.includes('EMPTY') ? '📄' :
+    errorCode.includes('TAB') ? '🔧' : '⚠️';
+  console.log(`[SH-AC] ${emoji} ${errorCode} — ${Math.round(delay/1000)}초 대기 (retry=${retryCount})`);
+
+  // ACCESS_BLOCKED: 탭 재생성 (차단된 세션 갱신)
+  if (errorCode === 'ACCESS_BLOCKED' && collector.currentTabId) {
+    try { chrome.tabs.remove(collector.currentTabId); } catch (_) {}
     collector.currentTabId = null;
-  } else {
-    delay = shortDelay(10000, 30000); // 10~30초 (기타)
-    console.log(`[SH-AC] ⚠️ 기타 오류 — ${Math.round(delay/1000)}초 후 재시도`);
+  }
+  // TAB_ERROR: 탭 ID 리셋
+  if (errorCode === 'TAB_ERROR') {
+    collector.currentTabId = null;
   }
 
   collector.status = 'WAITING_NEXT';
   await collectorSleep(delay);
-  await runNextKeyword();
+
+  // v7.4: 재귀 대신 루프로 전환 (scheduleNextKeyword)
+  scheduleNextKeyword();
 }
 
 // ---- 자동 수집 성공 처리 (content.js에서 호출되는 기존 방식 유지, 하위호환) ----
@@ -2014,8 +2141,8 @@ async function collectDetailForItem(item, keyword) {
     setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 20000);
   });
 
-  // DOM 안정화 대기 (3~6초)
-  await collectorSleep(randomDelay(3000, 6000));
+  // DOM 안정화 대기 (3~6초 + 지터)
+  await collectorSleep(addJitter(3000 + Math.floor(Math.random() * 3000)));
 
   // content-detail.js에 파싱 요청
   try {
