@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "7.3.3";
+const EXTENSION_VERSION = "7.4.0";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "165KB";
 
@@ -586,15 +586,27 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v7.3.2",
-                    date: "2026-03-10",
+                    version: "v7.4.0",
+                    date: "2026-03-12",
                     badge: "Latest",
+                    changes: [
+                      "확장프로그램 v7.4.0 릴리스",
+                      "수집 시작 오류 수정 (Service Worker 메시지 타임아웃 해결)",
+                      "탭 내 DOMParser 기반 파싱 (리뷰/평점 100% 정상 수집)",
+                      "reviewGrowth 스냅샷 비교 버그 수정",
+                      "키워드 메트릭 엔진: EMA 스무딩 + 판매 추정 + 급등 탐지",
+                      "검색수요 독립 페이지 + 사이드바 4그룹 카테고리 재편",
+                      "마진 계산기 + 니치 파인더 페이지 추가",
+                    ],
+                  },
+                  {
+                    version: "v7.3.3",
+                    date: "2026-03-10",
                     changes: [
                       "종합점수 통합: 서버 '검색수요' = 확장프로그램 '수요' 동일 점수 표시",
                       "실패 키워드 우선 자동 재수집 (데이터 부족 키워드가 배치 수집에서 1순위)",
-                      "확장프로그램 버전 표기 정상화 (sidepanel/background.js 전체 v7.3.2)",
-                      "키워드 정렬 추가: 종합점수(keywordScore) 정렬 옵션",
-                      "수요 태그 추가: demandScore, reviewGrowth, salesEstimate 표시",
+                      "확장프로그램 버전 표기 정상화",
+                      "통계 리셋 버그 수정 (음수 growth 방지, 최적 스냅샷 자동 선택)",
                     ],
                   },
                   {
