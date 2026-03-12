@@ -868,3 +868,94 @@ export const marginCalcHistory = mysqlTable("margin_calc_history", {
 
 export type MarginCalcHistory = typeof marginCalcHistory.$inferSelect;
 export type InsertMarginCalcHistory = typeof marginCalcHistory.$inferInsert;
+
+// ==================== 키워드 마스터 (keyword_master) ====================
+// 모든 키워드 풀의 메인 테이블: 네이버/쿠팡/수동 소스 통합
+export const keywordMaster = mysqlTable("keyword_master", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  normalizedKeyword: varchar("normalized_keyword", { length: 255 }).notNull(),
+  sourceType: mysqlEnum("source_type", [
+    "naver_api", "coupang_autocomplete", "manual", "china", "extension",
+  ]).default("manual").notNull(),
+  rootKeyword: varchar("root_keyword", { length: 255 }),
+  keywordDepth: int("keyword_depth").default(0),
+  categoryHint: varchar("category_hint", { length: 100 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  firstSeenAt: timestamp("first_seen_at", tsOpts).defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordMaster = typeof keywordMaster.$inferSelect;
+export type InsertKeywordMaster = typeof keywordMaster.$inferInsert;
+
+// ==================== 키워드 일별 지표 (keyword_daily_metrics) ====================
+// 네이버 검색량 + 쿠팡 상품/리뷰/가격 + 점수 통합 일별 스냅샷
+export const keywordDailyMetrics = mysqlTable("keyword_daily_metrics", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keywordId: int("keyword_id").notNull(),
+  metricDate: varchar("metric_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  // 네이버 광고 데이터
+  naverPcSearch: int("naver_pc_search").default(0),
+  naverMobileSearch: int("naver_mobile_search").default(0),
+  naverTotalSearch: int("naver_total_search").default(0),
+  naverAvgCpc: decimal("naver_avg_cpc", { precision: 12, scale: 2 }).default("0"),
+  naverCompetitionIndex: varchar("naver_competition_index", { length: 20 }), // LOW/MID/HIGH
+  // 쿠팡 데이터
+  coupangProductCount: int("coupang_product_count").default(0),
+  coupangSellerCount: int("coupang_seller_count").default(0),
+  coupangAvgPrice: int("coupang_avg_price").default(0),
+  coupangMedianPrice: int("coupang_median_price").default(0),
+  coupangTop10ReviewSum: int("coupang_top10_review_sum").default(0),
+  coupangTop10ReviewDelta: int("coupang_top10_review_delta").default(0),
+  coupangNewProduct30d: int("coupang_new_product_30d").default(0),
+  coupangNewProductReview30d: int("coupang_new_product_review_30d").default(0),
+  coupangOutOfStockCount: int("coupang_out_of_stock_count").default(0),
+  // 점수
+  marketGapScore: decimal("market_gap_score", { precision: 10, scale: 4 }).default("0"),
+  trendScore: decimal("trend_score", { precision: 10, scale: 4 }).default("0"),
+  hiddenScore: decimal("hidden_score", { precision: 10, scale: 4 }).default("0"),
+  sourcingScore: decimal("sourcing_score", { precision: 10, scale: 4 }).default("0"),
+  finalScore: decimal("final_score", { precision: 10, scale: 4 }).default("0"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordDailyMetric = typeof keywordDailyMetrics.$inferSelect;
+export type InsertKeywordDailyMetric = typeof keywordDailyMetrics.$inferInsert;
+
+// ==================== 키워드 확장 관계 (keyword_relation) ====================
+export const keywordRelation = mysqlTable("keyword_relation", {
+  id: int("id").autoincrement().primaryKey(),
+  parentKeywordId: int("parent_keyword_id").notNull(),
+  childKeywordId: int("child_keyword_id").notNull(),
+  relationType: mysqlEnum("relation_type", [
+    "related", "autocomplete", "attribute_expand", "recursive",
+  ]).notNull(),
+  weight: decimal("weight", { precision: 10, scale: 4 }).default("0"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordRelation = typeof keywordRelation.$inferSelect;
+export type InsertKeywordRelation = typeof keywordRelation.$inferInsert;
+
+// ==================== 키워드 소싱 후보 (keyword_sourcing_candidate) ====================
+export const keywordSourcingCandidate = mysqlTable("keyword_sourcing_candidate", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keywordId: int("keyword_id").notNull(),
+  sourcePlatform: mysqlEnum("source_platform", ["1688", "aliexpress", "other"]).default("1688").notNull(),
+  sourceKeyword: varchar("source_keyword", { length: 255 }),
+  sourceProductName: varchar("source_product_name", { length: 500 }),
+  sourcePrice: decimal("source_price", { precision: 12, scale: 2 }).default("0"),
+  moq: int("moq").default(0),
+  shippingType: varchar("shipping_type", { length: 50 }),
+  confidenceScore: decimal("confidence_score", { precision: 10, scale: 4 }).default("0"),
+  marginEstimate: decimal("margin_estimate", { precision: 10, scale: 2 }).default("0"),
+  memo: text("memo"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordSourcingCandidate = typeof keywordSourcingCandidate.$inferSelect;
+export type InsertKeywordSourcingCandidate = typeof keywordSourcingCandidate.$inferInsert;

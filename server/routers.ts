@@ -23,6 +23,7 @@ import { extensionRouter } from "./routers/extension.router";
 import { sourcingCoachRouter } from "./routers/sourcingCoach.router";
 import { keywordMetricsRouter } from "./routers/keywordMetrics.router";
 import { marginRouter } from "./routers/margin.router";
+import { keywordDiscoveryRouter } from "./routers/keywordDiscovery.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   sourcingCoach: sourcingCoachRouter,
   keywordMetrics: keywordMetricsRouter,
   margin: marginRouter,
+  keywordDiscovery: keywordDiscoveryRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({
