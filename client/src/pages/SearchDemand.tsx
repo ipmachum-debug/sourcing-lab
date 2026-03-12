@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { calibrateSales } from "@/lib/salesCalibration";
 import DashboardLayout from "@/components/DashboardLayout";
 import SourcingFormModal from "@/components/SourcingFormModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -314,6 +315,12 @@ export default function SearchDemand() {
                         (keywordStatsList.data as any[]).map((kw: any) => {
                           const isSelected = demandSelectedKw === kw.query;
                           const isChecked = selectedDeleteKws.has(kw.query);
+                          const cal = calibrateSales({
+                            reviewDelta: kw.reviewGrowth || 0,
+                            productCount: kw.productCount,
+                            avgPrice: kw.avgPrice,
+                            categoryHint: kw.categoryHint,
+                          });
                           return (
                             <tr key={kw.id}
                               className={`border-b cursor-pointer transition ${isSelected ? "bg-orange-50 ring-1 ring-orange-200" : "hover:bg-gray-50"}`}
@@ -336,9 +343,14 @@ export default function SearchDemand() {
                                 ) : <span className="text-gray-400">0</span>}
                               </td>
                               <td className="p-2 text-center">
-                                {(kw.salesEstimate || 0) > 0 ? (
-                                  <span className="font-bold text-blue-600">{kw.salesEstimate?.toLocaleString()}</span>
-                                ) : <span className="text-gray-400">0</span>}
+                                <div className="flex flex-col items-center">
+                                  <span className="font-bold text-blue-600">{cal.correctedSalesEst.toLocaleString()}</span>
+                                  <Badge className={`text-[7px] px-1 py-0 border mt-0.5 ${
+                                    cal.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
+                                    cal.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                    "bg-red-50 text-red-700 border-red-200"
+                                  }`}>{cal.surgeLabel}</Badge>
+                                </div>
                               </td>
                               <td className="p-2 text-center">
                                 <Badge className={`text-[9px] ${
@@ -365,7 +377,7 @@ export default function SearchDemand() {
                                       source: "keyword", keyword: kw.query,
                                       productCount: kw.productCount, avgPrice: kw.avgPrice,
                                       competitionScore: kw.competitionScore, demandScore: kw.demandScore,
-                                      keywordScore: kw.keywordScore, salesEstimate: kw.salesEstimate,
+                                      keywordScore: kw.keywordScore, salesEstimate: cal.correctedSalesEst,
                                       reviewGrowth: kw.reviewGrowth, competitionLevel: kw.competitionLevel,
                                     })}>
                                     <Plus className="w-3 h-3" />
@@ -478,17 +490,20 @@ export default function SearchDemand() {
                             <th className="p-1.5">리뷰+</th><th className="p-1.5">판매</th><th className="p-1.5">경쟁</th><th className="p-1.5">수요</th>
                           </tr></thead>
                           <tbody>
-                            {(keywordDailyStats.data as any[]).slice().reverse().map((d: any, i: number) => (
-                              <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                                <td className="p-1.5 text-gray-500">{d.statDate?.slice(5)}</td>
-                                <td className="p-1.5 text-center">{d.productCount}</td>
-                                <td className="p-1.5 text-center">{formatPrice(d.avgPrice)}</td>
-                                <td className="p-1.5 text-center font-medium text-green-600">{d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
-                                <td className="p-1.5 text-center font-medium text-blue-600">{d.salesEstimate || 0}</td>
-                                <td className="p-1.5 text-center">{d.competitionScore}</td>
-                                <td className="p-1.5 text-center font-bold text-orange-600">{d.demandScore}</td>
-                              </tr>
-                            ))}
+                            {(keywordDailyStats.data as any[]).slice().reverse().map((d: any, i: number) => {
+                              const dayCal = calibrateSales({ reviewDelta: d.reviewGrowth || 0 });
+                              return (
+                                <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                                  <td className="p-1.5 text-gray-500">{d.statDate?.slice(5)}</td>
+                                  <td className="p-1.5 text-center">{d.productCount}</td>
+                                  <td className="p-1.5 text-center">{formatPrice(d.avgPrice)}</td>
+                                  <td className="p-1.5 text-center font-medium text-green-600">{d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
+                                  <td className="p-1.5 text-center font-medium text-blue-600">{dayCal.correctedSalesEst || 0}</td>
+                                  <td className="p-1.5 text-center">{d.competitionScore}</td>
+                                  <td className="p-1.5 text-center font-bold text-orange-600">{d.demandScore}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -511,10 +526,11 @@ export default function SearchDemand() {
               <CardContent className="pt-3 pb-3">
                 <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준</div>
                 <div className="space-y-1.5 text-[10px] text-gray-500">
-                  <div><span className="font-medium text-orange-600">수요점수</span>: 리뷰 증가량 기반 (증가량 × 20 = 추정 판매량)</div>
+                  <div><span className="font-medium text-orange-600">수요점수</span>: 리뷰 증가량 기반 (증가량 × 카테고리별 전환율)</div>
                   <div><span className="font-medium text-purple-600">종합점수</span>: 리뷰증가×0.5 + 상품당리뷰×30 + (1-광고비율)×20</div>
-                  <div><span className="font-medium text-green-600">판매추정</span>: 리뷰 증가량 × 20 (리뷰 1개 = 판매 15~25건)</div>
+                  <div><span className="font-medium text-green-600">판매추정</span>: base × (1 + alpha × 수요지수) · 카테고리별 보정 적용</div>
                   <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수·평점·광고비율 종합 (0=블루오션, 100=레드오션)</div>
+                  <div><span className="font-medium text-indigo-600">보정배지</span>: 실수요/프로모의심/선행트렌드/안정/기본추정</div>
                 </div>
               </CardContent>
             </Card>

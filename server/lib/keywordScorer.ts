@@ -1,6 +1,17 @@
 /**
- * 키워드 점수화 엔진
- * 7가지 알고리즘을 통합하여 키워드별 최종 점수 산출
+ * 키워드 점수화 + 판매추정 보정 엔진
+ *
+ * 7가지 채굴 알고리즘 + 네이버 외부수요 보정
+ *
+ * 핵심 보정 구조:
+ *   base_sales_est = 쿠팡 리뷰증가량 × 카테고리별 리뷰전환계수
+ *   naver_demand_index = (검색량 표준화 × 0.5) + (CPC 표준화 × 0.3) + (경쟁도 표준화 × 0.2)
+ *   corrected_sales_est = base_sales_est × (1 + alpha × naver_demand_index)
+ *
+ * 가짜 상승 필터링:
+ *   네이버 정체 + 쿠팡만 급등 → 광고/프로모션 가능성 (신뢰도 ↓)
+ *   네이버 상승 + 쿠팡 상승 → 실수요 확대 (신뢰도 ↑)
+ *   네이버 선행 상승 + 쿠팡 아직 → 초기 트렌드 (선행지표)
  */
 
 interface ScoringInput {
@@ -9,6 +20,8 @@ interface ScoringInput {
   naverCompetition?: string; // "높음" | "중간" | "낮음"
   naverAvgCpc?: number;
   naverSearchPrev?: number; // 이전 기간 검색량 (트렌드용)
+  naverPcSearch?: number;
+  naverMobileSearch?: number;
 
   // 쿠팡 데이터
   coupangProductCount?: number;
@@ -20,9 +33,13 @@ interface ScoringInput {
   coupangNewProductReview30d?: number;
   coupangOutOfStockCount?: number;
   coupangProductCountPrev?: number; // 이전 상품수 (공급증가율용)
+  coupangReviewDeltaPrev?: number; // 이전 리뷰 증가량 (가짜 상승 필터용)
 
   // 소싱 데이터
   sourcePrice?: number; // 중국가
+
+  // 카테고리 (보정 계수 결정용)
+  categoryHint?: string;
 }
 
 export interface ScoringResult {
@@ -36,6 +53,21 @@ export interface ScoringResult {
   finalScore: number;          // 최종 종합 점수
   grade: "S" | "A" | "B" | "C" | "D";
   tags: string[];
+  // 판매추정 보정 결과
+  calibration: CalibrationResult;
+}
+
+/** 판매추정 보정 결과 */
+export interface CalibrationResult {
+  baseSalesEst: number;          // 기본 판매추정 (리뷰 × 전환계수)
+  naverDemandIndex: number;      // 네이버 수요지수 (0~1)
+  correctedSalesEst: number;     // 보정된 판매추정
+  confidence: "high" | "medium" | "low"; // 신뢰도
+  confidenceReason: string;      // 신뢰도 근거
+  surgeType: "real_demand" | "promo_suspected" | "early_trend" | "stable" | "unknown";
+  surgeLabel: string;            // 한글 라벨
+  categoryAlpha: number;         // 적용된 카테고리 보정계수
+  reviewConversion: number;      // 적용된 리뷰전환계수
 }
 
 /** 0~100 클램프 */
@@ -146,8 +178,205 @@ function calcMarketPressure(
   return clamp(pressure * 30);
 }
 
+// ========== 판매추정 보정 엔진 ==========
+
 /**
- * 최종 점수 계산
+ * 카테고리별 리뷰→판매 전환계수
+ * 리뷰 1건 ≈ 실제 판매 N건 (카테고리마다 다름)
+ */
+const REVIEW_CONVERSION_MAP: Record<string, number> = {
+  "가전": 25,
+  "생활용품": 20,
+  "주방": 22,
+  "뷰티": 30,
+  "패션": 35,
+  "식품": 15,
+  "반려동물": 20,
+  "유아동": 25,
+  "스포츠": 25,
+  "자동차": 20,
+  "캠핑": 22,
+  "수납": 20,
+  "욕실": 20,
+  "문구": 18,
+};
+
+/**
+ * 카테고리별 네이버 보정 강도 (alpha)
+ * - 생활용품/가전: 네이버 보정 강하게 (0.3)
+ * - 충동구매형 저가 잡화: 쿠팡 내부지표 비중 크게 (0.1)
+ * - 시즌상품: 네이버 선행신호 비중 높게 (0.4)
+ */
+const CATEGORY_ALPHA_MAP: Record<string, number> = {
+  "가전": 0.30,
+  "생활용품": 0.30,
+  "주방": 0.25,
+  "뷰티": 0.15,
+  "패션": 0.10,   // 충동구매형
+  "식품": 0.15,
+  "반려동물": 0.20,
+  "유아동": 0.25,
+  "스포츠": 0.25,
+  "자동차": 0.30,
+  "캠핑": 0.35,   // 시즌성 강함
+  "수납": 0.25,
+  "욕실": 0.25,
+  "문구": 0.15,
+};
+
+function getReviewConversion(category?: string): number {
+  if (!category) return 20; // 기본값
+  for (const [key, val] of Object.entries(REVIEW_CONVERSION_MAP)) {
+    if (category.includes(key)) return val;
+  }
+  return 20;
+}
+
+function getCategoryAlpha(category?: string): number {
+  if (!category) return 0.20; // 기본값
+  for (const [key, val] of Object.entries(CATEGORY_ALPHA_MAP)) {
+    if (category.includes(key)) return val;
+  }
+  return 0.20;
+}
+
+/**
+ * 네이버 수요지수 계산 (0~1 범위)
+ * = (검색량 표준화 × 0.5) + (CPC 표준화 × 0.3) + (경쟁도 표준화 × 0.2)
+ */
+function calcNaverDemandIndex(
+  totalSearch: number,
+  avgCpc: number,
+  competition: string | undefined,
+): number {
+  // 검색량 표준화: 0~50000 → 0~1
+  const searchNorm = Math.min(1, totalSearch / 50000);
+
+  // CPC 표준화: 0~2000 → 0~1 (CPC 높을수록 광고주가 돈 쓰는 키워드)
+  const cpcNorm = Math.min(1, avgCpc / 2000);
+
+  // 경쟁도 표준화: 높음=1, 중간=0.5, 낮음=0.1
+  let compNorm = 0.3;
+  if (competition === "높음") compNorm = 1.0;
+  else if (competition === "중간") compNorm = 0.5;
+  else if (competition === "낮음") compNorm = 0.1;
+
+  return searchNorm * 0.5 + cpcNorm * 0.3 + compNorm * 0.2;
+}
+
+/**
+ * 가짜 상승 / 실수요 판별
+ *
+ * 네이버 검색량 + 쿠팡 리뷰 delta 비교:
+ * - 둘 다 상승 → real_demand (실수요 확대)
+ * - 네이버 정체 + 쿠팡만 급등 → promo_suspected (광고/프로모션 의심)
+ * - 네이버 선행 상승 + 쿠팡 아직 → early_trend (초기 트렌드)
+ * - 변동 없음 → stable
+ */
+function detectSurgeType(
+  naverSearch: number,
+  naverSearchPrev: number,
+  reviewDelta: number,
+  reviewDeltaPrev: number,
+): { type: CalibrationResult["surgeType"]; label: string; confidence: CalibrationResult["confidence"]; reason: string } {
+  const naverGrowth = naverSearchPrev > 0 ? (naverSearch - naverSearchPrev) / naverSearchPrev : 0;
+  const coupangGrowth = reviewDeltaPrev > 0 ? (reviewDelta - reviewDeltaPrev) / reviewDeltaPrev : (reviewDelta > 0 ? 1 : 0);
+
+  // 쿠팡 급등 (리뷰 delta 50%+ 증가)
+  const coupangSurge = coupangGrowth > 0.5;
+  // 네이버 상승 (검색량 20%+ 증가)
+  const naverRising = naverGrowth > 0.2;
+  // 네이버 정체 (-10% ~ +10%)
+  const naverFlat = naverGrowth > -0.1 && naverGrowth < 0.1;
+
+  if (coupangSurge && naverRising) {
+    return {
+      type: "real_demand",
+      label: "실수요 확대",
+      confidence: "high",
+      reason: "네이버 검색량과 쿠팡 판매 동시 상승 → 실제 수요 증가",
+    };
+  }
+
+  if (coupangSurge && naverFlat) {
+    return {
+      type: "promo_suspected",
+      label: "프로모션 의심",
+      confidence: "low",
+      reason: "네이버 검색량 정체인데 쿠팡만 급등 → 광고/딜/랭킹 조작 가능성",
+    };
+  }
+
+  if (naverRising && !coupangSurge) {
+    return {
+      type: "early_trend",
+      label: "초기 트렌드",
+      confidence: "medium",
+      reason: "네이버 검색량 선행 상승 → 쿠팡 판매 반응 대기 (진입 기회)",
+    };
+  }
+
+  if (!coupangSurge && !naverRising) {
+    return {
+      type: "stable",
+      label: "안정",
+      confidence: "medium",
+      reason: "큰 변동 없는 안정적 시장",
+    };
+  }
+
+  return {
+    type: "unknown",
+    label: "판단보류",
+    confidence: "low",
+    reason: "데이터 부족으로 판단 보류",
+  };
+}
+
+/**
+ * 판매추정 보정 계산
+ */
+function calibrateSalesEstimate(input: ScoringInput): CalibrationResult {
+  const reviewDelta = input.coupangTop10ReviewDelta || 0;
+  const reviewConversion = getReviewConversion(input.categoryHint);
+  const alpha = getCategoryAlpha(input.categoryHint);
+
+  // 1. 기본 판매추정 = 리뷰 증가량 × 카테고리별 전환계수
+  const baseSalesEst = reviewDelta * reviewConversion;
+
+  // 2. 네이버 수요지수 (0~1)
+  const naverDemandIndex = calcNaverDemandIndex(
+    input.naverTotalSearch || 0,
+    input.naverAvgCpc || 0,
+    input.naverCompetition,
+  );
+
+  // 3. 보정된 판매추정 = base × (1 + alpha × naverDemandIndex)
+  const correctedSalesEst = Math.round(baseSalesEst * (1 + alpha * naverDemandIndex));
+
+  // 4. 가짜 상승 판별
+  const surge = detectSurgeType(
+    input.naverTotalSearch || 0,
+    input.naverSearchPrev || 0,
+    reviewDelta,
+    input.coupangReviewDeltaPrev || 0,
+  );
+
+  return {
+    baseSalesEst,
+    naverDemandIndex: Math.round(naverDemandIndex * 100) / 100,
+    correctedSalesEst,
+    confidence: surge.confidence,
+    confidenceReason: surge.reason,
+    surgeType: surge.type,
+    surgeLabel: surge.label,
+    categoryAlpha: alpha,
+    reviewConversion,
+  };
+}
+
+/**
+ * 최종 점수 계산 + 판매추정 보정
  */
 export function scoreKeyword(input: ScoringInput): ScoringResult {
   const search = input.naverTotalSearch || 0;
@@ -207,6 +436,14 @@ export function scoreKeyword(input: ScoringInput): ScoringResult {
   if (demandDensityScore >= 70) tags.push("수요밀집");
   if (marketGapScore < 20 && salesVelocityScore < 20) tags.push("레드오션");
 
+  // 판매추정 보정
+  const calibration = calibrateSalesEstimate(input);
+
+  // 보정 결과에 따른 추가 태그
+  if (calibration.surgeType === "real_demand") tags.push("실수요");
+  if (calibration.surgeType === "promo_suspected") tags.push("프로모의심");
+  if (calibration.surgeType === "early_trend") tags.push("선행트렌드");
+
   return {
     marketGapScore,
     salesVelocityScore,
@@ -218,6 +455,7 @@ export function scoreKeyword(input: ScoringInput): ScoringResult {
     finalScore,
     grade,
     tags,
+    calibration,
   };
 }
 
