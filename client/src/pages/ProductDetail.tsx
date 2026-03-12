@@ -46,7 +46,7 @@ export default function ProductDetail() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center gap-4 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => setLocation("/products")} className="text-pink-500 hover:text-pink-600 hover:bg-pink-50 rounded-xl">

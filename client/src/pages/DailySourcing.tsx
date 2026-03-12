@@ -183,7 +183,7 @@ export default function DailySourcing() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">
