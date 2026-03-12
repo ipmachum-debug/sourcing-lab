@@ -1360,7 +1360,7 @@ export const coupangRouter = router({
 
       // Finalize
       await db.update(coupangSyncJobs).set({
-        status: hasError ? "partial" : "success",
+        status: hasError ? "failed" : "success",
         finishedAt: sql`NOW()`,
         recordCount: totalRecords,
         errorMessage: hasError ? results.filter(r => r.includes("실패")).join("; ").slice(0, 500) : null,

@@ -626,7 +626,7 @@ function MarginSection({ productId, scenarios }: { productId: number; scenarios:
           <CardContent className="pt-4 flex items-start gap-3">
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge className="bg-purple-100 text-purple-700 border-purple-200">{{ conservative: "보수적", normal: "일반", aggressive: "공격적" }[s.label] || s.label}</Badge>
+                <Badge className="bg-purple-100 text-purple-700 border-purple-200">{{ conservative: "보수적", normal: "일반", aggressive: "공격적" }[s.label as "conservative" | "normal" | "aggressive"] || s.label}</Badge>
                 <span className={`text-lg font-bold ${Number(s.marginRate) >= 30 ? "text-pink-500" : Number(s.marginRate) >= 20 ? "text-purple-500" : "text-amber-500"}`}>마진율 {s.marginRate}%</span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
