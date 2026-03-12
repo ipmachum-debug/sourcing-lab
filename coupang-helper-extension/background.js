@@ -691,7 +691,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'HYBRID_BATCH_SELECTION': {
       apiClient.getBatchKeywordSelection(message.opts || {}).then((resp) => {
-        sendResponse({ ok: true, data: resp?.result?.data });
+        // 적응형 스케줄러: { keywords, delayConfig, totalActive, totalOverdue }
+        const data = resp?.result?.data || {};
+        sendResponse({ ok: true, data });
       }).catch(e => {
         sendResponse({ ok: false, error: e.message });
       });
@@ -1446,6 +1448,24 @@ function randomDelay(min = 15000, max = 25000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// ---- 인간 행동 딜레이 생성기 (서버 delayConfig 기반) ----
+// 버스트 + 긴 휴식 패턴으로 봇 탐지 회피
+function humanDelay(config, indexInBurst) {
+  if (!config) return randomDelay();
+  const isBurstBreak = config.burstSize > 0 && indexInBurst > 0 && indexInBurst % config.burstSize === 0;
+  if (isBurstBreak) {
+    // 버스트 완료 → 긴 휴식 (사람이 다른 일 하다 돌아오는 패턴)
+    return randomDelay(config.burstPauseMinMs, config.burstPauseMaxMs);
+  }
+  // 버스트 내 — 정규분포에 가까운 랜덤 (Box-Muller)
+  const u1 = Math.random(), u2 = Math.random();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const mean = (config.baseDelayMs + config.maxDelayMs) / 2;
+  const stddev = (config.maxDelayMs - config.baseDelayMs) / 4;
+  const delay = Math.round(mean + z * stddev);
+  return Math.max(config.baseDelayMs, Math.min(config.maxDelayMs, delay));
+}
+
 // v7.2.2: 에러 유형별 짧은 딜레이 (비차단 에러용)
 function shortDelay(min = 5000, max = 15000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -1538,6 +1558,7 @@ async function startAutoCollect(options = {}) {
   // 큐 로드
   try {
     let keywords;
+    let delayConfig = null; // 서버 제공 인간 행동 딜레이 설정
     if (directKeywords && directKeywords.length > 0) {
       keywords = directKeywords.map(kw => ({
         keyword: typeof kw === 'string' ? kw : kw.keyword,
@@ -1546,12 +1567,18 @@ async function startAutoCollect(options = {}) {
       }));
       console.log(`[SH-AC] 직접 키워드 ${keywords.length}개 로드`);
     } else {
+      // 서버 적응형 스케줄러: { keywords, delayConfig, totalActive, totalOverdue }
       const resp = await apiClient.getBatchKeywordSelection({ limit });
-      keywords = resp?.result?.data || [];
+      const data = resp?.result?.data || {};
+      keywords = data.keywords || data || []; // 하위 호환: 배열 직접 반환도 지원
+      delayConfig = data.delayConfig || null;
+      if (data.totalActive !== undefined) {
+        console.log(`[SH-AC] 적응형 스케줄러: 전체 ${data.totalActive}개 중 수집 대상 ${data.totalOverdue}개`);
+      }
     }
-    if (!keywords.length) {
+    if (Array.isArray(keywords) && !keywords.length) {
       console.log('[SH-AC] 수집할 키워드가 없습니다.');
-      return { ok: false, error: '수집할 키워드가 없습니다 (watch_keywords 등록 필요)' };
+      return { ok: false, error: '수집할 키워드가 없습니다 (watch_keywords 등록 필요 또는 아직 수집 시기 아님)' };
     }
 
     // 상태 완전 초기화 후 설정
@@ -1560,6 +1587,8 @@ async function startAutoCollect(options = {}) {
       keyword: k.keyword,
       priority: k.priority || 50,
       selectionReason: k.selectionReason || '',
+      volatilityScore: k.volatilityScore || 0,
+      adaptiveIntervalHours: k.adaptiveIntervalHours || null,
       retryCount: 0,
     }));
     collector.collectDetail = collectDetail;
@@ -1570,16 +1599,24 @@ async function startAutoCollect(options = {}) {
     collector.failCount = 0;
     collector.skipCount = 0;
     collector._collectedKeywords = [];
+    collector._delayConfig = delayConfig; // 서버 딜레이 설정 저장
+    collector._burstIndex = 0;            // 버스트 카운터 초기화
     collector.lastError = null;
     collector.startedAt = new Date().toISOString();
 
-    console.log(`[SH-AC] 큐 로드 완료: ${collector.queue.length}개 키워드`);
+    console.log(`[SH-AC] 큐 로드 완료: ${collector.queue.length}개 키워드` +
+      (delayConfig ? ` (인간 딜레이: burst=${delayConfig.burstSize}, base=${delayConfig.baseDelayMs}ms)` : ''));
     collector.queue.forEach((k, i) => {
-      console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority})`);
+      const volTag = k.volatilityScore >= 80 ? '🔥' : k.volatilityScore >= 40 ? '📊' : '😴';
+      const intervalTag = k.adaptiveIntervalHours ? `${k.adaptiveIntervalHours}h` : '-';
+      console.log(`  [${i+1}] "${k.keyword}" (우선순위:${k.priority} ${volTag}변동성:${k.volatilityScore} 주기:${intervalTag} 사유:${k.selectionReason})`);
     });
 
     // ★ v7.3.1: 비동기 시작 — 즉시 반환 (message channel timeout 방지)
-    runNextKeyword();
+    // 워밍업 딜레이 후 시작 (서버 설정 or 기본 5초)
+    const warmup = delayConfig?.warmupDelayMs || 5000;
+    console.log(`[SH-AC] 워밍업 ${Math.round(warmup/1000)}초 후 수집 시작...`);
+    setTimeout(() => runNextKeyword(), warmup);
     return { ok: true, queueLength: collector.queue.length };
   } catch (e) {
     console.error('[SH-AC] 큐 로드 실패:', e.message);
@@ -1847,10 +1884,12 @@ async function runNextKeyword() {
       }
     }
 
-    // 다음 키워드 — 50~89초 랜덤 딜레이
+    // 다음 키워드 — 인간 행동 딜레이 (서버 delayConfig 기반)
     if (!collector.running || collector._aborted) return;
-    const delay = randomDelay();
-    console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기...`);
+    collector._burstIndex = (collector._burstIndex || 0) + 1;
+    const delay = humanDelay(collector._delayConfig, collector._burstIndex);
+    const isBurst = collector._delayConfig?.burstSize > 0 && collector._burstIndex % collector._delayConfig.burstSize === 0;
+    console.log(`[SH-AC] ⏳ 다음 키워드까지 ${Math.round(delay/1000)}초 대기${isBurst ? ' (버스트 휴식 🛋️)' : ''}...`);
     collector.status = 'WAITING_NEXT';
     await collectorSleep(delay);
 

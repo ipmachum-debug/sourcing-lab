@@ -722,6 +722,10 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
   reviewGrowth7d: int("review_growth_7d").default(0),
   priceChange1d: int("price_change_1d").default(0),
   compositeScore: int("composite_score").default(0),
+  // 적응형 스케줄링
+  nextCollectAt: timestamp("next_collect_at", tsOpts),
+  adaptiveIntervalHours: int("adaptive_interval_hours"),
+  volatilityScore: int("volatility_score").default(0),
   // 타임스탬프
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
