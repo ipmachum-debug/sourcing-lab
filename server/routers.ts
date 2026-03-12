@@ -22,6 +22,7 @@ import { coupangRouter } from "./routers/coupang.router";
 import { extensionRouter } from "./routers/extension.router";
 import { sourcingCoachRouter } from "./routers/sourcingCoach.router";
 import { keywordMetricsRouter } from "./routers/keywordMetrics.router";
+import { marginRouter } from "./routers/margin.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -39,6 +40,7 @@ export const appRouter = router({
   extension: extensionRouter,
   sourcingCoach: sourcingCoachRouter,
   keywordMetrics: keywordMetricsRouter,
+  margin: marginRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({
