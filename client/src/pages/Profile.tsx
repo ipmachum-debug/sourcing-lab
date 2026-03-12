@@ -176,7 +176,7 @@ export default function Profile() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-2xl">
+      <div className="space-y-4 max-w-2xl">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">

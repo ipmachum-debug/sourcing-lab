@@ -97,7 +97,7 @@ export default function UserManagement() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">

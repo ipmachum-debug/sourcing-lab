@@ -86,7 +86,7 @@ export default function SourcingHelper() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 space-y-6">
+      <div className="space-y-4">
         {/* ===== 페이지 헤더 + 빠른 액세스 ===== */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

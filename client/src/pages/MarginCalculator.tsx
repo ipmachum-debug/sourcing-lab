@@ -31,6 +31,7 @@ import {
   ShieldX,
   CheckCircle,
   XCircle,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -242,6 +243,20 @@ export default function MarginCalculator() {
     const sourcingRoasPass = minAdRoi > 0 && minAdRoi <= 250;
     const sourcingPass = sourcingMarginPass && sourcingRoasPass;
 
+    // 적정 판매가 역산 (비용 기반)
+    // sell = fixedCosts / (1 - targetMargin - feeRate*1.1/100 - 1/11 - adRate/100)
+    const fixedCosts = costPrice + fulfillment + shipping + fulfillmentVat;
+    const variableRatio = (fr: number, ar: number, tm: number) =>
+      1 - tm / 100 - (fr * 1.1) / 100 - 1 / 11 - ar / 100;
+
+    const ratio30 = variableRatio(feeRate, adRateNum, 30);
+    const ratio45 = variableRatio(feeRate, adRateNum, 45);
+    const breakEvenRatio = variableRatio(feeRate, adRateNum, 0);
+
+    const recommendedPrice30 = ratio30 > 0 ? Math.ceil(fixedCosts / ratio30 / 100) * 100 : 0;
+    const recommendedPrice45 = ratio45 > 0 ? Math.ceil(fixedCosts / ratio45 / 100) * 100 : 0;
+    const breakEvenPrice = breakEvenRatio > 0 ? Math.ceil(fixedCosts / breakEvenRatio / 100) * 100 : 0;
+
     return {
       fulfillment,
       shipping,
@@ -261,6 +276,9 @@ export default function MarginCalculator() {
       sourcingMarginPass,
       sourcingRoasPass,
       sourcingPass,
+      recommendedPrice30,
+      recommendedPrice45,
+      breakEvenPrice,
     };
   }, [
     sellingPrice,
@@ -1063,6 +1081,72 @@ export default function MarginCalculator() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* 적정 판매가 가이드 */}
+                {costPrice > 0 && (
+                  <Card className="bg-violet-50/50 border-violet-100 dark:bg-violet-950/20 dark:border-violet-900">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-violet-500" /> 적정 판매가 가이드
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 text-xs">
+                        <p className="text-[10px] text-gray-400 mb-2">
+                          현재 비용 기준으로 목표 마진율 달성에 필요한 판매가
+                        </p>
+                        {[
+                          {
+                            label: "손익분기 (0%)",
+                            price: result.breakEvenPrice,
+                            color: "text-red-500",
+                            bgColor: "bg-red-50 dark:bg-red-950/30",
+                          },
+                          {
+                            label: "30% 마진",
+                            price: result.recommendedPrice30,
+                            color: "text-amber-600",
+                            bgColor: "bg-amber-50 dark:bg-amber-950/30",
+                          },
+                          {
+                            label: "45% 마진 (소싱원칙)",
+                            price: result.recommendedPrice45,
+                            color: "text-emerald-600",
+                            bgColor: "bg-emerald-50 dark:bg-emerald-950/30",
+                          },
+                        ].map((item, i) => (
+                          <div
+                            key={i}
+                            className={`flex justify-between items-center px-3 py-2 rounded-lg ${item.bgColor}`}
+                          >
+                            <span className="text-gray-600 font-medium">
+                              {item.label}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`font-bold ${item.color}`}>
+                                {item.price > 0
+                                  ? formatKRW(item.price)
+                                  : "산출불가"}
+                              </span>
+                              {item.price > 0 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-5 px-1.5 text-[9px] text-violet-600 hover:text-violet-800"
+                                  onClick={() =>
+                                    setSellingPrice(item.price.toString())
+                                  }
+                                >
+                                  적용
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </>
             ) : (
               <Card className="border-dashed">

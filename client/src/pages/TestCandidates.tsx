@@ -25,7 +25,7 @@ export default function TestCandidates() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">
             <span className="text-2xl">🧪</span>
