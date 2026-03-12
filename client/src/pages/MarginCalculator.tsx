@@ -32,6 +32,11 @@ import {
   CheckCircle,
   XCircle,
   Sparkles,
+  Brain,
+  Loader2,
+  Target,
+  Zap,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -116,6 +121,9 @@ export default function MarginCalculator() {
   const [historySearch, setHistorySearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
 
+  // AI 추천가 상태
+  const [aiResult, setAiResult] = useState<any>(null);
+
   const utils = trpc.useUtils();
 
   const historyQuery = trpc.margin.list.useQuery(
@@ -137,6 +145,34 @@ export default function MarginCalculator() {
       utils.margin.list.invalidate();
     },
   });
+
+  const aiRecommendMut = trpc.margin.aiRecommend.useMutation({
+    onSuccess: (res) => {
+      if (res.success && res.data) {
+        setAiResult(res.data);
+        toast.success("AI 추천가 분석 완료");
+      }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const requestAiRecommend = () => {
+    if (costPrice <= 0) {
+      toast.error("원가를 먼저 입력하세요");
+      return;
+    }
+    const preset = FULFILLMENT_PRESETS[sizePreset];
+    aiRecommendMut.mutate({
+      itemName,
+      costPrice,
+      feeRate,
+      fulfillmentFee: sizePreset === "custom" ? (parseInt(customFulfillment) || 0) : (preset?.fulfillment ?? 0),
+      shippingFee: sizePreset === "custom" ? (parseInt(customShipping) || 0) : (preset?.shipping ?? 0),
+      adRate: parseFloat(adRate) || 0,
+      category: COUPANG_FEE_RATES[category]?.name || "",
+      supplier,
+    });
+  };
 
   // 환율 자동 변경
   const handleCurrencyChange = (val: "KRW" | "CNY" | "USD") => {
@@ -697,7 +733,7 @@ export default function MarginCalculator() {
               </CardContent>
             </Card>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
@@ -726,6 +762,20 @@ export default function MarginCalculator() {
                   </Button>
                 </>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 text-purple-600 border-purple-200 hover:bg-purple-50"
+                onClick={requestAiRecommend}
+                disabled={aiRecommendMut.isPending || costPrice <= 0}
+              >
+                {aiRecommendMut.isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Brain className="w-3 h-3" />
+                )}
+                {aiRecommendMut.isPending ? "분석 중..." : "AI 추천가"}
+              </Button>
             </div>
           </div>
 
@@ -1081,6 +1131,66 @@ export default function MarginCalculator() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* AI 추천가 카드 */}
+                {aiResult && (
+                  <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50/50 to-blue-50/50 dark:from-purple-950/20 dark:to-blue-950/20">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Brain className="w-4 h-4 text-purple-600" /> AI 추천 판매가
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2.5">
+                      {[
+                        { key: "conservative", label: "보수적", icon: Shield, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/30", border: "border-blue-200" },
+                        { key: "balanced", label: "균형 (추천)", icon: Target, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-950/30", border: "border-emerald-200" },
+                        { key: "aggressive", label: "공격적", icon: Zap, color: "text-orange-600", bg: "bg-orange-50 dark:bg-orange-950/30", border: "border-orange-200" },
+                      ].map(({ key, label, icon: Icon, color, bg, border }) => {
+                        const rec = aiResult[key];
+                        if (!rec) return null;
+                        const isPass = rec.marginRate >= 45 && rec.endRoas <= 250 && rec.endRoas > 0;
+                        return (
+                          <div key={key} className={`rounded-lg p-2.5 ${bg} border ${border}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <Icon className={`w-3.5 h-3.5 ${color}`} />
+                                <span className={`text-xs font-bold ${color}`}>{label}</span>
+                                {isPass && (
+                                  <Badge className="text-[8px] px-1 bg-emerald-100 text-emerald-700 border-emerald-200">PASS</Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-sm font-bold ${color}`}>
+                                  {rec.price > 0 ? formatKRW(rec.price) : "산출불가"}
+                                </span>
+                                {rec.price > 0 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-5 px-1.5 text-[9px] text-purple-600 hover:text-purple-800"
+                                    onClick={() => setSellingPrice(rec.price.toString())}
+                                  >
+                                    적용
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex gap-3 text-[10px] text-gray-500">
+                              <span>마진 <span className={rec.marginRate >= 45 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{rec.marginRate}%</span></span>
+                              <span>ROAS <span className={rec.endRoas <= 250 && rec.endRoas > 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{rec.endRoas}%</span></span>
+                            </div>
+                            <p className="text-[10px] text-gray-500 mt-1">{rec.strategy}</p>
+                          </div>
+                        );
+                      })}
+                      {aiResult.tip && (
+                        <div className="text-[10px] text-purple-700 bg-purple-50/50 dark:bg-purple-950/30 rounded p-2 mt-1 border border-purple-100">
+                          <span className="font-semibold">💡 AI 조언:</span> {aiResult.tip}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* 적정 판매가 가이드 */}
                 {costPrice > 0 && (
