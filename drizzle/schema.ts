@@ -838,3 +838,33 @@ export const extKeywordAlerts = mysqlTable("ext_keyword_alerts", {
 
 export type ExtKeywordAlert = typeof extKeywordAlerts.$inferSelect;
 export type InsertExtKeywordAlert = typeof extKeywordAlerts.$inferInsert;
+
+// ==================== 마진 계산 이력 (margin_calc_history) ====================
+// 마진 계산기에서 저장한 계산 이력
+export const marginCalcHistory = mysqlTable("margin_calc_history", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  itemName: varchar("item_name", { length: 200 }).default("").notNull(),
+  // 입력값
+  sellingPrice: int("selling_price").notNull(),           // 판매가
+  costPrice: int("cost_price").notNull(),                 // 원가
+  feeRate: decimal("fee_rate", { precision: 5, scale: 2 }).notNull(), // 판매수수료율 %
+  fulfillmentFee: int("fulfillment_fee").notNull(),       // 입출고비 (VAT 별도)
+  shippingFee: int("shipping_fee").notNull(),             // 배송비 (VAT 별도)
+  expectedSales: int("expected_sales").notNull().default(100), // 예상판매량
+  returnRate: decimal("return_rate", { precision: 5, scale: 2 }).notNull().default("0"), // 반품률 %
+  returnCollectionFee: int("return_collection_fee").notNull().default(0), // 반품회수비
+  // 계산 결과 스냅샷
+  fulfillmentVat: int("fulfillment_vat").notNull(),       // 입출고비용 VAT
+  salesCommission: int("sales_commission").notNull(),     // 판매수수료
+  salesCommissionVat: int("sales_commission_vat").notNull(), // 판매수수료 VAT
+  vat: int("vat").notNull(),                              // 부가세
+  margin: int("margin").notNull(),                        // 마진
+  marginRate: decimal("margin_rate", { precision: 5, scale: 2 }).notNull(), // 마진율 %
+  minAdRoi: decimal("min_ad_roi", { precision: 7, scale: 2 }).notNull().default("0"), // 최소광고수익률 %
+  totalMargin: int("total_margin").notNull().default(0),  // 총마진 (마진 × 예상판매량)
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MarginCalcHistory = typeof marginCalcHistory.$inferSelect;
+export type InsertMarginCalcHistory = typeof marginCalcHistory.$inferInsert;
