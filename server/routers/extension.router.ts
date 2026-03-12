@@ -18,6 +18,7 @@ import { eq, and, desc, sql, like, asc, gte, ne, lt, isNull } from "drizzle-orm"
 import {
   selectBatchKeywords, computeDailyAggregation, runDailyBatch,
   recomputeCompositeScore, diagnoseParsingQuality,
+  normalizeKeyword, detectDuplicateKeywords,
 } from "../batchCollector";
 import { TRPCError } from "@trpc/server";
 
@@ -1715,20 +1716,31 @@ export const extensionRouter = router({
       let computed = 0;
       const entries = Array.from(byQuery.entries());
       for (const [query, querySnapshots] of entries) {
-        const latest = querySnapshots[0]; // 가장 최신 스냅샷
-        let items: any[] = [];
-        try {
-          items = latest.itemsJson ? JSON.parse(latest.itemsJson) : [];
-        } catch { items = []; }
+        // ★ v7.3.3: 스냅샷 중 가장 완전한 데이터(totalReviewSum 최대) 선택
+        let bestSnapshot = querySnapshots[0];
+        let bestItems: any[] = [];
+        let bestTotalReviewSum = 0;
 
-        // items에서 상세 통계 계산
-        const totalReviewSum = items.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+        for (const snap of querySnapshots.slice(0, 5)) {
+          let snapItems: any[] = [];
+          try { snapItems = snap.itemsJson ? JSON.parse(snap.itemsJson) : []; } catch { snapItems = []; }
+          const snapReviewSum = snapItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+          if (snapReviewSum > bestTotalReviewSum) {
+            bestTotalReviewSum = snapReviewSum;
+            bestSnapshot = snap;
+            bestItems = snapItems;
+          }
+        }
+
+        const latest = bestSnapshot;
+        const items = bestItems;
+        const totalReviewSum = bestTotalReviewSum;
+
         const adCount = items.filter((i: any) => i.isAd).length;
         const rocketCount = items.filter((i: any) => i.isRocket).length;
         const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
         const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
 
-        // ★ 개선: 다단계 이전 데이터 조회 (어제 → 최근 7일 → 이전 스냅샷)
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().slice(0, 10);
@@ -1766,7 +1778,7 @@ export const extensionRouter = router({
         let prevSnapshotAvgPrice: number | null = null;
         let prevSnapshotTotalItems: number | null = null;
         if (!prevStat && querySnapshots.length > 1) {
-          const prevSnapshot = querySnapshots[1]; // 두 번째 최신 스냅샷
+          const prevSnapshot = querySnapshots[1];
           let prevItems: any[] = [];
           try { prevItems = prevSnapshot.itemsJson ? JSON.parse(prevSnapshot.itemsJson) : []; } catch { prevItems = []; }
           prevSnapshotReviewSum = prevItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
@@ -1774,24 +1786,47 @@ export const extensionRouter = router({
           prevSnapshotTotalItems = prevSnapshot.totalItems || 0;
         }
 
-        // 리뷰 증가량 계산 (다단계 소스)
-        // ★ v7.2.7 수정: 이전 데이터가 오늘이 아닌 경우에만 증가량 계산
+        // ★ v7.3.3: 기존 growth 복구 소스 (오늘 저장값 또는 어제 growth)
+        const [existingTodayStat] = await db.select()
+          .from(extKeywordDailyStats)
+          .where(and(
+            eq(extKeywordDailyStats.userId, ctx.user!.id),
+            eq(extKeywordDailyStats.query, query),
+            eq(extKeywordDailyStats.statDate, todayStr),
+          ))
+          .limit(1);
+        const todayStoredGrowth = existingTodayStat ? N(existingTodayStat.reviewGrowth) || 0 : 0;
+        const prevDayGrowth = prevStat ? N(prevStat.reviewGrowth) || 0 : 0;
+        const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : prevDayGrowth;
+
+        // ★ v7.3.3: 수집 편차에 의한 음수 growth 방지
         let reviewGrowth = 0;
         let priceChange = 0;
         let productCountChange = 0;
         if (prevStat) {
           const prevDate = String(prevStat.statDate || '');
           if (prevDate !== todayStr) {
-            reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
+            const rawGrowth = totalReviewSum - (N(prevStat.totalReviewSum) || 0);
+            if (rawGrowth >= 0) {
+              reviewGrowth = rawGrowth;
+            } else {
+              reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+            }
             priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
             productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+          } else if (fallbackGrowth > 0) {
+            reviewGrowth = fallbackGrowth;
           }
         } else if (prevSnapshotReviewSum !== null) {
-          // ★ v7.2.8: 이전 스냅샷이 오늘이 아닌 경우에만 증가량 계산
           const prevSnap = querySnapshots.length > 1 ? querySnapshots[1] : null;
           const prevSnapDate = prevSnap?.createdAt ? String(prevSnap.createdAt).slice(0, 10) : '';
           if (prevSnapDate && prevSnapDate !== todayStr) {
-            reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
+            const rawGrowth = totalReviewSum - prevSnapshotReviewSum;
+            if (rawGrowth >= 0) {
+              reviewGrowth = rawGrowth;
+            } else {
+              reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+            }
             priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
             productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
           }
@@ -3670,9 +3705,22 @@ export const extensionRouter = router({
           await db.update(extKeywordDailyStatus).set(statusData)
             .where(eq(extKeywordDailyStatus.id, existingStatus.id));
         } else {
-          await db.insert(extKeywordDailyStatus).values({
-            userId, keyword: input.keyword, statDate: todayStr, source: input.source, ...statusData,
-          });
+          try {
+            await db.insert(extKeywordDailyStatus).values({
+              userId, keyword: input.keyword, statDate: todayStr, source: input.source, ...statusData,
+            });
+          } catch (dupErr: any) {
+            if (dupErr?.cause?.code === "ER_DUP_ENTRY" || dupErr?.code === "ER_DUP_ENTRY") {
+              await db.update(extKeywordDailyStatus).set(statusData)
+                .where(and(
+                  eq(extKeywordDailyStatus.userId, userId),
+                  eq(extKeywordDailyStatus.keyword, input.keyword),
+                  eq(extKeywordDailyStatus.statDate, todayStr),
+                ));
+            } else {
+              throw dupErr;
+            }
+          }
         }
       }).catch((err) => console.error("[saveSearchEvent] daily status error:", err));
 
@@ -3738,10 +3786,11 @@ export const extensionRouter = router({
     }),
 
   // ===== 감시 키워드 목록 조회 =====
+  // v7.3.2: keywordScore 정렬 추가, daily_stats 기반 점수 포함
   listWatchKeywords: protectedProcedure
     .input(z.object({
       activeOnly: z.boolean().default(true),
-      sortBy: z.enum(["priority", "lastSearched", "reviewGrowth", "compositeScore"]).default("compositeScore"),
+      sortBy: z.enum(["priority", "lastSearched", "reviewGrowth", "compositeScore", "keywordScore"]).default("compositeScore"),
       limit: z.number().int().min(1).max(200).default(50),
       offset: z.number().int().min(0).default(0),
     }))
@@ -3757,6 +3806,7 @@ export const extensionRouter = router({
         lastSearched: desc(extWatchKeywords.lastSearchedAt),
         reviewGrowth: desc(extWatchKeywords.reviewGrowth7d),
         compositeScore: desc(extWatchKeywords.compositeScore),
+        keywordScore: desc(extWatchKeywords.compositeScore),
       };
 
       const rows = await db.select()
@@ -3766,26 +3816,70 @@ export const extensionRouter = router({
         .limit(input.limit)
         .offset(input.offset);
 
-      return rows.map(r => ({
-        id: r.id,
-        keyword: r.keyword,
-        priority: N(r.priority),
-        isActive: r.isActive,
-        collectIntervalHours: N(r.collectIntervalHours),
-        totalSearchCount: N(r.totalSearchCount),
-        lastSearchedAt: r.lastSearchedAt,
-        lastCollectedAt: r.lastCollectedAt,
-        latestTotalItems: N(r.latestTotalItems),
-        latestAvgPrice: N(r.latestAvgPrice),
-        latestAvgRating: N(r.latestAvgRating),
-        latestAvgReview: N(r.latestAvgReview),
-        latestTotalReviewSum: N(r.latestTotalReviewSum),
-        reviewGrowth1d: N(r.reviewGrowth1d),
-        reviewGrowth7d: N(r.reviewGrowth7d),
-        priceChange1d: N(r.priceChange1d),
-        compositeScore: N(r.compositeScore),
-        createdAt: r.createdAt,
-      }));
+      // v7.3.2: daily_stats에서 keywordScore, demandScore 가져오기
+      const dailyStatsMap = new Map<string, { keywordScore: number; demandScore: number; reviewGrowth: number; salesEstimate: number; competitionScore: number }>();
+      const dailyRows = await db.select({
+        query: extKeywordDailyStats.query,
+        keywordScore: extKeywordDailyStats.keywordScore,
+        demandScore: extKeywordDailyStats.demandScore,
+        reviewGrowth: extKeywordDailyStats.reviewGrowth,
+        salesEstimate: extKeywordDailyStats.salesEstimate,
+        competitionScore: extKeywordDailyStats.competitionScore,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          sql`(${extKeywordDailyStats.query}, ${extKeywordDailyStats.statDate}) IN (
+            SELECT \`query\`, MAX(stat_date) FROM ext_keyword_daily_stats
+            WHERE user_id = ${ctx.user!.id}
+            GROUP BY \`query\`
+          )`,
+        ));
+      for (const dr of dailyRows) {
+        dailyStatsMap.set(dr.query, {
+          keywordScore: N(dr.keywordScore),
+          demandScore: N(dr.demandScore),
+          reviewGrowth: N(dr.reviewGrowth),
+          salesEstimate: N(dr.salesEstimate),
+          competitionScore: N(dr.competitionScore),
+        });
+      }
+
+      const result = rows.map(r => {
+        const ds = dailyStatsMap.get(r.keyword);
+        return {
+          id: r.id,
+          keyword: r.keyword,
+          priority: N(r.priority),
+          isActive: r.isActive,
+          collectIntervalHours: N(r.collectIntervalHours),
+          totalSearchCount: N(r.totalSearchCount),
+          lastSearchedAt: r.lastSearchedAt,
+          lastCollectedAt: r.lastCollectedAt,
+          latestTotalItems: N(r.latestTotalItems),
+          latestAvgPrice: N(r.latestAvgPrice),
+          latestAvgRating: N(r.latestAvgRating),
+          latestAvgReview: N(r.latestAvgReview),
+          latestTotalReviewSum: N(r.latestTotalReviewSum),
+          reviewGrowth1d: N(r.reviewGrowth1d),
+          reviewGrowth7d: N(r.reviewGrowth7d),
+          priceChange1d: N(r.priceChange1d),
+          compositeScore: N(r.compositeScore),
+          keywordScore: ds?.keywordScore || N(r.compositeScore),
+          demandScore: ds?.demandScore || 0,
+          dailyReviewGrowth: ds?.reviewGrowth || 0,
+          dailySalesEstimate: ds?.salesEstimate || 0,
+          dailyCompetitionScore: ds?.competitionScore || 0,
+          createdAt: r.createdAt,
+        };
+      });
+
+      // keywordScore 정렬
+      if (input.sortBy === "keywordScore") {
+        result.sort((a, b) => b.keywordScore - a.keywordScore);
+      }
+
+      return result;
     }),
 
   // ===== 감시 키워드 우선순위/설정 변경 =====
@@ -4060,6 +4154,22 @@ export const extensionRouter = router({
       try { items = JSON.parse(latestEvent.itemsJson); } catch { items = []; }
 
       return { keyword: input.keyword, hasData: true, searchedAt: latestEvent.searchedAt, diagnosis: diagnoseParsingQuality(items) };
+    }),
+
+  // ===== v7.3.2: 키워드 중복 감지 =====
+  detectDuplicateKeywords: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const watchKws = await db.select({ keyword: extWatchKeywords.keyword })
+        .from(extWatchKeywords)
+        .where(and(eq(extWatchKeywords.userId, ctx.user!.id), eq(extWatchKeywords.isActive, true)));
+      
+      const keywords = watchKws.map(k => k.keyword);
+      const groups = detectDuplicateKeywords(keywords, 0.85);
+      
+      return { totalKeywords: keywords.length, duplicateGroups: groups };
     }),
 
   // ===================================================================
@@ -4583,25 +4693,40 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
     today.setHours(today.getHours() + 9);
     const todayStr = today.toISOString().slice(0, 10);
 
-    // 해당 키워드의 최신 스냅샷
-    const [latest] = await db.select()
+    // ★ v7.3.3: 최근 스냅샷 중 가장 완전한 데이터(totalReviewSum 최대) 선택
+    const recentSnapshots = await db.select()
       .from(extSearchSnapshots)
       .where(and(eq(extSearchSnapshots.userId, userId), eq(extSearchSnapshots.query, query)))
       .orderBy(desc(extSearchSnapshots.createdAt))
-      .limit(1);
+      .limit(5);
 
-    if (!latest) return;
+    if (!recentSnapshots.length) return;
 
-    let items: any[] = [];
-    try { items = latest.itemsJson ? JSON.parse(latest.itemsJson) : []; } catch { items = []; }
+    let bestSnapshot = recentSnapshots[0];
+    let bestItems: any[] = [];
+    let bestTotalReviewSum = 0;
 
-    const totalReviewSum = items.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+    for (const snap of recentSnapshots) {
+      let snapItems: any[] = [];
+      try { snapItems = snap.itemsJson ? JSON.parse(snap.itemsJson) : []; } catch { snapItems = []; }
+      const snapReviewSum = snapItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+      if (snapReviewSum > bestTotalReviewSum) {
+        bestTotalReviewSum = snapReviewSum;
+        bestSnapshot = snap;
+        bestItems = snapItems;
+      }
+    }
+
+    const latest = bestSnapshot;
+    const items = bestItems;
+    const totalReviewSum = bestTotalReviewSum;
+
     const adCount = items.filter((i: any) => i.isAd).length;
     const rocketCount = items.filter((i: any) => i.isRocket).length;
     const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
     const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
 
-    // ★ 개선: 다단계 이전 데이터 조회 (어제 → 최근 7일 이내 → 이전 스냅샷)
+    // 다단계 이전 데이터 조회 (어제 → 최근 7일 이내 → 이전 스냅샷)
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().slice(0, 10);
@@ -4660,28 +4785,68 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
       }
     }
 
-    // 리뷰 증가량 계산 (다단계 소스 활용)
-    // ★ v7.2.8 수정: prevSnapshot의 실제 생성일을 사용하여 정확한 날짜 비교
-    // 같은 날 첫 수집 = 기준점이므로 증가량 0 (전날 대비만 의미있음)
+    // ★ v7.3.3: 기존 growth 복구 소스 (오늘 저장값 또는 최근 7일 중 양수 growth)
+    const [existingTodayStat] = await db.select()
+      .from(extKeywordDailyStats)
+      .where(and(
+        eq(extKeywordDailyStats.userId, userId),
+        eq(extKeywordDailyStats.query, query),
+        eq(extKeywordDailyStats.statDate, todayStr),
+      ))
+      .limit(1);
+    const todayStoredGrowth = existingTodayStat ? N(existingTodayStat.reviewGrowth) || 0 : 0;
+    // 최근 7일 중 가장 최신의 양수 growth를 찾아 fallback으로 사용
+    let recentPositiveGrowth = 0;
+    if (todayStoredGrowth <= 0) {
+      const recentStats = await db.select({
+        reviewGrowth: extKeywordDailyStats.reviewGrowth,
+        statDate: extKeywordDailyStats.statDate,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          eq(extKeywordDailyStats.query, query),
+          sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
+          sql`${extKeywordDailyStats.statDate} >= DATE_SUB(${todayStr}, INTERVAL 7 DAY)`,
+        ))
+        .orderBy(desc(extKeywordDailyStats.statDate))
+        .limit(7);
+      for (const rs of recentStats) {
+        const g = N(rs.reviewGrowth);
+        if (g > 0) { recentPositiveGrowth = g; break; }
+      }
+    }
+    const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : recentPositiveGrowth;
+
+    // ★ v7.3.3: 리뷰 증가량 계산 — 수집 편차(상품 수 변동)에 의한 음수 방지
     let reviewGrowth = 0;
     let priceChange = 0;
     let productCountChange = 0;
 
     if (prevStat) {
       const prevDate = String(prevStat.statDate || '');
-      // 이전 데이터가 오늘이 아닌 경우에만 증가량 계산 (전일 대비)
       if (prevDate !== todayStr) {
-        reviewGrowth = Math.max(0, totalReviewSum - (N(prevStat.totalReviewSum) || 0));
+        const rawGrowth = totalReviewSum - (N(prevStat.totalReviewSum) || 0);
+        if (rawGrowth >= 0) {
+          reviewGrowth = rawGrowth;
+        } else {
+          // 음수 = 수집 편차 → fallback(오늘 기존값 or 어제 growth) 사용
+          reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+        }
         priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
         productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
+      } else if (fallbackGrowth > 0) {
+        // 같은 날 재계산: 기존 growth 보존
+        reviewGrowth = fallbackGrowth;
       }
-      // 같은 날이면 증가량 0 유지 (기준점 재설정)
     } else if (prevSnapshotReviewSum !== null) {
-      // ★ v7.2.8: prevSnapshot의 실제 생성일(prevSnapshotCreatedAt) 사용
-      // 이전 스냅샷이 오늘 생성 = 같은 날 재수집이므로 증가량 0
-      // 이전 스냅샷이 어제 이전 = 정상적인 전일대비 증가량 계산
       if (prevSnapshotCreatedAt && prevSnapshotCreatedAt !== todayStr) {
-        reviewGrowth = Math.max(0, totalReviewSum - prevSnapshotReviewSum);
+        const rawGrowth = totalReviewSum - prevSnapshotReviewSum;
+        if (rawGrowth >= 0) {
+          reviewGrowth = rawGrowth;
+        } else {
+          reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+        }
         priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
         productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
       }

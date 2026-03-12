@@ -456,7 +456,49 @@ export async function computeDailyAggregation(
     ))
     .limit(1);
 
-  const reviewGrowth = prevStatus ? totalReviewSum - N(prevStatus.totalReviewSum) : 0;
+  // ★ v7.3.3: 기존 growth 복구 소스 (오늘 저장값 또는 최근 7일 중 양수 growth)
+  const [existingStatus] = await db.select()
+    .from(extKeywordDailyStatus)
+    .where(and(
+      eq(extKeywordDailyStatus.userId, userId),
+      eq(extKeywordDailyStatus.keyword, keyword),
+      eq(extKeywordDailyStatus.statDate, statDate),
+    ))
+    .limit(1);
+  const todayStoredGrowth = existingStatus ? N(existingStatus.reviewGrowth) || 0 : 0;
+  // 최근 7일 중 가장 최신의 양수 growth를 찾아 fallback으로 사용
+  let recentPositiveGrowth = 0;
+  if (todayStoredGrowth <= 0) {
+    const recentStats = await db.select({
+      reviewGrowth: extKeywordDailyStatus.reviewGrowth,
+      statDate: extKeywordDailyStatus.statDate,
+    })
+      .from(extKeywordDailyStatus)
+      .where(and(
+        eq(extKeywordDailyStatus.userId, userId),
+        eq(extKeywordDailyStatus.keyword, keyword),
+        sql`${extKeywordDailyStatus.statDate} < ${statDate}`,
+        sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${statDate}, INTERVAL 7 DAY)`,
+      ))
+      .orderBy(desc(extKeywordDailyStatus.statDate))
+      .limit(7);
+    for (const rs of recentStats) {
+      const g = N(rs.reviewGrowth);
+      if (g > 0) { recentPositiveGrowth = g; break; }
+    }
+  }
+  const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : recentPositiveGrowth;
+
+  // ★ v7.3.3: 수집 편차에 의한 음수 growth 방지
+  let reviewGrowth = 0;
+  if (prevStatus) {
+    const rawGrowth = totalReviewSum - N(prevStatus.totalReviewSum);
+    if (rawGrowth >= 0) {
+      reviewGrowth = rawGrowth;
+    } else {
+      reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+    }
+  }
   const priceChange = prevStatus ? avgPrice - N(prevStatus.avgPrice) : 0;
   const itemCountChange = prevStatus ? totalItems - N(prevStatus.totalItems) : 0;
 
@@ -717,13 +759,27 @@ export async function runDailyBatch(
           .set(statusData)
           .where(eq(extKeywordDailyStatus.id, existing.id));
       } else {
-        await db.insert(extKeywordDailyStatus).values({
-          userId,
-          keyword: kw.keyword,
-          statDate: today,
-          source: "batch",
-          ...statusData,
-        });
+        try {
+          await db.insert(extKeywordDailyStatus).values({
+            userId,
+            keyword: kw.keyword,
+            statDate: today,
+            source: "batch",
+            ...statusData,
+          });
+        } catch (dupErr: any) {
+          if (dupErr?.cause?.code === "ER_DUP_ENTRY" || dupErr?.code === "ER_DUP_ENTRY") {
+            // Race condition: another request inserted first → update instead
+            await db.update(extKeywordDailyStatus).set(statusData)
+              .where(and(
+                eq(extKeywordDailyStatus.userId, userId),
+                eq(extKeywordDailyStatus.keyword, kw.keyword),
+                eq(extKeywordDailyStatus.statDate, today),
+              ));
+          } else {
+            throw dupErr;
+          }
+        }
       }
 
       // 7일 리뷰 증가 계산
@@ -870,4 +926,67 @@ export function diagnoseParsingQuality(items: any[]): {
   }
 
   return { totalItems, priceOk, ratingOk, reviewOk, priceRate, ratingRate, reviewRate, overallScore, issues };
+}
+
+// ============================================================
+//  키워드 유사도/중복 감지 유틸 (v7.3.2)
+// ============================================================
+
+/**
+ * 키워드 정규화: 공백/특수문자 제거 + 소문자
+ * "오트밀 국수" → "오트밀국수"
+ */
+export function normalizeKeyword(keyword: string): string {
+  return keyword
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[·,.\-_\/\\]+/g, '')
+    .toLowerCase();
+}
+
+/**
+ * 두 키워드의 유사도 계산 (자카드 유사도 + 포함 관계)
+ */
+export function keywordSimilarity(a: string, b: string): number {
+  const na = normalizeKeyword(a);
+  const nb = normalizeKeyword(b);
+  if (na === nb) return 1.0;
+  if (na.includes(nb) || nb.includes(na)) {
+    const shorter = Math.min(na.length, nb.length);
+    const longer = Math.max(na.length, nb.length);
+    return shorter / longer;
+  }
+  const bigramsA = new Set<string>();
+  const bigramsB = new Set<string>();
+  for (let i = 0; i < na.length - 1; i++) bigramsA.add(na.slice(i, i + 2));
+  for (let i = 0; i < nb.length - 1; i++) bigramsB.add(nb.slice(i, i + 2));
+  let intersection = 0;
+  for (const bg of bigramsA) { if (bigramsB.has(bg)) intersection++; }
+  const union = bigramsA.size + bigramsB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * 키워드 목록에서 중복 그룹 감지
+ */
+export function detectDuplicateKeywords(
+  keywords: string[],
+  threshold: number = 0.85,
+): Array<{ group: string[]; normalized: string }> {
+  const groups: Array<{ group: string[]; normalized: string }> = [];
+  const assigned = new Set<number>();
+  for (let i = 0; i < keywords.length; i++) {
+    if (assigned.has(i)) continue;
+    const group = [keywords[i]];
+    assigned.add(i);
+    for (let j = i + 1; j < keywords.length; j++) {
+      if (assigned.has(j)) continue;
+      const sim = keywordSimilarity(keywords[i], keywords[j]);
+      if (sim >= threshold) { group.push(keywords[j]); assigned.add(j); }
+    }
+    if (group.length > 1) {
+      groups.push({ group, normalized: normalizeKeyword(group[0]) });
+    }
+  }
+  return groups;
 }
