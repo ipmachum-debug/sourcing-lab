@@ -3598,6 +3598,9 @@ export const extensionRouter = router({
 
         recomputeCompositeScore(userId, existing.id).catch(() => {});
       } else {
+        // 신규 키워드: 24시간 후 첫 적응형 수집 스케줄링
+        const nextCollect = new Date(now.getTime() + 24 * 3600 * 1000);
+        const nextCollectStr = nextCollect.toISOString().slice(0, 19).replace("T", " ");
         await db.insert(extWatchKeywords).values({
           userId,
           keyword: input.keyword,
@@ -3614,6 +3617,9 @@ export const extensionRouter = router({
           latestTotalReviewSum: input.totalReviewSum,
           latestAdCount: input.adCount,
           latestRocketCount: input.rocketCount,
+          nextCollectAt: nextCollectStr,
+          adaptiveIntervalHours: 24,
+          volatilityScore: 0,
         });
       }
 

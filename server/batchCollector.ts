@@ -1,18 +1,20 @@
 /**
  * ============================================================
- * Hybrid Data Collection — Batch Collector Engine
+ * Hybrid Data Collection — Adaptive Batch Collector Engine
  * ============================================================
  *
- * 서버 사이드 배치 수집 엔진
+ * 서버 사이드 배치 수집 엔진 (적응형 스케줄러 + 인간 행동 딜레이)
  * - 크롤링 NO! 사용자가 수집한 데이터를 기반으로 일일 집계/분석만 수행
- * - 배치 우선순위 기반 키워드 선택
- * - 리뷰 증감, 순위 변동, 판매량 추정 계산
+ * - next_collect_at 기반 적응형 스케줄링
+ * - 변동성(volatility) 기반 수집 주기 자동 조절
+ * - 인간 행동 패턴을 모방한 딜레이 설정 제공
  *
- * 배치 우선순위 규칙:
- * 1. 최근 3일 내 검색된 키워드
- * 2. 종합 점수(composite_score) 높은 키워드
- * 3. 리뷰 증가가 감지된 키워드
- * 4. 오래 수집되지 않은 키워드
+ * 적응형 스케줄링 규칙:
+ *   변동성 점수(0~100) → 수집 주기(8h~168h)
+ *   - 🔥 급변 (score≥80): 8시간
+ *   - 🆕 신규 (등록 3일 이내): 24~30시간 (신규 보너스)
+ *   - 📊 중간 (score 40~79): 24~48시간
+ *   - 😴 안정 (score<40): 72~168시간
  */
 
 import { getDb } from "./db";
@@ -20,10 +22,22 @@ import {
   extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
   extSearchSnapshots, extKeywordDailyStats,
 } from "../drizzle/schema";
-import { eq, and, desc, sql, gte, lt, asc, ne } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lt, asc, ne, isNull, lte, or } from "drizzle-orm";
 
 /** Drizzle-ORM decimal/SUM 결과 → number 변환 */
 function N(v: any): number { return Number(v) || 0; }
+
+/** KST 현재 시각 */
+function nowKST(): Date {
+  const d = new Date();
+  d.setHours(d.getHours() + 9);
+  return d;
+}
+
+/** Date → MySQL TIMESTAMP 문자열 (KST) */
+function toMySQLTimestamp(d: Date): string {
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
 
 // ============================================================
 //  타입 정의
@@ -35,9 +49,35 @@ export interface BatchKeywordSelection {
   priority: number;
   lastSearchedAt: string | null;
   lastCollectedAt: string | null;
+  nextCollectAt: string | null;
   totalSearchCount: number;
   compositeScore: number;
+  volatilityScore: number;
+  adaptiveIntervalHours: number | null;
   selectionReason: string;
+}
+
+export interface AdaptiveBatchResult {
+  keywords: BatchKeywordSelection[];
+  delayConfig: HumanDelayConfig;
+  totalActive: number;
+  totalOverdue: number;
+}
+
+/** 인간 행동 딜레이 설정 — 클라이언트에 전달 */
+export interface HumanDelayConfig {
+  /** 버스트 내 요청 간 기본 딜레이 (ms) */
+  baseDelayMs: number;
+  /** 버스트 내 딜레이 랜덤 범위 상한 (ms) */
+  maxDelayMs: number;
+  /** 버스트 크기 (연속 수집 후 긴 휴식) */
+  burstSize: number;
+  /** 버스트 후 긴 휴식 최소 (ms) */
+  burstPauseMinMs: number;
+  /** 버스트 후 긴 휴식 최대 (ms) */
+  burstPauseMaxMs: number;
+  /** 세션 시작 워밍업 딜레이 (ms) */
+  warmupDelayMs: number;
 }
 
 export interface DailyAggregation {
@@ -57,18 +97,14 @@ export interface DailyAggregation {
   rocketRatio: number;
   highReviewCount: number;
   newProductCount: number;
-  // 전일 대비 변동
   reviewGrowth: number;
   priceChange: number;
   itemCountChange: number;
-  // 판매량 추정
   estimatedDailySales: number;
   salesScore: number;
   demandScore: number;
-  // 경쟁도
   competitionScore: number;
   competitionLevel: string;
-  // 품질
   dataQualityScore: number;
   priceParseRate: number;
   ratingParseRate: number;
@@ -76,67 +112,242 @@ export interface DailyAggregation {
 }
 
 // ============================================================
-//  배치 키워드 선택 (우선순위 기반)
+//  적응형 스케줄러 — 변동성 기반 수집 주기 계산
+// ============================================================
+
+/** 변동성 점수 계산 (0~100) */
+function computeVolatilityScore(kw: {
+  reviewGrowth1d: any;
+  reviewGrowth7d: any;
+  priceChange1d: any;
+  compositeScore: any;
+  totalSearchCount: any;
+  createdAt: any;
+  lastSearchedAt: any;
+}): number {
+  let score = 0;
+
+  // 리뷰 증가 (1일) — 최대 35점
+  const rg1d = Math.abs(N(kw.reviewGrowth1d));
+  if (rg1d >= 100) score += 35;
+  else if (rg1d >= 50) score += 28;
+  else if (rg1d >= 20) score += 20;
+  else if (rg1d >= 10) score += 12;
+  else if (rg1d > 0) score += 5;
+
+  // 리뷰 증가 (7일) — 최대 20점
+  const rg7d = Math.abs(N(kw.reviewGrowth7d));
+  if (rg7d >= 500) score += 20;
+  else if (rg7d >= 200) score += 15;
+  else if (rg7d >= 100) score += 10;
+  else if (rg7d > 0) score += 5;
+
+  // 가격 변동 — 최대 20점
+  const pc = Math.abs(N(kw.priceChange1d));
+  if (pc >= 10000) score += 20;
+  else if (pc >= 5000) score += 15;
+  else if (pc >= 2000) score += 10;
+  else if (pc >= 500) score += 5;
+
+  // 사용자 관심도 (검색 횟수) — 최대 15점
+  const searches = N(kw.totalSearchCount);
+  if (searches >= 20) score += 15;
+  else if (searches >= 10) score += 10;
+  else if (searches >= 5) score += 7;
+  else if (searches >= 2) score += 3;
+
+  // 최근 사용자 활동 보정 — 최대 10점
+  const now = nowKST();
+  const lastSearch = kw.lastSearchedAt ? new Date(kw.lastSearchedAt) : null;
+  if (lastSearch) {
+    const hoursSince = (now.getTime() - lastSearch.getTime()) / (3600 * 1000);
+    if (hoursSince <= 6) score += 10;
+    else if (hoursSince <= 24) score += 7;
+    else if (hoursSince <= 72) score += 4;
+  }
+
+  return Math.min(100, score);
+}
+
+/**
+ * 변동성 점수 → 적응형 수집 주기 (시간)
+ *
+ * | 시나리오         | 점수    | 주기      |
+ * |-----------------|---------|----------|
+ * | 🔥 급변          | ≥80     | 8시간    |
+ * | 🆕 신규 (3일)    | any     | 24~30시간 |
+ * | 📊 높은 변동     | 60~79   | 24시간    |
+ * | 📊 중간 변동     | 40~59   | 48시간    |
+ * | 😴 낮은 변동     | 20~39   | 72시간    |
+ * | 💤 안정          | <20     | 120시간   |
+ */
+function computeAdaptiveInterval(
+  volatilityScore: number,
+  createdAt: string | null,
+): number {
+  const now = nowKST();
+
+  // 신규 키워드 보너스 (등록 3일 이내)
+  if (createdAt) {
+    const created = new Date(createdAt);
+    const daysSinceCreation = (now.getTime() - created.getTime()) / (24 * 3600 * 1000);
+    if (daysSinceCreation <= 3) {
+      // 신규는 자주 수집하되, 변동성 높으면 더 자주
+      return volatilityScore >= 60 ? 12 : 24;
+    }
+  }
+
+  // 변동성 기반 주기
+  if (volatilityScore >= 80) return 8;
+  if (volatilityScore >= 60) return 24;
+  if (volatilityScore >= 40) return 48;
+  if (volatilityScore >= 20) return 72;
+  return 120;
+}
+
+/** next_collect_at 계산 */
+function computeNextCollectAt(intervalHours: number): Date {
+  const next = nowKST();
+  next.setTime(next.getTime() + intervalHours * 3600 * 1000);
+  return next;
+}
+
+// ============================================================
+//  인간 행동 딜레이 설정 생성
 // ============================================================
 
 /**
- * 배치 수집 대상 키워드를 우선순위에 따라 선택
- * SQL 기반 배치 선택: LIMIT 20, ORDER BY 최근 검색 > 우선순위 > 마지막 수집
+ * 수집 키워드 수에 따라 인간 행동 패턴 딜레이 설정 생성
+ * - 버스트 + 긴 휴식 패턴 (사람이 검색하다가 다른 일 하다 돌아오는 패턴)
+ * - 키워드가 많을수록 보수적으로 설정
+ */
+function generateDelayConfig(keywordCount: number): HumanDelayConfig {
+  if (keywordCount <= 5) {
+    // 소량: 비교적 빠르게
+    return {
+      baseDelayMs: 15000,
+      maxDelayMs: 35000,
+      burstSize: 3,
+      burstPauseMinMs: 60000,
+      burstPauseMaxMs: 120000,
+      warmupDelayMs: 5000,
+    };
+  }
+  if (keywordCount <= 15) {
+    // 중간: 적당한 패턴
+    return {
+      baseDelayMs: 20000,
+      maxDelayMs: 45000,
+      burstSize: 4,
+      burstPauseMinMs: 80000,
+      burstPauseMaxMs: 150000,
+      warmupDelayMs: 8000,
+    };
+  }
+  // 대량: 보수적 패턴
+  return {
+    baseDelayMs: 25000,
+    maxDelayMs: 55000,
+    burstSize: 5,
+    burstPauseMinMs: 90000,
+    burstPauseMaxMs: 180000,
+    warmupDelayMs: 10000,
+  };
+}
+
+// ============================================================
+//  배치 키워드 선택 (next_collect_at 기반 적응형)
+// ============================================================
+
+/**
+ * 적응형 배치 수집 대상 키워드 선택
+ *
+ * 선택 전략:
+ * 1. next_collect_at이 현재 이전인 키워드 (수집 기한 초과) — 우선
+ * 2. next_collect_at이 NULL인 키워드 (아직 스케줄링 안 됨) — 다음
+ * 3. 변동성 높은 순 → 마지막 수집이 오래된 순 정렬
+ *
+ * 반환에 delayConfig 포함 → 클라이언트는 이 설정대로 딜레이만 적용
  */
 export async function selectBatchKeywords(
   userId: number,
-  limit: number = 20
-): Promise<BatchKeywordSelection[]> {
+  limit: number = 20,
+): Promise<AdaptiveBatchResult> {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return { keywords: [], delayConfig: generateDelayConfig(0), totalActive: 0, totalOverdue: 0 };
 
-  const now = new Date();
-  now.setHours(now.getHours() + 9); // KST
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  const now = nowKST();
+  const nowStr = toMySQLTimestamp(now);
 
-  // 배치 우선순위 SQL
-  // 1순위: 최근 3일 내 사용자가 검색한 키워드
-  // 2순위: composite_score 높은 키워드
-  // 3순위: 리뷰 증가 감지 키워드 (review_growth_1d > 0)
-  // 4순위: 오래 수집되지 않은 키워드 (last_collected_at ASC)
+  // 전체 활성 키워드 수
+  const [{ cnt: totalActive }] = await db.select({
+    cnt: sql<number>`COUNT(*)`,
+  })
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+    ));
+
+  // next_collect_at 기한 초과 또는 NULL인 키워드 선택
   const keywords = await db.select({
     id: extWatchKeywords.id,
     keyword: extWatchKeywords.keyword,
     priority: extWatchKeywords.priority,
     lastSearchedAt: extWatchKeywords.lastSearchedAt,
     lastCollectedAt: extWatchKeywords.lastCollectedAt,
+    nextCollectAt: extWatchKeywords.nextCollectAt,
     totalSearchCount: extWatchKeywords.totalSearchCount,
     compositeScore: extWatchKeywords.compositeScore,
+    volatilityScore: extWatchKeywords.volatilityScore,
+    adaptiveIntervalHours: extWatchKeywords.adaptiveIntervalHours,
     reviewGrowth1d: extWatchKeywords.reviewGrowth1d,
+    reviewGrowth7d: extWatchKeywords.reviewGrowth7d,
+    priceChange1d: extWatchKeywords.priceChange1d,
+    createdAt: extWatchKeywords.createdAt,
     lastUserViewAt: extWatchKeywords.lastUserViewAt,
   })
     .from(extWatchKeywords)
     .where(and(
       eq(extWatchKeywords.userId, userId),
       eq(extWatchKeywords.isActive, true),
+      or(
+        isNull(extWatchKeywords.nextCollectAt),
+        lte(extWatchKeywords.nextCollectAt, nowStr),
+      ),
     ))
     .orderBy(
-      // 최근 사용자 조회 우선
-      desc(extWatchKeywords.lastUserViewAt),
-      // 우선순위 높은 순
-      desc(extWatchKeywords.priority),
+      // NULL(미스케줄링) 먼저
+      sql`${extWatchKeywords.nextCollectAt} IS NOT NULL`,
+      // 기한 초과가 오래된 순
+      asc(extWatchKeywords.nextCollectAt),
+      // 변동성 높은 순
+      desc(extWatchKeywords.volatilityScore),
       // 마지막 수집이 오래된 순
       asc(extWatchKeywords.lastCollectedAt),
     )
     .limit(limit);
 
-  return keywords.map(k => {
-    let reason = '';
-    const lastSearch = k.lastSearchedAt ? new Date(k.lastSearchedAt) : null;
+  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
 
-    if (lastSearch && lastSearch >= threeDaysAgo) {
-      reason = '최근_3일_검색';
-    } else if (N(k.compositeScore) >= 70) {
-      reason = '높은_종합점수';
-    } else if (N(k.reviewGrowth1d) > 0) {
-      reason = '리뷰_증가_감지';
+  const result: BatchKeywordSelection[] = keywords.map(k => {
+    // 변동성 재계산 (최신 데이터 기반)
+    const volScore = computeVolatilityScore(k);
+    const intervalHours = computeAdaptiveInterval(volScore, k.createdAt);
+
+    // 선택 사유
+    let reason = "";
+    if (!k.nextCollectAt) {
+      reason = "미스케줄링_초기수집";
+    } else if (!k.lastCollectedAt) {
+      reason = "미수집_키워드";
     } else {
-      reason = '정기_수집';
+      const lastSearch = k.lastSearchedAt ? new Date(k.lastSearchedAt) : null;
+      if (volScore >= 80) reason = "급변_감지";
+      else if (lastSearch && lastSearch >= threeDaysAgo) reason = "최근_3일_검색";
+      else if (N(k.compositeScore) >= 70) reason = "높은_종합점수";
+      else if (N(k.reviewGrowth1d) > 0) reason = "리뷰_증가_감지";
+      else reason = "정기_수집";
     }
 
     return {
@@ -145,11 +356,21 @@ export async function selectBatchKeywords(
       priority: N(k.priority),
       lastSearchedAt: k.lastSearchedAt,
       lastCollectedAt: k.lastCollectedAt,
+      nextCollectAt: k.nextCollectAt,
       totalSearchCount: N(k.totalSearchCount),
       compositeScore: N(k.compositeScore),
+      volatilityScore: volScore,
+      adaptiveIntervalHours: intervalHours,
       selectionReason: reason,
     };
   });
+
+  return {
+    keywords: result,
+    delayConfig: generateDelayConfig(result.length),
+    totalActive: N(totalActive),
+    totalOverdue: result.length,
+  };
 }
 
 // ============================================================
@@ -273,7 +494,7 @@ export async function computeDailyAggregation(
   else if (adRatio > 15) competitionScore += 10;
 
   competitionScore = Math.min(100, competitionScore);
-  const competitionLevel = competitionScore >= 70 ? 'hard' : competitionScore >= 40 ? 'medium' : 'easy';
+  const competitionLevel = competitionScore >= 70 ? "hard" : competitionScore >= 40 ? "medium" : "easy";
 
   return {
     keyword,
@@ -292,7 +513,7 @@ export async function computeDailyAggregation(
     rocketRatio,
     highReviewCount,
     newProductCount,
-    reviewGrowth: Math.max(0, reviewGrowth), // 음수는 0 처리
+    reviewGrowth: Math.max(0, reviewGrowth),
     priceChange,
     itemCountChange,
     estimatedDailySales,
@@ -332,8 +553,7 @@ export async function recomputeCompositeScore(
 
   if (!kw) return 0;
 
-  const now = new Date();
-  now.setHours(now.getHours() + 9);
+  const now = nowKST();
 
   // 검색 빈도 점수 (최근 7일 검색 횟수)
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -344,7 +564,7 @@ export async function recomputeCompositeScore(
     .where(and(
       eq(extSearchEvents.userId, userId),
       eq(extSearchEvents.keyword, kw.keyword),
-      gte(extSearchEvents.searchedAt, sevenDaysAgo.toISOString().slice(0, 19).replace('T', ' ')),
+      gte(extSearchEvents.searchedAt, sevenDaysAgo.toISOString().slice(0, 19).replace("T", " ")),
     ));
   const recentSearches = N(countResult?.cnt);
   const frequencyScore = Math.min(30, recentSearches * 5); // 최대 30점
@@ -374,8 +594,16 @@ export async function recomputeCompositeScore(
 
   const composite = Math.min(100, frequencyScore + growthScore + priorityScore + activityScore);
 
+  // 변동성 점수도 함께 업데이트
+  const volScore = computeVolatilityScore(kw);
+  const intervalHours = computeAdaptiveInterval(volScore, kw.createdAt);
+
   await db.update(extWatchKeywords)
-    .set({ compositeScore: composite })
+    .set({
+      compositeScore: composite,
+      volatilityScore: volScore,
+      adaptiveIntervalHours: intervalHours,
+    })
     .where(eq(extWatchKeywords.id, keywordId));
 
   return composite;
@@ -389,7 +617,7 @@ export async function recomputeCompositeScore(
  * 일일 배치: 모든 활성 키워드의 일일 상태 계산
  * - 크롤링 NO! 이미 수집된 search_events를 기반으로 집계만 수행
  * - 전일 대비 변동 계산 (리뷰 증감, 가격 변동)
- * - watch_keywords 업데이트
+ * - watch_keywords 업데이트 + next_collect_at 적응형 갱신
  */
 export async function runDailyBatch(
   userId: number,
@@ -407,8 +635,7 @@ export async function runDailyBatch(
   const db = await getDb();
   if (!db) return { processed: 0, updated: 0, errors: 0, hasMore: false, total: 0, results: [] };
 
-  const now = new Date();
-  now.setHours(now.getHours() + 9);
+  const now = nowKST();
   const today = now.toISOString().slice(0, 10);
 
   // 활성 키워드 가져오기
@@ -440,7 +667,7 @@ export async function runDailyBatch(
       // 일일 집계 계산
       const agg = await computeDailyAggregation(userId, kw.keyword, today);
       if (!agg) {
-        results.push({ keyword: kw.keyword, reviewGrowth: 0, salesEstimate: 0, error: '데이터 없음' });
+        results.push({ keyword: kw.keyword, reviewGrowth: 0, salesEstimate: 0, error: "데이터 없음" });
         continue;
       }
 
@@ -516,7 +743,16 @@ export async function runDailyBatch(
         ? agg.totalReviewSum - N(weekAgoStatus.totalReviewSum)
         : 0;
 
-      // watch_keyword 업데이트
+      // 적응형 스케줄링: 변동성 점수 + 다음 수집 시각 계산
+      const volScore = computeVolatilityScore({
+        ...kw,
+        reviewGrowth1d: agg.reviewGrowth,
+        priceChange1d: agg.priceChange,
+      });
+      const intervalHours = computeAdaptiveInterval(volScore, kw.createdAt);
+      const nextCollect = computeNextCollectAt(intervalHours);
+
+      // watch_keyword 업데이트 (적응형 스케줄링 필드 포함)
       await db.update(extWatchKeywords)
         .set({
           latestTotalItems: agg.totalItems,
@@ -529,7 +765,11 @@ export async function runDailyBatch(
           reviewGrowth1d: agg.reviewGrowth,
           reviewGrowth7d: Math.max(0, reviewGrowth7d),
           priceChange1d: agg.priceChange,
-          lastCollectedAt: now.toISOString().slice(0, 19).replace('T', ' '),
+          lastCollectedAt: toMySQLTimestamp(now),
+          // 적응형 스케줄링
+          volatilityScore: volScore,
+          adaptiveIntervalHours: intervalHours,
+          nextCollectAt: toMySQLTimestamp(nextCollect),
         })
         .where(eq(extWatchKeywords.id, kw.id));
 
@@ -549,7 +789,7 @@ export async function runDailyBatch(
         keyword: kw.keyword,
         reviewGrowth: 0,
         salesEstimate: 0,
-        error: err?.message || '알 수 없는 오류',
+        error: err?.message || "알 수 없는 오류",
       });
     }
   }
@@ -563,14 +803,14 @@ export async function runDailyBatch(
 
 /** YYYY-MM-DD → 전일 YYYY-MM-DD */
 function getPrevDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
+  const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
 /** YYYY-MM-DD → N일 전 YYYY-MM-DD */
 function getPrevDateN(dateStr: string, n: number): string {
-  const d = new Date(dateStr + 'T00:00:00');
+  const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 }
@@ -595,7 +835,7 @@ export function diagnoseParsingQuality(items: any[]): {
     return {
       totalItems: 0, priceOk: 0, ratingOk: 0, reviewOk: 0,
       priceRate: 0, ratingRate: 0, reviewRate: 0,
-      overallScore: 0, issues: ['상품 데이터 없음'],
+      overallScore: 0, issues: ["상품 데이터 없음"],
     };
   }
 
