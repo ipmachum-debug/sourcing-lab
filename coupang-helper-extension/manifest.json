@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "7.3.1",
-  "description": "쿠팡+알리 AI 소싱 코치 v7.3.1 — 수집시작오류수정(SW메시지타임아웃) · 탭내DOMParser파싱(리뷰100%정상수집) · reviewGrowth버그수정",
+  "version": "7.4.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v7.4.0 — 수집시작오류수정(SW메시지타임아웃) · 탭내DOMParser파싱(리뷰100%정상수집) · reviewGrowth버그수정",
   "permissions": [
     "storage",
     "tabs",
