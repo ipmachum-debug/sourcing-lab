@@ -945,7 +945,7 @@ export default function ExtensionDashboard() {
               </Card>
             )}
 
-            {/* 자동 처리 안내 + 새로고침 + v7.3.3 업데이트 안내 */}
+            {/* 자동 처리 안내 + 새로고침 + v7.4.0 업데이트 안내 */}
             {!statsRunning && (
               <Card className="border-blue-100 bg-blue-50/30">
                 <CardContent className="pt-3 pb-3">
@@ -975,12 +975,12 @@ export default function ExtensionDashboard() {
                       </Button>
                     </div>
 
-                    {/* v7.3.3 업데이트 안내 */}
+                    {/* v7.4.0 업데이트 안내 */}
                     <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                       <Sparkles className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
                       <div className="text-[10px] text-amber-800">
-                        <p className="font-semibold mb-0.5">확장프로그램 v7.3.3 업데이트 안내</p>
-                        <p>자동수집 완료 시 서버 통계가 <b>자동 갱신</b>됩니다. 확장프로그램을 v7.3.3으로 업데이트하면 수집 후 별도 작업 없이 이 페이지에 자동 반영됩니다.</p>
+                        <p className="font-semibold mb-0.5">확장프로그램 v7.4.0 업데이트 안내</p>
+                        <p>자동수집 완료 시 서버 통계가 <b>자동 갱신</b>됩니다. 확장프로그램을 v7.4.0으로 업데이트하면 수집 후 별도 작업 없이 이 페이지에 자동 반영됩니다.</p>
                         <p className="mt-1 text-amber-600">업데이트 전에는 수집 후 위 "통계 계산" 또는 "새로고침" 버튼을 사용해주세요.</p>
                       </div>
                     </div>
