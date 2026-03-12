@@ -1526,7 +1526,7 @@ export const extensionRouter = router({
       keyword: z.string().optional(),
       category: z.string().optional(),
       limit: z.number().int().min(1).max(100).default(20),
-    }).optional().default({}))
+    }).optional().default({ limit: 20 }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
@@ -1618,7 +1618,7 @@ export const extensionRouter = router({
         .from(extWingSearches)
         .where(and(
           eq(extWingSearches.userId, ctx.user!.id),
-          gte(extWingSearches.createdAt, sevenDaysAgo),
+          gte(extWingSearches.createdAt, sevenDaysAgo.toISOString().slice(0, 19).replace("T", " ")),
         ))
         .groupBy(sql`DATE(created_at)`)
         .orderBy(asc(sql`DATE(created_at)`));
@@ -1681,7 +1681,7 @@ export const extensionRouter = router({
   computeKeywordDailyStats: protectedProcedure
     .input(z.object({
       query: z.string().min(1).max(255).optional(), // 특정 키워드만 또는 전체
-    }).optional().default({}))
+    }).optional().default({} as { query?: string }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
@@ -2053,7 +2053,7 @@ export const extensionRouter = router({
   aiInsights: protectedProcedure
     .input(z.object({
       forceRefresh: z.boolean().default(false),
-    }).default({}))
+    }).default({ forceRefresh: false }))
     .query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -4129,7 +4129,7 @@ export const extensionRouter = router({
       failCount: z.number().int().default(0),
       skipCount: z.number().int().default(0),
       keywords: z.array(z.string()).optional(),
-    }).optional().default({}))
+    }).optional().default({ successCount: 0, failCount: 0, skipCount: 0 }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -4191,7 +4191,7 @@ export const extensionRouter = router({
     .input(z.object({
       offset: z.number().int().min(0).default(0),
       limit: z.number().int().min(1).max(100).default(100),
-    }).optional().default({}))
+    }).optional().default({ offset: 0, limit: 100 }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

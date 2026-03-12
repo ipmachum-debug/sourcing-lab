@@ -16,7 +16,7 @@ export async function getDb() {
         uri: process.env.DATABASE_URL,
         timezone: "+09:00",
       });
-      _db = drizzle(pool);
+      _db = drizzle(pool) as any;
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;

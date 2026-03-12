@@ -35,7 +35,7 @@ export default function UserManagement() {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
   const [userToReset, setUserToReset] = useState<any>(null);
-  const [resetResult, setResetResult] = useState<{ tempPassword: string; email: string; name: string | null } | null>(null);
+  const [resetResult, setResetResult] = useState<{ tempPassword: string; email: string | null; name: string | null } | null>(null);
 
   const utils = trpc.useUtils();
   const { data: users, isLoading } = trpc.admin.listUsers.useQuery();

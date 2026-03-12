@@ -25,7 +25,7 @@ export default function ForgotPassword() {
       toast.success("재설정 링크가 전송되었습니다! ✨");
       if (data.resetToken) {
         console.log("[개발 모드] 비밀번호 재설정 토큰:", data.resetToken);
-        console.log("[개발 모드] 재설정 URL:", data.resetUrl);
+        console.log("[개발 모드] 재설정 URL:", `/reset-password?token=${data.resetToken}`);
       }
     },
     onError: (error) => {

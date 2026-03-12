@@ -143,12 +143,12 @@ export const sourcingRouter = router({
       search: z.string().optional(),
       limit: z.number().default(100),
       offset: z.number().default(0),
-    }).optional())
+    }).optional().default({ limit: 100, offset: 0 }))
     .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      const filters = input || {};
+      const filters = input;
       const conditions = [eq(products.userId, ctx.user.id)];
 
       if (filters.weekKey) conditions.push(eq(products.weekKey, filters.weekKey));
