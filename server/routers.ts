@@ -21,6 +21,7 @@ import { dailyProfitRouter } from "./routers/dailyProfit.router";
 import { coupangRouter } from "./routers/coupang.router";
 import { extensionRouter } from "./routers/extension.router";
 import { sourcingCoachRouter } from "./routers/sourcingCoach.router";
+import { keywordMetricsRouter } from "./routers/keywordMetrics.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -37,6 +38,7 @@ export const appRouter = router({
   coupang: coupangRouter,
   extension: extensionRouter,
   sourcingCoach: sourcingCoachRouter,
+  keywordMetrics: keywordMetricsRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({
