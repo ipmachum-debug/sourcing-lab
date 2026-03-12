@@ -727,6 +727,12 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
   adaptiveIntervalHours: int("adaptive_interval_hours"),
   volatilityScore: int("volatility_score").notNull().default(0),
   priorityScore: int("priority_score").default(0),
+  // 키워드 마스터 연결 + 감시 상태
+  keywordMasterId: int("keyword_master_id"),
+  watchReason: varchar("watch_reason", { length: 100 }),
+  watchStatus: mysqlEnum("watch_status", [
+    "watching", "promoted", "expired", "paused",
+  ]).default("watching").notNull(),
   // 타임스탬프
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
@@ -883,6 +889,13 @@ export const keywordMaster = mysqlTable("keyword_master", {
   rootKeyword: varchar("root_keyword", { length: 255 }),
   keywordDepth: int("keyword_depth").default(0),
   categoryHint: varchar("category_hint", { length: 100 }),
+  validationStatus: mysqlEnum("validation_status", [
+    "pending", "validated", "rejected", "recommended",
+  ]).default("pending").notNull(),
+  canonicalKeyword: varchar("canonical_keyword", { length: 255 }),
+  validationPriority: int("validation_priority").default(50).notNull(),
+  lastValidatedAt: timestamp("last_validated_at", tsOpts),
+  recommendedExpiresAt: timestamp("recommended_expires_at", tsOpts),
   isActive: boolean("is_active").default(true).notNull(),
   firstSeenAt: timestamp("first_seen_at", tsOpts).defaultNow().notNull(),
   lastSeenAt: timestamp("last_seen_at", tsOpts).defaultNow().notNull(),
@@ -920,6 +933,10 @@ export const keywordDailyMetrics = mysqlTable("keyword_daily_metrics", {
   hiddenScore: decimal("hidden_score", { precision: 10, scale: 4 }).default("0"),
   sourcingScore: decimal("sourcing_score", { precision: 10, scale: 4 }).default("0"),
   finalScore: decimal("final_score", { precision: 10, scale: 4 }).default("0"),
+  coupangBaseScore: decimal("coupang_base_score", { precision: 10, scale: 4 }).default("0"),
+  naverValidationScore: decimal("naver_validation_score", { precision: 10, scale: 4 }).default("0"),
+  validationPassed: boolean("validation_passed"),
+  rejectReason: varchar("reject_reason", { length: 100 }),
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
 });
 
