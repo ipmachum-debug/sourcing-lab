@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import { calibrateSales } from "@/lib/salesCalibration";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -354,6 +355,12 @@ export default function NicheFinder() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {opportunities.slice(0, 30).map((kw, i) => {
                   const grade = getOpportunityGrade(kw.opportunityScore);
+                  const cal = calibrateSales({
+                    reviewDelta: kw.reviewGrowth || 0,
+                    productCount: kw.productCount,
+                    avgPrice: kw.avgPrice,
+                    categoryHint: kw.categoryHint,
+                  });
                   return (
                     <Card key={kw.id || i} className={`hover:shadow-md transition-shadow ${i < 3 ? "border-blue-200 ring-1 ring-blue-100" : ""}`}>
                       <CardContent className="pt-4 pb-4">
@@ -395,8 +402,23 @@ export default function NicheFinder() {
                           </div>
                           <div className="bg-gray-50 rounded-lg py-1.5 px-1">
                             <div className="text-[9px] text-gray-400">판매추정</div>
-                            <div className="text-xs font-bold text-blue-600">{(kw.salesEstimate || 0).toLocaleString()}</div>
+                            <div className="text-xs font-bold text-blue-600">{cal.correctedSalesEst.toLocaleString()}</div>
                           </div>
+                        </div>
+                        {/* 보정 신뢰도 */}
+                        <div className="flex items-center justify-between mt-2 bg-gradient-to-r from-indigo-50 to-blue-50 rounded px-2 py-1">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-gray-400">보정:</span>
+                            <span className="text-[9px] text-gray-400 line-through">{cal.baseSalesEst.toLocaleString()}</span>
+                            <span className="text-[10px] font-bold text-indigo-700">{cal.correctedSalesEst.toLocaleString()}</span>
+                          </div>
+                          <Badge className={`text-[8px] border ${
+                            cal.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
+                            cal.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                            "bg-red-50 text-red-700 border-red-200"
+                          }`}>
+                            {cal.surgeLabel}
+                          </Badge>
                         </div>
                         <div className="flex justify-between items-center mt-2 text-[10px] text-gray-500">
                           <span>상품수: {kw.productCount || 0}</span>
@@ -638,6 +660,30 @@ export default function NicheFinder() {
                             <div className="text-[10px] font-bold text-purple-600">{Math.round(scores.hiddenItemScore || 0)}</div>
                           </div>
                         </div>
+
+                        {/* 판매추정 보정 */}
+                        {scores.calibration && (
+                          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded p-2 mb-2">
+                            <div className="flex items-center justify-between text-[10px] mb-1">
+                              <span className="text-gray-500">판매추정 (보정)</span>
+                              <Badge className={`text-[8px] border ${
+                                scores.calibration.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
+                                scores.calibration.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                "bg-red-50 text-red-700 border-red-200"
+                              }`}>
+                                {scores.calibration.surgeLabel}
+                              </Badge>
+                            </div>
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-[9px] text-gray-400 line-through">{scores.calibration.baseSalesEst.toLocaleString()}</span>
+                              <span className="text-sm font-bold text-indigo-700">{scores.calibration.correctedSalesEst.toLocaleString()}</span>
+                              <span className="text-[9px] text-gray-400">건/월</span>
+                            </div>
+                            <div className="text-[8px] text-gray-400 mt-0.5">
+                              수요지수 {scores.calibration.naverDemandIndex} | alpha {scores.calibration.categoryAlpha}
+                            </div>
+                          </div>
+                        )}
 
                         {/* 네이버 검색량 */}
                         <div className="flex justify-between text-[10px] text-gray-500">
