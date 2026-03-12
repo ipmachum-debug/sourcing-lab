@@ -31,6 +31,10 @@ export interface CalibrationOutput {
   surgeLabel: string;
   confidenceReason: string;
   hasNaverData: boolean;
+  /** 쿠팡 내부 지표 기반 점수 비중 (70%) - UI 표시용 */
+  coupangWeight: number;
+  /** 네이버 검증 점수 비중 (30%) - UI 표시용 */
+  naverWeight: number;
 }
 
 const REVIEW_CONVERSION: Record<string, number> = {
@@ -136,5 +140,7 @@ export function calibrateSales(input: CalibrationInput): CalibrationOutput {
     surgeLabel,
     confidenceReason,
     hasNaverData,
+    coupangWeight: 0.70,
+    naverWeight: 0.30,
   };
 }

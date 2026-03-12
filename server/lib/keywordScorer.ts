@@ -50,6 +50,8 @@ export interface ScoringResult {
   demandDensityScore: number;  // 5. 리뷰 대비 상품수
   hiddenItemScore: number;     // 6. 숨은 아이템
   marketPressureScore: number; // 7. 시장 압력
+  coupangBaseScore: number;    // 쿠팡 기본 점수 (70% 비중)
+  naverValidationScore: number; // 네이버 검증 점수 (30% 비중)
   finalScore: number;          // 최종 종합 점수
   grade: "S" | "A" | "B" | "C" | "D";
   tags: string[];
@@ -406,15 +408,24 @@ export function scoreKeyword(input: ScoringInput): ScoringResult {
     products,
   );
 
-  // 최종 추천 점수
+  // 쿠팡 기본 점수 (70%): 쿠팡 내부 지표만으로 산출
+  const coupangBaseScore = clamp(
+    salesVelocityScore * 0.25 +
+    demandDensityScore * 0.25 +
+    hiddenItemScore * 0.20 +
+    marketPressureScore * 0.15 +
+    chinaArbitrageScore * 0.15,
+  );
+
+  // 네이버 검증 점수 (30%): 네이버 외부수요 지표로 보정
+  const naverValidationScore = clamp(
+    marketGapScore * 0.45 +
+    trendSpikeScore * 0.55,
+  );
+
+  // 최종 추천 점수 = 쿠팡 70% + 네이버 30%
   const finalScore = clamp(
-    marketGapScore * 0.20 +
-    salesVelocityScore * 0.15 +
-    trendSpikeScore * 0.15 +
-    demandDensityScore * 0.15 +
-    hiddenItemScore * 0.15 +
-    marketPressureScore * 0.10 +
-    chinaArbitrageScore * 0.10,
+    coupangBaseScore * 0.70 + naverValidationScore * 0.30,
   );
 
   // 등급
@@ -452,6 +463,8 @@ export function scoreKeyword(input: ScoringInput): ScoringResult {
     demandDensityScore,
     hiddenItemScore,
     marketPressureScore,
+    coupangBaseScore,
+    naverValidationScore,
     finalScore,
     grade,
     tags,
