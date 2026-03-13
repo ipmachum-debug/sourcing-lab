@@ -341,36 +341,41 @@ export default function CoupangManager() {
                 { key: "weekly" as const, label: "이번 주", emoji: "\uD83D\uDCCA", gradient: "from-purple-400 to-pink-400" },
                 { key: "monthly" as const, label: "이번 달", emoji: "\uD83D\uDDD3\uFE0F", gradient: "from-emerald-400 to-teal-400" },
               ]).map(period => {
-                const d = dashboard?.[period.key];
+                const d = dashboard?.[period.key] as any;
                 const payout = d?.payout || 0;
                 const grossSales = d?.grossSales || 0;
                 const adSpend = d?.adSpend || 0;
                 const commission = d?.commission || 0;
                 const netProfit = payout - adSpend;
                 const marginRate = grossSales > 0 ? Math.round((netProfit / grossSales) * 10000) / 100 : 0;
+                const isEstimated = d?.isEstimated === true;
                 return (
                   <Card key={period.key} className="pretty-card overflow-hidden group hover:shadow-lg transition-shadow">
                     <div className={`h-1 bg-gradient-to-r ${period.gradient}`} />
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><span>{period.emoji}</span> {period.label}</span>
-                        <ProfitBadge value={netProfit} />
+                        <div className="flex items-center gap-1">
+                          {isEstimated && <Badge className="bg-blue-50 text-blue-600 border-blue-200 text-[9px] px-1">추정</Badge>}
+                          <ProfitBadge value={netProfit} />
+                        </div>
                       </div>
                       <div className="space-y-1.5">
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">판매량</span><span className="text-lg font-bold gradient-text">{formatNum(d?.qty || 0)}<span className="text-xs font-normal text-muted-foreground ml-0.5">개</span></span></div>
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">매출</span><span className="text-sm font-semibold text-blue-600">{formatNum(grossSales)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
-                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">수수료</span><span className="text-xs text-amber-600">-{formatNum(commission)}</span></div>
-                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">실정산</span><span className="text-sm font-semibold text-purple-600">{formatNum(payout)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
+                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">수수료{isEstimated ? "*" : ""}</span><span className="text-xs text-amber-600">-{formatNum(commission)}</span></div>
+                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">실정산{isEstimated ? "*" : ""}</span><span className="text-sm font-semibold text-purple-600">{formatNum(payout)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">광고비</span><span className="text-sm font-semibold text-amber-600">-{formatNum(adSpend)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
                         <div className="border-t border-pink-100/40 pt-1.5 mt-1.5">
                           <div className="flex justify-between items-baseline">
-                            <span className="text-xs font-medium text-muted-foreground">순이익</span>
+                            <span className="text-xs font-medium text-muted-foreground">순이익{isEstimated ? "*" : ""}</span>
                             <div className="text-right">
                               <span className={`text-base font-bold ${netProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>{netProfit >= 0 ? "+" : ""}{formatNum(netProfit)}<span className="text-xs font-normal ml-0.5">원</span></span>
                               {marginRate !== 0 ? <span className={`text-[10px] ml-1 ${marginRate >= 0 ? "text-emerald-500" : "text-red-400"}`}>({marginRate}%)</span> : null}
                             </div>
                           </div>
                         </div>
+                        {isEstimated && <div className="text-[9px] text-blue-500 mt-1">* 최근 수수료율 기반 추정치</div>}
                       </div>
                     </CardContent>
                   </Card>
@@ -851,7 +856,7 @@ export default function CoupangManager() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Card className="pretty-card"><CardContent className="py-3 text-center"><p className="text-xs text-muted-foreground">판매량</p><p className="text-lg font-bold gradient-text">{formatNum(dailySalesData.totals.totalQuantity)}개</p></CardContent></Card>
                 <Card className="pretty-card"><CardContent className="py-3 text-center"><p className="text-xs text-muted-foreground">매출</p><p className="text-lg font-bold text-blue-600">{formatNum(dailySalesData.totals.totalGrossSales)}원</p></CardContent></Card>
-                <Card className="pretty-card"><CardContent className="py-3 text-center"><p className="text-xs text-muted-foreground">실정산</p><p className="text-lg font-bold text-purple-600">{formatNum(dailySalesData.totals.totalPayoutAmount)}원</p></CardContent></Card>
+                <Card className="pretty-card"><CardContent className="py-3 text-center"><p className="text-xs text-muted-foreground">실정산{(dailySalesData.totals as any).isEstimated ? "*" : ""}</p><p className="text-lg font-bold text-purple-600">{formatNum(dailySalesData.totals.totalPayoutAmount)}원</p>{(dailySalesData.totals as any).isEstimated && <p className="text-[10px] text-muted-foreground mt-0.5">추정치</p>}</CardContent></Card>
                 <Card className="pretty-card"><CardContent className="py-3 text-center"><p className="text-xs text-muted-foreground">추정수익</p><p className={`text-lg font-bold ${dailySalesData.totals.totalEstimatedProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>{formatNum(dailySalesData.totals.totalEstimatedProfit)}원</p></CardContent></Card>
               </div>
             ) : null}

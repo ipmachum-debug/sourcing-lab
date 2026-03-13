@@ -397,13 +397,39 @@ export const coupangRouter = router({
         };
       });
 
+      let totalPayoutAmount = items.reduce((s, i) => s + i.payoutAmount, 0);
+      const totalGrossSales = items.reduce((s, i) => s + i.grossSales, 0);
+      let isEstimated = false;
+
+      // 오늘 날짜이고 정산 데이터가 없지만 매출이 있으면 추정
+      if (totalPayoutAmount === 0 && totalGrossSales > 0) {
+        const recentSettleDays = await db.select({
+          totalGross: sql<number>`COALESCE(SUM(${cpDailySettlements.grossAmount}), 0)`,
+          totalPayout: sql<number>`COALESCE(SUM(${cpDailySettlements.payoutAmount}), 0)`,
+        }).from(cpDailySettlements).where(and(
+          eq(cpDailySettlements.userId, ctx.user.id),
+          eq(cpDailySettlements.accountId, input.accountId),
+          sql`${cpDailySettlements.settlementDate} >= DATE_SUB(${input.date}, INTERVAL 14 DAY)`,
+          sql`${cpDailySettlements.settlementDate} < ${input.date}`,
+        ));
+        const recentGross = N(recentSettleDays[0]?.totalGross);
+        const recentPayout = N(recentSettleDays[0]?.totalPayout);
+        if (recentGross > 0) {
+          totalPayoutAmount = Math.round(totalGrossSales * (recentPayout / recentGross));
+        } else {
+          totalPayoutAmount = Math.round(totalGrossSales * (1 - 0.108));
+        }
+        isEstimated = true;
+      }
+
       const totals = {
         totalQuantity: items.reduce((s, i) => s + i.quantity, 0),
-        totalGrossSales: items.reduce((s, i) => s + i.grossSales, 0),
+        totalGrossSales,
         totalOrders: items.reduce((s, i) => s + i.orderCount, 0),
         totalAdSpend: items.reduce((s, i) => s + i.adSpend, 0),
         totalEstimatedProfit: items.reduce((s, i) => s + i.estimatedProfit, 0),
-        totalPayoutAmount: items.reduce((s, i) => s + i.payoutAmount, 0),
+        totalPayoutAmount,
+        isEstimated,
       };
 
       return { date: input.date, items, totals };
@@ -552,6 +578,45 @@ export const coupangRouter = router({
       const [weeklySettle] = await settlementQuery(weekStart, weekEnd);
       const [monthlySettle] = await settlementQuery(monthStart, monthEnd);
 
+      // ★ 오늘 정산 데이터 추정: settlement API는 당일 데이터를 제공하지 않으므로
+      //   최근 7일 수수료율 평균을 이용해 오늘의 수수료/실정산을 추정
+      let dailyPayout = N(dailySettle?.totalPayout);
+      let dailyCommission = N(dailySettle?.totalCommission);
+      const dailyGrossSales = N(dailySales?.totalGrossSales);
+      const isEstimated = dailyPayout === 0 && dailyCommission === 0 && dailyGrossSales > 0;
+
+      if (isEstimated) {
+        // 최근 7일간 정산이 있는 데이터에서 수수료율 계산
+        const recentSettleDays = await db.select({
+          totalGross: sql<number>`COALESCE(SUM(${cpDailySettlements.grossAmount}), 0)`,
+          totalCommission: sql<number>`COALESCE(SUM(${cpDailySettlements.commissionAmount}), 0)`,
+          totalPayout: sql<number>`COALESCE(SUM(${cpDailySettlements.payoutAmount}), 0)`,
+        }).from(cpDailySettlements).where(and(
+          eq(cpDailySettlements.userId, ctx.user.id),
+          eq(cpDailySettlements.accountId, input.accountId),
+          sql`${cpDailySettlements.settlementDate} >= DATE_SUB(${today}, INTERVAL 14 DAY)`,
+          sql`${cpDailySettlements.settlementDate} < ${today}`,
+        ));
+
+        const recentGross = N(recentSettleDays[0]?.totalGross);
+        const recentCommission = N(recentSettleDays[0]?.totalCommission);
+        const recentPayout = N(recentSettleDays[0]?.totalPayout);
+
+        if (recentGross > 0) {
+          // 수수료율 = 최근 수수료 / 최근 총매출
+          const commissionRate = recentCommission / recentGross;
+          // 실정산율 = 최근 실정산 / 최근 총매출
+          const payoutRate = recentPayout / recentGross;
+
+          dailyCommission = Math.round(dailyGrossSales * commissionRate);
+          dailyPayout = Math.round(dailyGrossSales * payoutRate);
+        } else {
+          // 최근 정산 데이터도 없으면 기본 수수료율 10.8% 적용
+          dailyCommission = Math.round(dailyGrossSales * 0.108);
+          dailyPayout = dailyGrossSales - dailyCommission;
+        }
+      }
+
       const [mappingCount] = await db.select({ count: sql<number>`count(*)` }).from(productChannelMappings)
         .where(and(eq(productChannelMappings.userId, ctx.user.id), eq(productChannelMappings.accountId, input.accountId)));
       const [activeMappingCount] = await db.select({ count: sql<number>`count(*)` }).from(productChannelMappings)
@@ -564,7 +629,7 @@ export const coupangRouter = router({
         .limit(5);
 
       return {
-        daily: { qty: N(dailySales?.totalQty), grossSales: N(dailySales?.totalGrossSales), adSpend: N(dailySales?.totalAdSpend), payout: N(dailySettle?.totalPayout), commission: N(dailySettle?.totalCommission), label: today },
+        daily: { qty: N(dailySales?.totalQty), grossSales: dailyGrossSales, adSpend: N(dailySales?.totalAdSpend), payout: dailyPayout, commission: dailyCommission, label: today, isEstimated },
         weekly: { qty: N(weeklySales?.totalQty), grossSales: N(weeklySales?.totalGrossSales), adSpend: N(weeklySales?.totalAdSpend), payout: N(weeklySettle?.totalPayout), commission: N(weeklySettle?.totalCommission), label: `${weekStart} ~ ${weekEnd}` },
         monthly: { qty: N(monthlySales?.totalQty), grossSales: N(monthlySales?.totalGrossSales), adSpend: N(monthlySales?.totalAdSpend), payout: N(monthlySettle?.totalPayout), commission: N(monthlySettle?.totalCommission), label: `${year}년 ${month}월` },
         mappingCount: N(mappingCount?.count),
