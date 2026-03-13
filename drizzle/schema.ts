@@ -1,4 +1,4 @@
-import { boolean, decimal, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, decimal, int, json, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 // ★ MySQL 서버가 KST(+09:00)로 동작하며, drizzle-orm의 timestamp()는
 //   내부적으로 `new Date(value + "+0000")`으로 UTC 강제 변환하여 9시간 오차 발생.
@@ -977,3 +977,120 @@ export const keywordSourcingCandidate = mysqlTable("keyword_sourcing_candidate",
 
 export type KeywordSourcingCandidate = typeof keywordSourcingCandidate.$inferSelect;
 export type InsertKeywordSourcingCandidate = typeof keywordSourcingCandidate.$inferInsert;
+
+// ==================== 알리 검증 엔진 (Ali Validation Engine) ====================
+
+// 알리 검색 캐시 — 쿠팡 키워드 → 알리 검색 결과 (TTL 캐시)
+export const aliSearchCache = mysqlTable("ali_search_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  keywordId: int("keyword_id").notNull(),
+  searchQuery: varchar("search_query", { length: 255 }).notNull(),
+  resultRank: int("result_rank").notNull(),
+  productUrl: varchar("product_url", { length: 1000 }).notNull(),
+  productTitle: varchar("product_title", { length: 1000 }).notNull(),
+  productImageUrl: varchar("product_image_url", { length: 1000 }),
+  priceMin: decimal("price_min", { precision: 12, scale: 2 }).default("0"),
+  priceMax: decimal("price_max", { precision: 12, scale: 2 }).default("0"),
+  orderCount: int("order_count").default(0),
+  rating: decimal("rating", { precision: 4, scale: 2 }).default("0"),
+  shippingSummary: varchar("shipping_summary", { length: 255 }),
+  matchScore: decimal("match_score", { precision: 10, scale: 4 }).default("0"),
+  titleMatchScore: decimal("title_match_score", { precision: 10, scale: 4 }).default("0"),
+  attributeMatchScore: decimal("attribute_match_score", { precision: 10, scale: 4 }).default("0"),
+  priceFitScore: decimal("price_fit_score", { precision: 10, scale: 4 }).default("0"),
+  orderSignalScore: decimal("order_signal_score", { precision: 10, scale: 4 }).default("0"),
+  shippingFitScore: decimal("shipping_fit_score", { precision: 10, scale: 4 }).default("0"),
+  collectedAt: timestamp("collected_at", tsOpts).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", tsOpts).notNull(),
+});
+
+export type AliSearchCache = typeof aliSearchCache.$inferSelect;
+export type InsertAliSearchCache = typeof aliSearchCache.$inferInsert;
+
+// 알리 상품 캐시 — 확장프로그램에서 수집한 알리 상품 (역방향 매칭용)
+export const aliProductCache = mysqlTable("ali_product_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  aliProductId: varchar("ali_product_id", { length: 100 }),
+  productUrl: varchar("product_url", { length: 1000 }).notNull(),
+  title: varchar("title", { length: 1000 }).notNull(),
+  titleKo: varchar("title_ko", { length: 1000 }),
+  priceMin: decimal("price_min", { precision: 12, scale: 2 }).default("0"),
+  priceMax: decimal("price_max", { precision: 12, scale: 2 }).default("0"),
+  orderCount: int("order_count").default(0),
+  rating: decimal("rating", { precision: 4, scale: 2 }).default("0"),
+  categoryText: varchar("category_text", { length: 255 }),
+  attributesJson: json("attributes_json"),
+  imageUrl: varchar("image_url", { length: 1000 }),
+  sourceType: mysqlEnum("source_type", ["page", "search", "extension"]).default("page").notNull(),
+  collectedAt: timestamp("collected_at", tsOpts).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", tsOpts),
+});
+
+export type AliProductCache = typeof aliProductCache.$inferSelect;
+export type InsertAliProductCache = typeof aliProductCache.$inferInsert;
+
+// 알리→쿠팡 키워드 역방향 매칭 후보
+export const aliKeywordMatchCandidate = mysqlTable("ali_keyword_match_candidate", {
+  id: int("id").autoincrement().primaryKey(),
+  aliCacheId: int("ali_cache_id").notNull(),
+  keywordId: int("keyword_id").notNull(),
+  keywordSimilarityScore: decimal("keyword_similarity_score", { precision: 10, scale: 4 }).default("0"),
+  attributeOverlapScore: decimal("attribute_overlap_score", { precision: 10, scale: 4 }).default("0"),
+  priceFitScore: decimal("price_fit_score", { precision: 10, scale: 4 }).default("0"),
+  categoryFitScore: decimal("category_fit_score", { precision: 10, scale: 4 }).default("0"),
+  marketFitScore: decimal("market_fit_score", { precision: 10, scale: 4 }).default("0"),
+  finalMatchScore: decimal("final_match_score", { precision: 10, scale: 4 }).default("0"),
+  isSelected: boolean("is_selected").default(false),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type AliKeywordMatchCandidate = typeof aliKeywordMatchCandidate.$inferSelect;
+export type InsertAliKeywordMatchCandidate = typeof aliKeywordMatchCandidate.$inferInsert;
+
+// 쿠팡 키워드 ↔ 알리 상품 매핑 (운영자 선택, 영구 저장)
+export const keywordAliMapping = mysqlTable("keyword_ali_mapping", {
+  id: int("id").autoincrement().primaryKey(),
+  keywordId: int("keyword_id").notNull(),
+  aliProductUrl: varchar("ali_product_url", { length: 1000 }).notNull(),
+  aliProductId: varchar("ali_product_id", { length: 100 }),
+  aliProductTitle: varchar("ali_product_title", { length: 1000 }).notNull(),
+  selectedPrice: decimal("selected_price", { precision: 12, scale: 2 }).default("0"),
+  selectedShippingFee: decimal("selected_shipping_fee", { precision: 12, scale: 2 }).default("0"),
+  selectedTotalCost: decimal("selected_total_cost", { precision: 12, scale: 2 }).default("0"),
+  selectedOrderCount: int("selected_order_count").default(0),
+  selectedRating: decimal("selected_rating", { precision: 4, scale: 2 }).default("0"),
+  matchScore: decimal("match_score", { precision: 10, scale: 4 }).default("0"),
+  matchDirection: mysqlEnum("match_direction", ["forward", "reverse"]).default("forward").notNull(),
+  isPrimary: boolean("is_primary").default(false),
+  mappingStatus: mysqlEnum("mapping_status", ["active", "inactive", "dropped"]).default("active").notNull(),
+  trackingEnabled: boolean("tracking_enabled").default(true),
+  selectedBy: varchar("selected_by", { length: 100 }),
+  selectedReason: varchar("selected_reason", { length: 255 }),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type KeywordAliMapping = typeof keywordAliMapping.$inferSelect;
+export type InsertKeywordAliMapping = typeof keywordAliMapping.$inferInsert;
+
+// 알리 매핑 URL 추적 스냅샷 (가격/재고/배송 변화 추적)
+export const keywordAliTrackingSnapshot = mysqlTable("keyword_ali_tracking_snapshot", {
+  id: int("id").autoincrement().primaryKey(),
+  mappingId: int("mapping_id").notNull(),
+  snapshotAt: timestamp("snapshot_at", tsOpts).notNull(),
+  priceMin: decimal("price_min", { precision: 12, scale: 2 }).default("0"),
+  priceMax: decimal("price_max", { precision: 12, scale: 2 }).default("0"),
+  shippingFee: decimal("shipping_fee", { precision: 12, scale: 2 }).default("0"),
+  totalCost: decimal("total_cost", { precision: 12, scale: 2 }).default("0"),
+  orderCount: int("order_count").default(0),
+  rating: decimal("rating", { precision: 4, scale: 2 }).default("0"),
+  stockText: varchar("stock_text", { length: 255 }),
+  deliveryText: varchar("delivery_text", { length: 255 }),
+  availabilityStatus: mysqlEnum("availability_status", ["available", "low_stock", "out_of_stock", "unknown"]).default("unknown").notNull(),
+  priceChangeRate: decimal("price_change_rate", { precision: 10, scale: 4 }).default("0"),
+  orderVelocity: decimal("order_velocity", { precision: 10, scale: 4 }).default("0"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordAliTrackingSnapshot = typeof keywordAliTrackingSnapshot.$inferSelect;
+export type InsertKeywordAliTrackingSnapshot = typeof keywordAliTrackingSnapshot.$inferInsert;
