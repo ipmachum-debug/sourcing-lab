@@ -41,6 +41,7 @@ const menuItems: MenuItem[] = [
   // 소싱
   { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", group: "소싱" },
   { icon: Gem, label: "니치 파인더", path: "/niche-finder", emoji: "💎", group: "소싱" },
+  { icon: Sparkles, label: "AI 제품 발견", path: "/discovery", emoji: "🔍", group: "소싱" },
   { icon: Calculator, label: "마진 계산기", path: "/margin", emoji: "💰", group: "소싱" },
   { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", group: "소싱" },
   { icon: Package, label: "전체 상품", path: "/products", emoji: "📦", group: "소싱" },

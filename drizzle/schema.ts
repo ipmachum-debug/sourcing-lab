@@ -1120,3 +1120,94 @@ export const keywordAliTrackingSnapshot = mysqlTable("keyword_ali_tracking_snaps
 
 export type KeywordAliTrackingSnapshot = typeof keywordAliTrackingSnapshot.$inferSelect;
 export type InsertKeywordAliTrackingSnapshot = typeof keywordAliTrackingSnapshot.$inferInsert;
+
+// ==================== AI 제품 발견 작업 큐 (ext_discovery_jobs) ====================
+// 서버 → 확장프로그램 크롤링 명령 큐
+export const extDiscoveryJobs = mysqlTable("ext_discovery_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  status: mysqlEnum("status", [
+    "pending",         // 확장 프로그램이 아직 수신 안 함
+    "crawling_search", // 검색 결과 크롤링 중
+    "filtering",       // 1차 필터링 완료, 상세 크롤링 대기
+    "crawling_detail", // 상세 페이지 크롤링 중
+    "analyzing",       // AI 분석 중
+    "completed",       // 분석 완료
+    "failed",          // 실패
+  ]).default("pending").notNull(),
+  // 크롤링 설정
+  maxPages: int("max_pages").default(2),           // 검색 결과 최대 페이지
+  maxDetailProducts: int("max_detail_products").default(8), // 상세 크롤링 최대 상품 수
+  // 검색 결과 (확장에서 전송)
+  searchResultsJson: json("search_results_json"),  // 전체 검색 결과
+  searchSummaryJson: json("search_summary_json"),  // 요약 통계
+  // 1차 필터링 결과
+  filteredProductIds: json("filtered_product_ids"), // 상세 크롤링 대상 ID 배열
+  filterCriteria: json("filter_criteria"),          // 적용된 필터 조건
+  // 상세 크롤링 결과 (확장에서 전송)
+  detailResultsJson: json("detail_results_json"),   // 상세 페이지 데이터
+  detailCrawledCount: int("detail_crawled_count").default(0),
+  // AI 분석 결과
+  aiAnalysisJson: json("ai_analysis_json"),         // AI 분석 전체 결과
+  // 메타
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", tsOpts),
+  completedAt: timestamp("completed_at", tsOpts),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtDiscoveryJob = typeof extDiscoveryJobs.$inferSelect;
+export type InsertExtDiscoveryJob = typeof extDiscoveryJobs.$inferInsert;
+
+// ==================== AI 발견 제품 (ext_discovery_products) ====================
+// AI가 분석한 개별 추천 제품 + 유저 판단 (추적/거절)
+export const extDiscoveryProducts = mysqlTable("ext_discovery_products", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  jobId: int("job_id").notNull(),               // ext_discovery_jobs FK
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  // 제품 기본 정보
+  coupangProductId: varchar("coupang_product_id", { length: 50 }).notNull(),
+  productTitle: varchar("product_title", { length: 1000 }).notNull(),
+  productUrl: text("product_url"),
+  imageUrl: text("image_url"),
+  price: int("price").default(0),
+  originalPrice: int("original_price").default(0),
+  rating: decimal("rating", { precision: 3, scale: 1 }).default("0"),
+  reviewCount: int("review_count").default(0),
+  // 상세 데이터 (크롤링)
+  sellerName: varchar("seller_name", { length: 255 }),
+  deliveryType: varchar("delivery_type", { length: 50 }),  // rocket, free, standard
+  categoryPath: varchar("category_path", { length: 500 }),
+  optionCount: int("option_count").default(0),
+  detailDataJson: json("detail_data_json"),       // 전체 상세 데이터
+  // 검색 순위 정보
+  searchRank: int("search_rank").default(0),
+  isAd: boolean("is_ad").default(false),
+  isRocket: boolean("is_rocket").default(false),
+  // AI 분석 결과
+  aiScore: int("ai_score").default(0),            // 0~100
+  aiGrade: varchar("ai_grade", { length: 2 }),    // S/A/B/C/D
+  aiVerdict: mysqlEnum("ai_verdict", ["strong_buy", "buy", "watch", "pass"]).default("watch"),
+  aiReasonJson: json("ai_reason_json"),           // 디테일 근거 배열
+  aiRiskJson: json("ai_risk_json"),               // 리스크 배열
+  aiOpportunityJson: json("ai_opportunity_json"), // 기회 요인 배열
+  estimatedMonthlySales: int("estimated_monthly_sales").default(0),
+  estimatedMarginPercent: decimal("estimated_margin_percent", { precision: 5, scale: 2 }).default("0"),
+  // 유저 판단
+  userDecision: mysqlEnum("user_decision", [
+    "pending",    // 미결정
+    "track",      // 매일 추적
+    "reject",     // 거절
+  ]).default("pending").notNull(),
+  userMemo: text("user_memo"),
+  trackingId: int("tracking_id"),                 // ext_product_trackings FK (추적 시)
+  decidedAt: timestamp("decided_at", tsOpts),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtDiscoveryProduct = typeof extDiscoveryProducts.$inferSelect;
+export type InsertExtDiscoveryProduct = typeof extDiscoveryProducts.$inferInsert;

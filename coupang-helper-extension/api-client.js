@@ -253,6 +253,23 @@ class ApiClient {
     return this._call('extension.getDetailHistory', opts, 'query');
   }
 
+  // ===== v8.0: AI 제품 발견 시스템 =====
+  async discoveryGetPendingJobs() {
+    return this._call('extension.getPendingJobs', undefined, 'query');
+  }
+
+  async discoveryUpdateJobStatus(data) {
+    return this._call('extension.updateJobStatus', data, 'mutation');
+  }
+
+  async discoverySubmitSearchResults(data) {
+    return this._call('extension.submitSearchResults', data, 'mutation');
+  }
+
+  async discoverySubmitDetailResults(data) {
+    return this._call('extension.submitDetailResults', data, 'mutation');
+  }
+
   // ===== v7.2: 내부 통신 (리트라이·타임아웃·인증 갱신 강화) =====
 
   // 동시 요청 큐 — 서버 과부하 방지 (최대 3개)
