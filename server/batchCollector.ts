@@ -446,7 +446,83 @@ export async function computeDailyAggregation(
   const reviewParseRate = totalItems ? Math.round(reviews.length / totalItems * 100) : 0;
   const dataQualityScore = Math.round((priceParseRate + ratingParseRate + reviewParseRate) / 3);
 
-  // 전일 데이터 가져오기 (변동 계산용)
+  // ★ v7.4.0: 유효한 기준점(baseline) 기반 리뷰 증가 계산
+  // - 리뷰 파싱 실패(totalReviewSum=0 && totalItems>0)인 날은 기준점에서 제외
+  // - 유효한 첫 기준점부터 증가분만 계산
+  // - 중간에 파싱 실패한 날이 있으면 경과일수로 나눠 일평균 증가로 산출
+
+  // 최근 14일 이내 과거 데이터 조회 (유효한 기준점 찾기)
+  const recentHistory = await db.select({
+    statDate: extKeywordDailyStatus.statDate,
+    totalReviewSum: extKeywordDailyStatus.totalReviewSum,
+    totalItems: extKeywordDailyStatus.totalItems,
+    reviewGrowth: extKeywordDailyStatus.reviewGrowth,
+    avgPrice: extKeywordDailyStatus.avgPrice,
+  })
+    .from(extKeywordDailyStatus)
+    .where(and(
+      eq(extKeywordDailyStatus.userId, userId),
+      eq(extKeywordDailyStatus.keyword, keyword),
+      sql`${extKeywordDailyStatus.statDate} < ${statDate}`,
+      sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${statDate}, INTERVAL 14 DAY)`,
+    ))
+    .orderBy(desc(extKeywordDailyStatus.statDate))
+    .limit(14);
+
+  /**
+   * 리뷰 데이터가 유효한지 판별:
+   * - totalReviewSum > 0 이어야 함
+   * - totalItems > 0인데 totalReviewSum = 0이면 파싱 실패로 판단
+   */
+  const isReviewDataValid = (reviewSum: number, items: number): boolean =>
+    reviewSum > 0 || items === 0;
+
+  // 오늘 데이터가 유효한지 확인
+  const todayReviewValid = isReviewDataValid(totalReviewSum, totalItems);
+
+  // 유효한 가장 최근 기준점 찾기
+  let baselineEntry: { statDate: string; totalReviewSum: number; avgPrice: number } | null = null;
+  let daysSinceBaseline = 0;
+
+  for (const entry of recentHistory) {
+    const entryReviewSum = N(entry.totalReviewSum);
+    const entryItems = N(entry.totalItems);
+    if (isReviewDataValid(entryReviewSum, entryItems)) {
+      baselineEntry = {
+        statDate: String(entry.statDate),
+        totalReviewSum: entryReviewSum,
+        avgPrice: N(entry.avgPrice),
+      };
+      // 경과일수 계산
+      const baseDate = new Date(baselineEntry.statDate + "T00:00:00");
+      const currentDate = new Date(statDate + "T00:00:00");
+      daysSinceBaseline = Math.max(1, Math.round(
+        (currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000),
+      ));
+      break;
+    }
+  }
+
+  let reviewGrowth = 0;
+  let priceChange = 0;
+  let itemCountChange = 0;
+
+  if (todayReviewValid && baselineEntry) {
+    const rawGrowth = totalReviewSum - baselineEntry.totalReviewSum;
+    if (rawGrowth >= 0) {
+      // 경과일수로 나눠 일평균 증가분 산출
+      reviewGrowth = daysSinceBaseline > 1
+        ? Math.round(rawGrowth / daysSinceBaseline)
+        : rawGrowth;
+    }
+    // 음수면 0 유지 (수집 편차)
+    priceChange = avgPrice - baselineEntry.avgPrice;
+  } else if (!todayReviewValid) {
+    // 오늘 리뷰 파싱 실패 → 증가 0 (잘못된 데이터로 계산하지 않음)
+    reviewGrowth = 0;
+  }
+
+  // 전일 데이터로 상품수 변동 계산
   const prevDate = getPrevDate(statDate);
   const [prevStatus] = await db.select()
     .from(extKeywordDailyStatus)
@@ -456,52 +532,7 @@ export async function computeDailyAggregation(
       eq(extKeywordDailyStatus.statDate, prevDate),
     ))
     .limit(1);
-
-  // ★ v7.3.3: 기존 growth 복구 소스 (오늘 저장값 또는 최근 7일 중 양수 growth)
-  const [existingStatus] = await db.select()
-    .from(extKeywordDailyStatus)
-    .where(and(
-      eq(extKeywordDailyStatus.userId, userId),
-      eq(extKeywordDailyStatus.keyword, keyword),
-      eq(extKeywordDailyStatus.statDate, statDate),
-    ))
-    .limit(1);
-  const todayStoredGrowth = existingStatus ? N(existingStatus.reviewGrowth) || 0 : 0;
-  // 최근 7일 중 가장 최신의 양수 growth를 찾아 fallback으로 사용
-  let recentPositiveGrowth = 0;
-  if (todayStoredGrowth <= 0) {
-    const recentStats = await db.select({
-      reviewGrowth: extKeywordDailyStatus.reviewGrowth,
-      statDate: extKeywordDailyStatus.statDate,
-    })
-      .from(extKeywordDailyStatus)
-      .where(and(
-        eq(extKeywordDailyStatus.userId, userId),
-        eq(extKeywordDailyStatus.keyword, keyword),
-        sql`${extKeywordDailyStatus.statDate} < ${statDate}`,
-        sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${statDate}, INTERVAL 7 DAY)`,
-      ))
-      .orderBy(desc(extKeywordDailyStatus.statDate))
-      .limit(7);
-    for (const rs of recentStats) {
-      const g = N(rs.reviewGrowth);
-      if (g > 0) { recentPositiveGrowth = g; break; }
-    }
-  }
-  const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : recentPositiveGrowth;
-
-  // ★ v7.3.3: 수집 편차에 의한 음수 growth 방지
-  let reviewGrowth = 0;
-  if (prevStatus) {
-    const rawGrowth = totalReviewSum - N(prevStatus.totalReviewSum);
-    if (rawGrowth >= 0) {
-      reviewGrowth = rawGrowth;
-    } else {
-      reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
-    }
-  }
-  const priceChange = prevStatus ? avgPrice - N(prevStatus.avgPrice) : 0;
-  const itemCountChange = prevStatus ? totalItems - N(prevStatus.totalItems) : 0;
+  itemCountChange = prevStatus ? totalItems - N(prevStatus.totalItems) : 0;
 
   // 판매량 추정 (리뷰 증가 × 20 = 리뷰 작성률 ~5% 기준)
   const estimatedDailySales = Math.max(0, reviewGrowth * 20);
@@ -783,22 +814,32 @@ export async function runDailyBatch(
         }
       }
 
-      // 7일 리뷰 증가 계산
-      const sevenDaysAgo = getPrevDateN(today, 7);
-      const [weekAgoStatus] = await db.select({
+      // ★ v7.4.0: 7일 리뷰 증가 — 유효한 기준점 기반 계산
+      // 7일 전~14일 전 사이에서 리뷰가 정상 파싱된 가장 가까운 날 찾기
+      const weekBaseline = await db.select({
+        statDate: extKeywordDailyStatus.statDate,
         totalReviewSum: extKeywordDailyStatus.totalReviewSum,
+        totalItems: extKeywordDailyStatus.totalItems,
       })
         .from(extKeywordDailyStatus)
         .where(and(
           eq(extKeywordDailyStatus.userId, userId),
           eq(extKeywordDailyStatus.keyword, kw.keyword),
-          eq(extKeywordDailyStatus.statDate, sevenDaysAgo),
+          sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${today}, INTERVAL 14 DAY)`,
+          sql`${extKeywordDailyStatus.statDate} <= DATE_SUB(${today}, INTERVAL 5 DAY)`,
         ))
-        .limit(1);
+        .orderBy(desc(extKeywordDailyStatus.statDate))
+        .limit(10);
 
-      const reviewGrowth7d = weekAgoStatus
-        ? agg.totalReviewSum - N(weekAgoStatus.totalReviewSum)
-        : 0;
+      let reviewGrowth7d = 0;
+      // 유효한 기준점: totalReviewSum > 0 (파싱 성공)
+      const validWeekBase = weekBaseline.find(
+        e => N(e.totalReviewSum) > 0,
+      );
+      if (validWeekBase && agg.totalReviewSum > 0) {
+        const rawGrowth7d = agg.totalReviewSum - N(validWeekBase.totalReviewSum);
+        reviewGrowth7d = Math.max(0, rawGrowth7d);
+      }
 
       // 적응형 스케줄링: 변동성 점수 + 다음 수집 시각 계산
       const volScore = computeVolatilityScore({
