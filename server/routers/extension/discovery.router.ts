@@ -356,6 +356,29 @@ export const discoveryRouter = router({
         .limit(5);
     }),
 
+  // ─── 3b. getCrawlQueue alias (확장프로그램 호환) ───
+  getCrawlQueue: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      return db.select({
+        id: extDiscoveryJobs.id,
+        keyword: extDiscoveryJobs.keyword,
+        status: extDiscoveryJobs.status,
+        maxPages: extDiscoveryJobs.maxPages,
+        maxDetailProducts: extDiscoveryJobs.maxDetailProducts,
+        filteredProductIds: extDiscoveryJobs.filteredProductIds,
+      })
+        .from(extDiscoveryJobs)
+        .where(and(
+          eq(extDiscoveryJobs.userId, ctx.user!.id),
+          sql`${extDiscoveryJobs.status} IN ('pending', 'filtering')`,
+        ))
+        .orderBy(extDiscoveryJobs.createdAt)
+        .limit(5);
+    }),
+
   // ─── 4. 확장프로그램: 검색 결과 전송 ───
   submitSearchResults: protectedProcedure
     .input(z.object({

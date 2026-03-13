@@ -2264,16 +2264,53 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // ============================================================
-//  v8.0: AI 제품 발견 크롤링 파이프라인
-//  서버 pending jobs 폴링 → 검색 크롤링 → 서버 필터링 → 상세 크롤링 → AI 분석
+//  v8.1: AI 제품 발견 — 자동 폴링 + 크롤링 파이프라인
+//  서버에서 유저가 승인한 키워드 → 자동 검색 크롤링 → 상세 크롤링 → AI 분석
 // ============================================================
 const discoveryState = {
   running: false,
-  status: 'IDLE', // IDLE|POLLING|CRAWLING_SEARCH|SUBMITTING_SEARCH|CRAWLING_DETAIL|SUBMITTING_DETAIL|DONE|ERROR
+  status: 'IDLE',
   currentJob: null,
   progress: '',
   error: null,
+  autoPolling: false,
 };
+
+// 자동 폴링: 60초마다 서버 큐 확인
+let discoveryPollTimer = null;
+
+function startDiscoveryAutoPolling() {
+  if (discoveryState.autoPolling) return;
+  discoveryState.autoPolling = true;
+  console.log('[Discovery] 자동 폴링 시작 (60초 간격)');
+  discoveryPollTimer = setInterval(async () => {
+    if (discoveryState.running) return;
+    const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+    if (!serverLoggedIn) return;
+    try {
+      const resp = await apiClient.discoveryGetPendingJobs();
+      const jobs = resp?.result?.data || [];
+      if (jobs.length > 0) {
+        console.log('[Discovery] 자동 감지: ' + jobs.length + '개 대기 작업 → 자동 크롤링 시작');
+        startDiscoveryCrawl();
+      }
+    } catch (_) {}
+  }, 60000);
+}
+
+function stopDiscoveryAutoPolling() {
+  discoveryState.autoPolling = false;
+  if (discoveryPollTimer) { clearInterval(discoveryPollTimer); discoveryPollTimer = null; }
+}
+
+// 서버 로그인 시 자동 폴링 시작
+chrome.storage.local.get('serverLoggedIn', ({ serverLoggedIn }) => {
+  if (serverLoggedIn) startDiscoveryAutoPolling();
+});
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.serverLoggedIn?.newValue) startDiscoveryAutoPolling();
+  else if (changes.serverLoggedIn && !changes.serverLoggedIn.newValue) stopDiscoveryAutoPolling();
+});
 
 async function startDiscoveryCrawl() {
   if (discoveryState.running) {

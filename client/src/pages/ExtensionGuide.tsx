@@ -11,7 +11,7 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.0.0";
+const EXTENSION_VERSION = "8.1.0";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "174KB";
 
@@ -586,7 +586,7 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v8.0.0",
+                    version: "v8.1.0",
                     date: "2026-03-14",
                     badge: "Latest",
                     changes: [
