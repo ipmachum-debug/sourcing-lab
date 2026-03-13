@@ -54,10 +54,20 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// v8.1: 서비스 워커 시작 시 10초 후 자동 폴링 체크 (알람 대기 없이 즉시)
-setTimeout(() => {
-  discoveryAutoCheck().catch(() => {});
-}, 10000);
+// v8.1: 서비스 워커 시작 시 — 알람 보장 + 즉시 체크
+(async () => {
+  // 알람이 없으면 재생성 (서비스 워커 재시작 시 알람이 사라질 수 있음)
+  const existing = await chrome.alarms.get('discoveryPolling').catch(() => null);
+  if (!existing) {
+    chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
+    console.log('[Discovery] 폴링 알람 재생성');
+  }
+  // 10초 후 즉시 체크
+  setTimeout(async () => {
+    console.log('[Discovery] 서비스 워커 시작 — 자동 체크 실행');
+    try { await discoveryAutoCheck(); } catch (e) { console.warn('[Discovery] 시작 체크 실패:', e.message); }
+  }, 10000);
+})();
 
 // ---- v5.3: SPA 재주입 제거 ----
 // content.js가 자체적으로 setInterval + popstate + MutationObserver로 URL 변경 감지
@@ -89,23 +99,33 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 async function discoveryAutoCheck() {
   try {
     // 이미 실행 중이면 스킵
-    if (discoveryState.running) return;
+    if (discoveryState.running) {
+      console.log('[Discovery] 자동 폴링: 이미 크롤링 실행 중 — 스킵');
+      return;
+    }
     
     // 로그인 상태 확인
     const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
-    if (!serverLoggedIn) return;
+    if (!serverLoggedIn) {
+      console.log('[Discovery] 자동 폴링: 로그인 안됨 — 스킵');
+      return;
+    }
+    
+    console.log('[Discovery] 자동 폴링: 서버에 pending 작업 확인 중...');
     
     // 서버에 pending 작업 확인
     const resp = await apiClient.discoveryGetPendingJobs();
+    console.log('[Discovery] 자동 폴링 응답:', JSON.stringify(resp)?.slice(0, 300));
     const jobs = resp?.result?.data || [];
     
     if (jobs.length > 0) {
       console.log(`[Discovery] 🔍 자동 폴링: ${jobs.length}개 대기 작업 발견 → 크롤링 시작`);
       startDiscoveryCrawl();
+    } else {
+      console.log('[Discovery] 자동 폴링: 대기 작업 없음');
     }
   } catch (err) {
-    // 폴링 에러는 조용히 무시 (서버 연결 끊김 등)
-    console.warn('[Discovery] 자동 폴링 체크 실패:', err.message);
+    console.warn('[Discovery] 자동 폴링 체크 실패:', err.message, err.stack);
   }
 }
 

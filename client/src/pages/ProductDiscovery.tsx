@@ -332,12 +332,10 @@ export default function ProductDiscovery() {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           {j.detailCrawledCount > 0 && <span>상세 {j.detailCrawledCount}개</span>}
                           {j.createdAt && <span>{String(j.createdAt).slice(5, 16)}</span>}
-                          {(j.status === "completed" || j.status === "failed") && (
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
-                              onClick={e => { e.stopPropagation(); deleteJob.mutate({ jobId: j.id }); }}>
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          )}
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-500"
+                            onClick={e => { e.stopPropagation(); if (confirm(`"${j.keyword}" 작업을 삭제하시겠습니까?`)) deleteJob.mutate({ jobId: j.id }); }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
