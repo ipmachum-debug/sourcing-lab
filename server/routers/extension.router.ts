@@ -4818,21 +4818,76 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
     }
     const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : recentPositiveGrowth;
 
-    // ★ v7.3.3: 리뷰 증가량 계산 — 수집 편차(상품 수 변동)에 의한 음수 방지
+    // ★ v7.4: 리뷰 증가량 — 동일 상품(productId) 매칭 기반 정밀 계산
+    //   기존: totalReviewSum 단순 차이 → 상품 set 변동 시 오류
+    //   수정: 양쪽 스냅샷에 공통으로 존재하는 상품의 리뷰 차이만 합산
     let reviewGrowth = 0;
     let priceChange = 0;
     let productCountChange = 0;
 
+    // 이전 스냅샷의 상품별 리뷰 맵 구축 (productId → reviewCount)
+    function buildReviewMap(snapshotItems: any[]): Map<string, number> {
+      const m = new Map<string, number>();
+      for (const item of snapshotItems) {
+        const pid = String(item.productId || item.url || '');
+        if (pid) m.set(pid, item.reviewCount || 0);
+      }
+      return m;
+    }
+
+    // 매칭 상품 기반 리뷰 증가 계산
+    function calcMatchedGrowth(currentItems: any[], prevReviewMap: Map<string, number>): number {
+      if (prevReviewMap.size === 0) return 0;
+      let growth = 0;
+      let matchedCount = 0;
+      for (const item of currentItems) {
+        const pid = String(item.productId || item.url || '');
+        const prevReview = prevReviewMap.get(pid);
+        if (prevReview !== undefined) {
+          matchedCount++;
+          const diff = (item.reviewCount || 0) - prevReview;
+          if (diff > 0) growth += diff;  // 개별 상품의 리뷰 감소는 무시
+        }
+      }
+      // 매칭 상품이 최소 3개 이상이어야 유의미한 결과
+      return matchedCount >= 3 ? growth : 0;
+    }
+
+    // 이전 스냅샷 아이템 가져오기 (prevStat용)
+    async function getPrevSnapshotItems(): Promise<any[]> {
+      // prevStat의 날짜에 해당하는 스냅샷 찾기
+      const prevDate = String(prevStat?.statDate || '');
+      if (!prevDate) return [];
+      const [prevSnap] = await db.select({ itemsJson: extSearchSnapshots.itemsJson })
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, userId),
+          eq(extSearchSnapshots.query, query),
+          sql`DATE(${extSearchSnapshots.createdAt}) = ${prevDate}`,
+        ))
+        .orderBy(desc(extSearchSnapshots.createdAt))
+        .limit(1);
+      if (!prevSnap?.itemsJson) return [];
+      try { return JSON.parse(prevSnap.itemsJson); } catch { return []; }
+    }
+
     if (prevStat) {
       const prevDate = String(prevStat.statDate || '');
       if (prevDate !== todayStr) {
-        const rawGrowth = totalReviewSum - (N(prevStat.totalReviewSum) || 0);
-        if (rawGrowth >= 0) {
-          reviewGrowth = rawGrowth;
+        // 매칭 기반 계산 시도
+        const prevItems = await getPrevSnapshotItems();
+        if (prevItems.length > 0) {
+          const prevMap = buildReviewMap(prevItems);
+          const matchedGrowth = calcMatchedGrowth(items, prevMap);
+          // 다날짜 갭이면 일수로 나눠서 일평균 적용
+          const daysDiff = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(prevDate).getTime()) / 86400000));
+          reviewGrowth = daysDiff > 1 ? Math.round(matchedGrowth / daysDiff) : matchedGrowth;
         } else {
-          // 음수 = 수집 편차 → fallback(오늘 기존값 or 어제 growth) 사용
-          reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+          // 이전 스냅샷 아이템이 없으면 기존 totalReviewSum 차이 (fallback)
+          const rawGrowth = totalReviewSum - (N(prevStat.totalReviewSum) || 0);
+          reviewGrowth = rawGrowth >= 0 ? Math.min(rawGrowth, totalReviewSum * 0.1) : 0;
         }
+        if (reviewGrowth <= 0 && fallbackGrowth > 0) reviewGrowth = fallbackGrowth;
         priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
         productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
       } else if (fallbackGrowth > 0) {
@@ -4841,12 +4896,28 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
       }
     } else if (prevSnapshotReviewSum !== null) {
       if (prevSnapshotCreatedAt && prevSnapshotCreatedAt !== todayStr) {
-        const rawGrowth = totalReviewSum - prevSnapshotReviewSum;
-        if (rawGrowth >= 0) {
-          reviewGrowth = rawGrowth;
+        // 이전 스냅샷과 직접 비교 — 매칭 기반
+        const [prevSnap] = await db.select({ itemsJson: extSearchSnapshots.itemsJson })
+          .from(extSearchSnapshots)
+          .where(and(
+            eq(extSearchSnapshots.userId, userId),
+            eq(extSearchSnapshots.query, query),
+            sql`${extSearchSnapshots.id} < ${latest.id}`,
+          ))
+          .orderBy(desc(extSearchSnapshots.createdAt))
+          .limit(1);
+        let prevItems: any[] = [];
+        if (prevSnap?.itemsJson) { try { prevItems = JSON.parse(prevSnap.itemsJson); } catch {} }
+        if (prevItems.length > 0) {
+          const prevMap = buildReviewMap(prevItems);
+          const matchedGrowth = calcMatchedGrowth(items, prevMap);
+          const daysDiff = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(prevSnapshotCreatedAt).getTime()) / 86400000));
+          reviewGrowth = daysDiff > 1 ? Math.round(matchedGrowth / daysDiff) : matchedGrowth;
         } else {
-          reviewGrowth = fallbackGrowth > 0 ? fallbackGrowth : 0;
+          const rawGrowth = totalReviewSum - prevSnapshotReviewSum;
+          reviewGrowth = rawGrowth >= 0 ? Math.min(rawGrowth, totalReviewSum * 0.1) : 0;
         }
+        if (reviewGrowth <= 0 && fallbackGrowth > 0) reviewGrowth = fallbackGrowth;
         priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
         productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
       }
