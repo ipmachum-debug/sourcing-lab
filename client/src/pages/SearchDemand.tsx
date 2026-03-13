@@ -15,12 +15,69 @@ import {
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, AreaChart, Area, Legend,
+  AreaChart, Area, Legend,
 } from "recharts";
 
 function formatPrice(n: number | null | undefined) {
   if (n === null || n === undefined) return "-";
   return n.toLocaleString("ko-KR") + "원";
+}
+
+/**
+ * 일별 데이터 보간 — 크롤링 날짜 사이 빈 날을 채우고 평균으로 분산
+ * 예: 03-11(+100) → 03-13(+60) → 03-11(+80), 03-12(+80), 03-13(+80) (3일 평균)
+ */
+function interpolateDailyData(rawData: any[]): any[] {
+  if (!rawData || rawData.length === 0) return [];
+  if (rawData.length === 1) return rawData;
+
+  const sorted = [...rawData].sort((a, b) => a.statDate.localeCompare(b.statDate));
+  const result: any[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const curr = sorted[i];
+    if (i === 0) {
+      result.push(curr);
+      continue;
+    }
+
+    const prev = sorted[i - 1];
+    const prevDate = new Date(prev.statDate + "T00:00:00+09:00");
+    const currDate = new Date(curr.statDate + "T00:00:00+09:00");
+    const dayGap = Math.round((currDate.getTime() - prevDate.getTime()) / 86400000);
+
+    if (dayGap <= 1) {
+      result.push(curr);
+      continue;
+    }
+
+    // 갭이 있으면 보간: 현재 데이터의 growth를 갭 일수로 분산
+    const dailyGrowth = Math.round((Number(curr.reviewGrowth) || 0) / dayGap);
+    const dailySales = Math.round((Number(curr.salesEstimate) || 0) / dayGap);
+
+    // 중간 날짜들을 보간값으로 채움
+    for (let d = 1; d < dayGap; d++) {
+      const fillDate = new Date(prevDate);
+      fillDate.setDate(fillDate.getDate() + d);
+      const fillDateStr = fillDate.toISOString().slice(0, 10);
+      result.push({
+        ...curr,
+        statDate: fillDateStr,
+        reviewGrowth: dailyGrowth,
+        salesEstimate: dailySales,
+        _interpolated: true,
+      });
+    }
+
+    // 현재 날짜도 분산값으로 교체
+    result.push({
+      ...curr,
+      reviewGrowth: dailyGrowth,
+      salesEstimate: dailySales,
+    });
+  }
+
+  return result;
 }
 
 export default function SearchDemand() {
@@ -417,21 +474,33 @@ export default function SearchDemand() {
                     </div>
                   </CardHeader>
                   <CardContent className="pt-3">
-                    {keywordDailyStats.data && keywordDailyStats.data.length > 1 ? (
+                    {keywordDailyStats.data && keywordDailyStats.data.length > 1 ? (() => {
+                      const chartData = interpolateDailyData(keywordDailyStats.data as any[]);
+                      return (
                       <div className="space-y-4">
-                        {/* 리뷰 증가 + 판매 추정 그래프 */}
+                        {/* 리뷰 증가 + 판매 추정 그래프 (곡선 + 날짜별 분산) */}
                         <div>
-                          <div className="text-[10px] font-semibold text-gray-500 mb-1">리뷰 증가 / 판매 추정</div>
+                          <div className="text-[10px] font-semibold text-gray-500 mb-1">리뷰 증가 / 판매 추정 (일평균)</div>
                           <ResponsiveContainer width="100%" height={160}>
-                            <BarChart data={keywordDailyStats.data}>
+                            <AreaChart data={chartData}>
+                              <defs>
+                                <linearGradient id="gradReview" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
+                                </linearGradient>
+                                <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
                               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                               <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
                               <YAxis tick={{ fontSize: 9 }} />
                               <Tooltip contentStyle={{ fontSize: 11 }} />
                               <Legend wrapperStyle={{ fontSize: 10 }} />
-                              <Bar dataKey="reviewGrowth" fill="#16a34a" name="리뷰 증가" radius={[3, 3, 0, 0]} />
-                              <Bar dataKey="salesEstimate" fill="#2563eb" name="판매 추정" radius={[3, 3, 0, 0]} />
-                            </BarChart>
+                              <Area type="monotone" dataKey="reviewGrowth" stroke="#16a34a" fill="url(#gradReview)" strokeWidth={2} name="리뷰 증가" dot={{ r: 2 }} />
+                              <Area type="monotone" dataKey="salesEstimate" stroke="#2563eb" fill="url(#gradSales)" strokeWidth={2} name="판매 추정" dot={{ r: 2 }} />
+                            </AreaChart>
                           </ResponsiveContainer>
                         </div>
 
@@ -439,7 +508,7 @@ export default function SearchDemand() {
                         <div>
                           <div className="text-[10px] font-semibold text-gray-500 mb-1">경쟁도 / 수요점수 / 종합점수</div>
                           <ResponsiveContainer width="100%" height={140}>
-                            <LineChart data={keywordDailyStats.data}>
+                            <LineChart data={chartData}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                               <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
                               <YAxis tick={{ fontSize: 9 }} domain={[0, 100]} />
@@ -456,7 +525,7 @@ export default function SearchDemand() {
                         <div>
                           <div className="text-[10px] font-semibold text-gray-500 mb-1">평균가 / 상품수 추이</div>
                           <ResponsiveContainer width="100%" height={130}>
-                            <AreaChart data={keywordDailyStats.data}>
+                            <AreaChart data={chartData}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                               <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
                               <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
@@ -466,7 +535,8 @@ export default function SearchDemand() {
                           </ResponsiveContainer>
                         </div>
                       </div>
-                    ) : (
+                      );
+                    })() : (
                       <div className="py-8 text-center text-gray-400">
                         <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
                         <p className="text-xs">일별 데이터가 부족합니다.</p>
