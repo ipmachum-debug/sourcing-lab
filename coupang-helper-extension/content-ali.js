@@ -888,18 +888,17 @@
   }
 
   // ============================================================
-  //  스캔 — v6.2 anti-bot 최소화: 초기 1회 + 수동 새로고침
-  //  MutationObserver/setInterval 제거 → 알리 봇탐지 방지
+  //  스캔 — v6.2: 봇 탐지 방지를 위해 최소한의 DOM 접근
+  //  페이지 완전 로딩 후 1회 스캔, 실패 시 1회 재시도
+  //  MutationObserver/visibilitychange 제거
   // ============================================================
   let lastSig = '';
-  let scanCount = 0;
-  const MAX_AUTO_SCANS = 3; // 초기 자동 스캔 최대 횟수
 
   function doScan(force = false) {
     const items = parseAliProducts();
     if (!items.length) {
       if (panel) renderPanel([]);
-      return;
+      return false;
     }
 
     const sig = items.map(i => i.productId).slice(0, 5).join(',');
@@ -908,8 +907,7 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
-      scanCount++;
-      console.log(`%c[SH-Ali] ✅ ${items.length}개 파싱 완료 (scan #${scanCount})`, 'color:#16a34a;font-weight:bold;');
+      console.log(`%c[SH-Ali] ✅ ${items.length}개 파싱 완료`, 'color:#16a34a;font-weight:bold;');
     }
 
     if (!panel) createPanel();
@@ -918,39 +916,42 @@
     if (isNew) {
       renderPanel(items);
     }
+    return items.length > 0;
   }
 
-  // URL 변경 감지 (SPA) — 저빈도: 3초 간격, 1회만 스캔
+  // URL 변경 감지 (SPA) — 3초마다 체크, 변경 시 2초 딜레이 후 1회 스캔
   let lastUrl = location.href;
   function urlCheck() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       lastSig = '';
       allItems = [];
-      scanCount = 0;
-      // 페이지 전환 후 충분히 기다린 뒤 1회만 스캔
-      setTimeout(() => doScan(true), 2000);
-    }
-  }
-
-  // 3초 간격으로 URL 체크 (기존 0.8초 → 3초)
-  setInterval(urlCheck, 3000);
-
-  // 초기 실행: 페이지 로드 완료 후 1회 스캔, 실패 시 재시도 1회
-  function initialScan() {
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
       setTimeout(() => {
-        doScan(true);
-        // 상품이 없으면 3초 후 1회 재시도 (lazy-load 대응)
-        if (!allItems.length && scanCount < MAX_AUTO_SCANS) {
+        if (!doScan(true)) {
+          // 실패 시 3초 후 1회 재시도
           setTimeout(() => doScan(true), 3000);
         }
-      }, 1500);
-    } else {
-      window.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => doScan(true), 1500);
-      }, { once: true });
+      }, 2000);
     }
   }
-  initialScan();
+
+  window.addEventListener('popstate', () => setTimeout(urlCheck, 500));
+  setInterval(urlCheck, 3000);
+
+  // ★ 초기 실행: 페이지 완전 로딩을 기다린 후 스캔
+  //   봇 탐지 회피를 위해 즉시 DOM 접근하지 않고 지연 실행
+  function initialScan() {
+    setTimeout(() => {
+      if (!doScan()) {
+        // 첫 시도 실패 시 3초 후 1회만 재시도
+        setTimeout(() => doScan(true), 3000);
+      }
+    }, 1500);
+  }
+
+  if (document.readyState === 'complete') {
+    initialScan();
+  } else {
+    window.addEventListener('load', initialScan, { once: true });
+  }
 })();
