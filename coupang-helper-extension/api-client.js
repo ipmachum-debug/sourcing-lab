@@ -253,7 +253,12 @@ class ApiClient {
     return this._call('extension.getDetailHistory', opts, 'query');
   }
 
-  // ===== v8.0: AI 제품 발견 시스템 =====
+  // ===== v8.1: AI 제품 발견 시스템 (자동 파이프라인) =====
+  async discoveryGetCrawlQueue() {
+    return this._call('extension.getCrawlQueue', undefined, 'query');
+  }
+
+  // 레거시 호환
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');
   }
