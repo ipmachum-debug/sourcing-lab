@@ -161,6 +161,17 @@ export const watchRouter = router({
           priceParseRate: agg.priceParseRate,
           ratingParseRate: agg.ratingParseRate,
           reviewParseRate: agg.reviewParseRate,
+          // ★ v7.5.0: 정규화 필드
+          baseProductCount: agg.baseProductCount,
+          normalizedReviewSum: agg.normalizedReviewSum,
+          coverageRatio: agg.coverageRatio.toFixed(4),
+          reviewDeltaObserved: agg.reviewDeltaObserved,
+          reviewDeltaUsed: agg.reviewDeltaUsed,
+          salesEstimateMa7: agg.salesEstimateMa7,
+          salesEstimateMa30: agg.salesEstimateMa30,
+          isProvisional: agg.isProvisional,
+          provisionalReason: agg.provisionalReason,
+          dataStatus: agg.dataStatus,
         };
 
         if (existingStatus) {
@@ -203,15 +214,16 @@ export const watchRouter = router({
           if (adRatio > 30) compScore += 20; else if (adRatio > 15) compScore += 10;
           const compLevel = compScore >= 70 ? "hard" : compScore >= 45 ? "medium" : "easy";
 
-          const [existingSnap] = await db.select({ id: extSearchSnapshots.id })
+          // ★ v7.5.0: 스냅샷을 덮어쓰지 않고 하루 최대 3개 보존
+          // 기존에는 같은 날 재크롤링 시 덮어써서 원본 데이터 소실됨
+          const todaySnaps = await db.select({ id: extSearchSnapshots.id })
             .from(extSearchSnapshots)
             .where(and(
               eq(extSearchSnapshots.userId, userId),
               eq(extSearchSnapshots.query, input.keyword),
               sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
             ))
-            .orderBy(desc(extSearchSnapshots.createdAt))
-            .limit(1);
+            .orderBy(desc(extSearchSnapshots.createdAt));
 
           const snapData = {
             query: input.keyword,
@@ -226,9 +238,12 @@ export const watchRouter = router({
             itemsJson: itemsJson,
           };
 
-          if (existingSnap) {
-            await db.update(extSearchSnapshots).set(snapData).where(eq(extSearchSnapshots.id, existingSnap.id));
+          if (todaySnaps.length >= 3) {
+            // 하루 3개 초과 시 가장 오래된 것 업데이트
+            await db.update(extSearchSnapshots).set(snapData)
+              .where(eq(extSearchSnapshots.id, todaySnaps[todaySnaps.length - 1].id));
           } else {
+            // 3개 미만이면 새로 추가 (원본 보존)
             await db.insert(extSearchSnapshots).values({ userId, ...snapData });
           }
           console.log(`[saveSearchEvent] snapshot synced: "${input.keyword}" (${input.items.length}개, comp:${compScore}/${compLevel})`);

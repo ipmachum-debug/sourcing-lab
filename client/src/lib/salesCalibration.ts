@@ -15,6 +15,14 @@ export interface CalibrationInput {
   productCount?: number;
   avgPrice?: number;
   categoryHint?: string;
+  // MA 기반 판매추정 (서버에서 계산된 값)
+  salesEstimateMa7?: number;
+  salesEstimateMa30?: number;
+  // 데이터 상태
+  dataStatus?: string;          // raw_valid/interpolated/provisional/anomaly/missing
+  isFinalized?: boolean;
+  spikeLevel?: string;          // normal/rising/surging/explosive
+  spikeRatio?: number;
   // 네이버 데이터 (있으면 보정 적용)
   naverTotalSearch?: number;
   naverSearchPrev?: number;
@@ -35,6 +43,14 @@ export interface CalibrationOutput {
   coupangWeight: number;
   /** 네이버 검증 점수 비중 (30%) - UI 표시용 */
   naverWeight: number;
+  /** MA7 기반 판매추정 (서버 계산값) */
+  ma7SalesEst: number;
+  /** 추정 방식 라벨: MA7추정 / 임시추정 / 기본추정 */
+  estimateLabel: string;
+  /** 추정 방식 타입 */
+  estimateType: "ma7" | "provisional" | "basic";
+  /** spike 라벨 */
+  spikeLabel: string | null;
 }
 
 const REVIEW_CONVERSION: Record<string, number> = {
@@ -131,9 +147,53 @@ export function calibrateSales(input: CalibrationInput): CalibrationOutput {
     confidenceReason = "변동 없음";
   }
 
+  // ★ v7.7.0: MA7 기반 판매추정 + 편차 기반 신뢰도 판단
+  const ma7SalesEst = input.salesEstimateMa7 ?? 0;
+  const hasMa7 = ma7SalesEst > 0;
+  const dailyEst = correctedSalesEst; // 오늘 리뷰증가 기반 일간추정
+
+  // MA7 vs 일간추정 편차 체크 — 3배 이상 벌어지면 MA7 불안정
+  const MAX_DIVERGENCE = 3.0;
+  let estimateLabel: string;
+  let estimateType: CalibrationOutput["estimateType"];
+  let finalSalesEst: number;
+
+  if (!hasMa7) {
+    // MA 데이터 없음
+    finalSalesEst = dailyEst;
+    estimateLabel = "기본추정";
+    estimateType = "basic";
+  } else if (input.dataStatus === "provisional" || !input.isFinalized) {
+    // 아직 확정 안 된 데이터
+    finalSalesEst = dailyEst > 0 ? dailyEst : ma7SalesEst;
+    estimateLabel = "임시추정";
+    estimateType = "provisional";
+  } else if (dailyEst > 0 && ma7SalesEst / dailyEst > MAX_DIVERGENCE) {
+    // MA7이 일간추정의 3배 초과 → MA7 불안정, 일간추정 사용
+    finalSalesEst = dailyEst;
+    estimateLabel = "일간추정";
+    estimateType = "basic";
+  } else if (dailyEst > 0 && dailyEst / ma7SalesEst > MAX_DIVERGENCE) {
+    // 일간추정이 MA7의 3배 초과 → 오늘 튀는 날, MA7 유지하되 spike 표시
+    finalSalesEst = ma7SalesEst;
+    estimateLabel = "MA7";
+    estimateType = "ma7";
+  } else {
+    // 정상 범위 — MA7 신뢰
+    finalSalesEst = ma7SalesEst;
+    estimateLabel = "MA7";
+    estimateType = "ma7";
+  }
+
+  // spike 라벨
+  let spikeLabel: string | null = null;
+  if (input.spikeLevel === "explosive") spikeLabel = "폭발적";
+  else if (input.spikeLevel === "surging") spikeLabel = "급등";
+  else if (input.spikeLevel === "rising") spikeLabel = "상승";
+
   return {
     baseSalesEst,
-    correctedSalesEst,
+    correctedSalesEst: finalSalesEst,
     naverDemandIndex: Math.round(naverDemandIndex * 100) / 100,
     confidence,
     surgeType,
@@ -142,5 +202,9 @@ export function calibrateSales(input: CalibrationInput): CalibrationOutput {
     hasNaverData,
     coupangWeight: 0.70,
     naverWeight: 0.30,
+    ma7SalesEst,
+    estimateLabel,
+    estimateType,
+    spikeLabel,
   };
 }

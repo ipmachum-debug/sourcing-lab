@@ -28,42 +28,21 @@ export const snapshotsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      // 같은 사용자 + 같은 검색어가 이미 있으면 업데이트 (중복 방지)
-      const [existing] = await db.select({ id: extSearchSnapshots.id })
+      // ★ v7.6.0: 스냅샷을 덮어쓰지 않고 하루 최대 3개 보존 (원본 데이터 보존)
+      const today = new Date();
+      today.setHours(today.getHours() + 9);
+      const todayStr = today.toISOString().slice(0, 10);
+
+      const todaySnaps = await db.select({ id: extSearchSnapshots.id })
         .from(extSearchSnapshots)
         .where(and(
           eq(extSearchSnapshots.userId, ctx.user!.id),
           eq(extSearchSnapshots.query, input.query),
+          sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
         ))
-        .orderBy(desc(extSearchSnapshots.createdAt))
-        .limit(1);
+        .orderBy(desc(extSearchSnapshots.createdAt));
 
-      if (existing) {
-        // 기존 레코드 업데이트
-        await db.update(extSearchSnapshots)
-          .set({
-            totalItems: input.totalItems,
-            avgPrice: input.avgPrice,
-            avgRating: input.avgRating.toFixed(1),
-            avgReview: input.avgReview,
-            highReviewRatio: input.highReviewRatio,
-            adCount: input.adCount,
-            competitionScore: input.competitionScore,
-            competitionLevel: input.competitionLevel,
-            itemsJson: input.items ? JSON.stringify(input.items) : null,
-          })
-          .where(eq(extSearchSnapshots.id, existing.id));
-        // 자동으로 일별 통계 계산 (비동기, 실패 무시)
-        autoComputeKeywordDailyStat(ctx.user!.id, input.query, db).catch(() => {});
-        // 추적 상품 자동 매칭 (비동기, 실패 무시)
-        autoMatchTrackedProducts(ctx.user!.id, input.query, input.items || [], db).catch(() => {});
-        return { success: true, id: existing.id, updated: true };
-      }
-
-      // 신규 저장
-      const result = await db.insert(extSearchSnapshots).values({
-        userId: ctx.user!.id,
-        query: input.query,
+      const snapData = {
         totalItems: input.totalItems,
         avgPrice: input.avgPrice,
         avgRating: input.avgRating.toFixed(1),
@@ -73,14 +52,32 @@ export const snapshotsRouter = router({
         competitionScore: input.competitionScore,
         competitionLevel: input.competitionLevel,
         itemsJson: input.items ? JSON.stringify(input.items) : null,
-      });
+      };
+
+      let resultId: number | undefined;
+
+      if (todaySnaps.length >= 3) {
+        // 하루 3개 초과 시 가장 오래된 것 업데이트 (원본 최대 3개 보존)
+        const oldestId = todaySnaps[todaySnaps.length - 1].id;
+        await db.update(extSearchSnapshots).set(snapData)
+          .where(eq(extSearchSnapshots.id, oldestId));
+        resultId = oldestId;
+      } else {
+        // 3개 미만이면 새로 추가 (원본 보존)
+        const result = await db.insert(extSearchSnapshots).values({
+          userId: ctx.user!.id,
+          query: input.query,
+          ...snapData,
+        });
+        resultId = (result as any)?.[0]?.insertId;
+      }
 
       // 자동으로 일별 통계 계산 (비동기, 실패 무시)
       autoComputeKeywordDailyStat(ctx.user!.id, input.query, db).catch(() => {});
       // 추적 상품 자동 매칭 (비동기, 실패 무시)
       autoMatchTrackedProducts(ctx.user!.id, input.query, input.items || [], db).catch(() => {});
 
-      return { success: true, id: (result as any)?.[0]?.insertId };
+      return { success: true, id: resultId };
     }),
 
   // 검색 히스토리 조회
