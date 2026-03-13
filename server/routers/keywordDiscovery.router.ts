@@ -98,7 +98,7 @@ export const keywordDiscoveryRouter = router({
   // ===== 2. 네이버 검증 실행 (확장 아닌 검증만) =====
   validateWithNaver: protectedProcedure
     .input(z.object({
-      keywordIds: z.array(z.number().int()).min(1).max(20),
+      keywordIds: z.array(z.number().int()).min(1).max(50),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -307,7 +307,7 @@ export const keywordDiscoveryRouter = router({
   // ===== 4. 감시 목록에 추가 (validated → ext_watch_keywords 연동) =====
   promoteToWatch: protectedProcedure
     .input(z.object({
-      keywordIds: z.array(z.number().int()).min(1).max(20),
+      keywordIds: z.array(z.number().int()).min(1).max(50),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
