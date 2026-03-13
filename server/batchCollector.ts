@@ -481,7 +481,7 @@ export async function computeDailyAggregation(
   const todayReviewValid = isReviewDataValid(totalReviewSum, totalItems);
 
   // 유효한 가장 최근 기준점 찾기
-  let baselineEntry: { statDate: string; totalReviewSum: number; avgPrice: number } | null = null;
+  let baselineEntry: { statDate: string; totalReviewSum: number; totalItems: number; avgPrice: number } | null = null;
   let daysSinceBaseline = 0;
 
   for (const entry of recentHistory) {
@@ -491,6 +491,7 @@ export async function computeDailyAggregation(
       baselineEntry = {
         statDate: String(entry.statDate),
         totalReviewSum: entryReviewSum,
+        totalItems: entryItems,
         avgPrice: N(entry.avgPrice),
       };
       // 경과일수 계산
@@ -508,12 +509,20 @@ export async function computeDailyAggregation(
   let itemCountChange = 0;
 
   if (todayReviewValid && baselineEntry) {
-    const rawGrowth = totalReviewSum - baselineEntry.totalReviewSum;
-    if (rawGrowth >= 0) {
+    // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반 성장 계산
+    // 크롤링 시 제품 수가 달라지면 totalReviewSum도 변동하므로
+    // 제품당 평균 리뷰로 정규화 후 보수적(min) 제품 수에 곱해 성장 산출
+    const avgReviewToday = totalReviewSum / Math.max(1, totalItems);
+    const avgReviewBaseline = baselineEntry.totalReviewSum / Math.max(1, baselineEntry.totalItems);
+    const growthPerProduct = avgReviewToday - avgReviewBaseline;
+    const referenceCount = Math.min(totalItems, baselineEntry.totalItems);
+    const normalizedGrowth = Math.round(growthPerProduct * referenceCount);
+
+    if (normalizedGrowth >= 0) {
       // 경과일수로 나눠 일평균 증가분 산출
       reviewGrowth = daysSinceBaseline > 1
-        ? Math.round(rawGrowth / daysSinceBaseline)
-        : rawGrowth;
+        ? Math.round(normalizedGrowth / daysSinceBaseline)
+        : normalizedGrowth;
     }
     // 음수면 0 유지 (수집 편차)
     priceChange = avgPrice - baselineEntry.avgPrice;
@@ -837,8 +846,13 @@ export async function runDailyBatch(
         e => N(e.totalReviewSum) > 0,
       );
       if (validWeekBase && agg.totalReviewSum > 0) {
-        const rawGrowth7d = agg.totalReviewSum - N(validWeekBase.totalReviewSum);
-        reviewGrowth7d = Math.max(0, rawGrowth7d);
+        // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반
+        const baseItems = N(validWeekBase.totalItems);
+        const avgReviewNow = agg.totalReviewSum / Math.max(1, agg.totalItems);
+        const avgReviewWeekBase = N(validWeekBase.totalReviewSum) / Math.max(1, baseItems);
+        const growthPerProduct7d = avgReviewNow - avgReviewWeekBase;
+        const refCount7d = Math.min(agg.totalItems, baseItems);
+        reviewGrowth7d = Math.max(0, Math.round(growthPerProduct7d * refCount7d));
       }
 
       // 적응형 스케줄링: 변동성 점수 + 다음 수집 시각 계산

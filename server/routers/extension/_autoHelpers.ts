@@ -141,12 +141,20 @@ export async function autoComputeKeywordDailyStat(userId: number, query: string,
     let productCountChange = 0;
 
     if (todayReviewValid && baselineEntry) {
-      const rawGrowth = totalReviewSum - baselineEntry.totalReviewSum;
-      if (rawGrowth >= 0) {
+      // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반 성장 계산
+      // 크롤링 시 제품 수가 달라지면 totalReviewSum도 변동하므로
+      // 제품당 평균 리뷰로 정규화 후 보수적(min) 제품 수에 곱해 성장 산출
+      const avgReviewToday = totalReviewSum / Math.max(1, items.length);
+      const avgReviewBaseline = baselineEntry.totalReviewSum / Math.max(1, baselineEntry.productCount);
+      const growthPerProduct = avgReviewToday - avgReviewBaseline;
+      const referenceCount = Math.min(items.length, baselineEntry.productCount);
+      const normalizedGrowth = Math.round(growthPerProduct * referenceCount);
+
+      if (normalizedGrowth >= 0) {
         // 경과일수로 나눠 일평균 증가분 산출
         reviewGrowth = daysSinceBaseline > 1
-          ? Math.round(rawGrowth / daysSinceBaseline)
-          : rawGrowth;
+          ? Math.round(normalizedGrowth / daysSinceBaseline)
+          : normalizedGrowth;
       }
       // 음수면 0 유지 (수집 편차)
       priceChange = (latest.avgPrice || 0) - baselineEntry.avgPrice;
