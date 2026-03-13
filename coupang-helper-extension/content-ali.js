@@ -11,7 +11,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.1.0';
+  const VER = '6.2.0';
 
   if (window.__SH_ALI_LOADED__) return;
   window.__SH_ALI_LOADED__ = true;
@@ -888,10 +888,12 @@
   }
 
   // ============================================================
-  //  스캔
+  //  스캔 — v6.2 anti-bot 최소화: 초기 1회 + 수동 새로고침
+  //  MutationObserver/setInterval 제거 → 알리 봇탐지 방지
   // ============================================================
   let lastSig = '';
-  let timer = null;
+  let scanCount = 0;
+  const MAX_AUTO_SCANS = 3; // 초기 자동 스캔 최대 횟수
 
   function doScan(force = false) {
     const items = parseAliProducts();
@@ -906,7 +908,8 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
-      console.log(`%c[SH-Ali] ✅ ${items.length}개 파싱 완료`, 'color:#16a34a;font-weight:bold;');
+      scanCount++;
+      console.log(`%c[SH-Ali] ✅ ${items.length}개 파싱 완료 (scan #${scanCount})`, 'color:#16a34a;font-weight:bold;');
     }
 
     if (!panel) createPanel();
@@ -917,29 +920,37 @@
     }
   }
 
-  // URL 변경 감지 (SPA)
+  // URL 변경 감지 (SPA) — 저빈도: 3초 간격, 1회만 스캔
   let lastUrl = location.href;
   function urlCheck() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       lastSig = '';
       allItems = [];
-      setTimeout(() => doScan(true), 500);
-      setTimeout(() => doScan(true), 1500);
-      setTimeout(() => doScan(true), 3000);
+      scanCount = 0;
+      // 페이지 전환 후 충분히 기다린 뒤 1회만 스캔
+      setTimeout(() => doScan(true), 2000);
     }
   }
 
-  window.addEventListener('popstate', () => setTimeout(urlCheck, 100));
-  setInterval(urlCheck, 800);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => doScan(true), 300); });
+  // 3초 간격으로 URL 체크 (기존 0.8초 → 3초)
+  setInterval(urlCheck, 3000);
 
-  const obs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(() => doScan(), 800); });
-  obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
-
-  // 초기 실행
-  doScan();
-  setTimeout(doScan, 800);
-  setTimeout(doScan, 2000);
-  setTimeout(doScan, 4000);
+  // 초기 실행: 페이지 로드 완료 후 1회 스캔, 실패 시 재시도 1회
+  function initialScan() {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(() => {
+        doScan(true);
+        // 상품이 없으면 3초 후 1회 재시도 (lazy-load 대응)
+        if (!allItems.length && scanCount < MAX_AUTO_SCANS) {
+          setTimeout(() => doScan(true), 3000);
+        }
+      }, 1500);
+    } else {
+      window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => doScan(true), 1500);
+      }, { once: true });
+    }
+  }
+  initialScan();
 })();
