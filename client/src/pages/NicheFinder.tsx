@@ -58,6 +58,8 @@ export default function NicheFinder() {
   const [manualInput, setManualInput] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [detailKeyword, setDetailKeyword] = useState<any>(null);
+  const [page, setPage] = useState(1);
+  const perPage = 30;
 
   // API calls
   const overview = trpc.keywordDiscovery.overview.useQuery();
@@ -68,8 +70,8 @@ export default function NicheFinder() {
     status: tab === "candidates" ? "pending" : tab === "validated" ? "validated" : "recommended",
     sortBy: "priority",
     sortDir: "desc",
-    page: 1,
-    perPage: 50,
+    page,
+    perPage,
   });
 
   const validationQueue = trpc.keywordDiscovery.getValidationQueue.useQuery({ limit: 20 });
@@ -129,6 +131,8 @@ export default function NicheFinder() {
   });
 
   const items = candidatesQuery.data?.items || [];
+  const totalPages = candidatesQuery.data?.totalPages || 1;
+  const totalItems = candidatesQuery.data?.total || 0;
   const isLoading = candidatesQuery.isLoading;
 
   function toggleSelect(id: number) {
@@ -238,7 +242,7 @@ export default function NicheFinder() {
           ] as const).map(t => (
             <button
               key={t.key}
-              onClick={() => { setTab(t.key); setSelectedIds([]); }}
+              onClick={() => { setTab(t.key); setSelectedIds([]); setPage(1); }}
               className={`px-4 py-2 rounded-t text-sm font-medium flex items-center gap-1.5 transition-colors ${
                 tab === t.key
                   ? "bg-primary text-primary-foreground"
@@ -259,7 +263,7 @@ export default function NicheFinder() {
             <Input
               placeholder="키워드 검색..."
               value={searchText}
-              onChange={e => setSearchText(e.target.value)}
+              onChange={e => { setSearchText(e.target.value); setPage(1); }}
               className="pl-9 h-9"
             />
           </div>
@@ -465,6 +469,56 @@ export default function NicheFinder() {
                 </Card>
               );
             })}
+          </div>
+        )}
+
+        {/* 페이지네이션 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+            >
+              이전
+            </Button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                let pageNum: number;
+                if (totalPages <= 7) {
+                  pageNum = i + 1;
+                } else if (page <= 4) {
+                  pageNum = i + 1;
+                } else if (page >= totalPages - 3) {
+                  pageNum = totalPages - 6 + i;
+                } else {
+                  pageNum = page - 3 + i;
+                }
+                return (
+                  <Button
+                    key={pageNum}
+                    size="sm"
+                    variant={pageNum === page ? "default" : "outline"}
+                    className="w-9 h-9"
+                    onClick={() => setPage(pageNum)}
+                  >
+                    {pageNum}
+                  </Button>
+                );
+              })}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            >
+              다음
+            </Button>
+            <span className="text-xs text-muted-foreground ml-2">
+              총 {formatNum(totalItems)}건
+            </span>
           </div>
         )}
 
