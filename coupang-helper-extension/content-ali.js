@@ -11,7 +11,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.1.0';
+  const VER = '6.2.0';
 
   if (window.__SH_ALI_LOADED__) return;
   window.__SH_ALI_LOADED__ = true;
@@ -888,16 +888,17 @@
   }
 
   // ============================================================
-  //  스캔
+  //  스캔 — v6.2: 봇 탐지 방지를 위해 최소한의 DOM 접근
+  //  페이지 완전 로딩 후 1회 스캔, 실패 시 1회 재시도
+  //  MutationObserver/visibilitychange 제거
   // ============================================================
   let lastSig = '';
-  let timer = null;
 
   function doScan(force = false) {
     const items = parseAliProducts();
     if (!items.length) {
       if (panel) renderPanel([]);
-      return;
+      return false;
     }
 
     const sig = items.map(i => i.productId).slice(0, 5).join(',');
@@ -915,31 +916,42 @@
     if (isNew) {
       renderPanel(items);
     }
+    return items.length > 0;
   }
 
-  // URL 변경 감지 (SPA)
+  // URL 변경 감지 (SPA) — 3초마다 체크, 변경 시 2초 딜레이 후 1회 스캔
   let lastUrl = location.href;
   function urlCheck() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       lastSig = '';
       allItems = [];
-      setTimeout(() => doScan(true), 500);
-      setTimeout(() => doScan(true), 1500);
-      setTimeout(() => doScan(true), 3000);
+      setTimeout(() => {
+        if (!doScan(true)) {
+          // 실패 시 3초 후 1회 재시도
+          setTimeout(() => doScan(true), 3000);
+        }
+      }, 2000);
     }
   }
 
-  window.addEventListener('popstate', () => setTimeout(urlCheck, 100));
-  setInterval(urlCheck, 800);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => doScan(true), 300); });
+  window.addEventListener('popstate', () => setTimeout(urlCheck, 500));
+  setInterval(urlCheck, 3000);
 
-  const obs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(() => doScan(), 800); });
-  obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  // ★ 초기 실행: 페이지 완전 로딩을 기다린 후 스캔
+  //   봇 탐지 회피를 위해 즉시 DOM 접근하지 않고 지연 실행
+  function initialScan() {
+    setTimeout(() => {
+      if (!doScan()) {
+        // 첫 시도 실패 시 3초 후 1회만 재시도
+        setTimeout(() => doScan(true), 3000);
+      }
+    }, 1500);
+  }
 
-  // 초기 실행
-  doScan();
-  setTimeout(doScan, 800);
-  setTimeout(doScan, 2000);
-  setTimeout(doScan, 4000);
+  if (document.readyState === 'complete') {
+    initialScan();
+  } else {
+    window.addEventListener('load', initialScan, { once: true });
+  }
 })();
