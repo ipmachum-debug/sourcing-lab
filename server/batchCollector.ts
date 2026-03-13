@@ -24,6 +24,13 @@ import {
   keywordMaster, keywordDailyMetrics,
 } from "../drizzle/schema";
 import { eq, and, desc, sql, gte, lt, asc, ne, isNull, lte, or } from "drizzle-orm";
+import {
+  computeBaseProductCount,
+  normalizeReviewSum as normalizeReviewSumFn,
+  isValidSnapshot as isValidSnapshotFn,
+  resolveReviewDelta as resolveReviewDeltaFn,
+  computeFallbackDeltas as computeFallbackDeltasFn,
+} from "./lib/reviewNormalization";
 
 /** Drizzle-ORM decimal/SUM 결과 → number 변환 */
 function N(v: any): number { return Number(v) || 0; }
@@ -110,6 +117,17 @@ export interface DailyAggregation {
   priceParseRate: number;
   ratingParseRate: number;
   reviewParseRate: number;
+  // ★ v7.5.0: 정규화 엔진 필드
+  baseProductCount: number;
+  normalizedReviewSum: number;
+  coverageRatio: number;
+  reviewDeltaObserved: number;
+  reviewDeltaUsed: number;
+  salesEstimateMa7: number;
+  salesEstimateMa30: number;
+  isProvisional: boolean;
+  provisionalReason: string | null;
+  dataStatus: string;
 }
 
 // ============================================================
@@ -446,55 +464,58 @@ export async function computeDailyAggregation(
   const reviewParseRate = totalItems ? Math.round(reviews.length / totalItems * 100) : 0;
   const dataQualityScore = Math.round((priceParseRate + ratingParseRate + reviewParseRate) / 3);
 
-  // ★ v7.4.0: 유효한 기준점(baseline) 기반 리뷰 증가 계산
-  // - 리뷰 파싱 실패(totalReviewSum=0 && totalItems>0)인 날은 기준점에서 제외
-  // - 유효한 첫 기준점부터 증가분만 계산
-  // - 중간에 파싱 실패한 날이 있으면 경과일수로 나눠 일평균 증가로 산출
-
-  // 최근 14일 이내 과거 데이터 조회 (유효한 기준점 찾기)
+  // ★ v7.5.0: 정규화 엔진 기반 리뷰 증가 계산
+  // 최근 30일 이내 과거 데이터 조회 (기준 상품수 + 기준점 찾기)
   const recentHistory = await db.select({
     statDate: extKeywordDailyStatus.statDate,
     totalReviewSum: extKeywordDailyStatus.totalReviewSum,
     totalItems: extKeywordDailyStatus.totalItems,
     reviewGrowth: extKeywordDailyStatus.reviewGrowth,
     avgPrice: extKeywordDailyStatus.avgPrice,
+    reviewDeltaUsed: extKeywordDailyStatus.reviewDeltaUsed,
+    estimatedDailySales: extKeywordDailyStatus.estimatedDailySales,
   })
     .from(extKeywordDailyStatus)
     .where(and(
       eq(extKeywordDailyStatus.userId, userId),
       eq(extKeywordDailyStatus.keyword, keyword),
       sql`${extKeywordDailyStatus.statDate} < ${statDate}`,
-      sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${statDate}, INTERVAL 14 DAY)`,
+      sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${statDate}, INTERVAL 30 DAY)`,
     ))
     .orderBy(desc(extKeywordDailyStatus.statDate))
-    .limit(14);
+    .limit(30);
 
-  /**
-   * 리뷰 데이터가 유효한지 판별:
-   * - totalReviewSum > 0 이어야 함
-   * - totalItems > 0인데 totalReviewSum = 0이면 파싱 실패로 판단
-   */
-  const isReviewDataValid = (reviewSum: number, items: number): boolean =>
-    reviewSum > 0 || items === 0;
+  // ★ v7.5.0: 기준 상품수 계산 (P70)
+  const recentProductCounts = recentHistory.map((e: any) => N(e.totalItems));
+  if (totalItems > 0) recentProductCounts.push(totalItems);
+  const { baseProductCount: computedBase } = computeBaseProductCount(recentProductCounts);
+  const effectiveBase = computedBase > 0 ? computedBase : totalItems;
 
-  // 오늘 데이터가 유효한지 확인
-  const todayReviewValid = isReviewDataValid(totalReviewSum, totalItems);
+  // 오늘 정규화
+  const todayNorm = normalizeReviewSumFn(totalReviewSum, totalItems, effectiveBase);
+  const todayValid = isValidSnapshotFn(totalItems, totalReviewSum, effectiveBase);
 
   // 유효한 가장 최근 기준점 찾기
-  let baselineEntry: { statDate: string; totalReviewSum: number; totalItems: number; avgPrice: number } | null = null;
+  let baselineEntry: {
+    statDate: string;
+    normalizedReviewSum: number;
+    avgPrice: number;
+    productCount: number;
+  } | null = null;
   let daysSinceBaseline = 0;
 
   for (const entry of recentHistory) {
-    const entryReviewSum = N(entry.totalReviewSum);
-    const entryItems = N(entry.totalItems);
-    if (isReviewDataValid(entryReviewSum, entryItems)) {
+    const rs = N(entry.totalReviewSum);
+    const pc = N(entry.totalItems);
+    const entryValid = isValidSnapshotFn(pc, rs, effectiveBase);
+    if (entryValid.valid && String(entry.statDate) !== statDate) {
+      const entryNorm = normalizeReviewSumFn(rs, pc, effectiveBase);
       baselineEntry = {
         statDate: String(entry.statDate),
-        totalReviewSum: entryReviewSum,
-        totalItems: entryItems,
+        normalizedReviewSum: entryNorm.normalizedReviewSum,
         avgPrice: N(entry.avgPrice),
+        productCount: pc,
       };
-      // 경과일수 계산
       const baseDate = new Date(baselineEntry.statDate + "T00:00:00");
       const currentDate = new Date(statDate + "T00:00:00");
       daysSinceBaseline = Math.max(1, Math.round(
@@ -504,42 +525,51 @@ export async function computeDailyAggregation(
     }
   }
 
+  // Fallback delta 계산
+  const recentPositiveDeltas = recentHistory
+    .map((e: any, i: number) => ({ delta: N(e.reviewDeltaUsed || e.reviewGrowth), daysAgo: i + 1 }))
+    .filter((d: any) => d.delta > 0);
+  const fallbackDeltas = computeFallbackDeltasFn(recentPositiveDeltas);
+
   let reviewGrowth = 0;
   let priceChange = 0;
   let itemCountChange = 0;
+  let reviewDeltaObserved = 0;
+  let reviewDeltaUsed = 0;
+  let isProvisional = false;
+  let provisionalReason: string | null = null;
+  let dataStatus = "raw_valid";
 
-  if (todayReviewValid && baselineEntry && baselineEntry.totalItems > 0) {
-    // ★ v7.6.0: 제품 수 변동 정규화 + 안전장치
-    const avgReviewToday = totalReviewSum / Math.max(1, totalItems);
-    const avgReviewBaseline = baselineEntry.totalReviewSum / Math.max(1, baselineEntry.totalItems);
-    const growthPerProduct = avgReviewToday - avgReviewBaseline;
-    const referenceCount = Math.min(totalItems, baselineEntry.totalItems);
-    const normalizedGrowth = Math.round(growthPerProduct * referenceCount);
+  if (todayValid.valid && baselineEntry) {
+    // ★ v7.5.0: 정규화 기준 delta 계산
+    const normalizedDelta = todayNorm.normalizedReviewSum - baselineEntry.normalizedReviewSum;
+    const dailyNormalizedDelta = daysSinceBaseline > 1
+      ? Math.round(normalizedDelta / daysSinceBaseline)
+      : normalizedDelta;
 
-    if (normalizedGrowth > 0) {
-      let dailyGrowth = daysSinceBaseline > 1
-        ? Math.round(normalizedGrowth / daysSinceBaseline)
-        : normalizedGrowth;
+    reviewDeltaObserved = dailyNormalizedDelta;
 
-      // ★ 안전장치 1: 상품수 변동 40% 초과 시 신뢰도 낮음 → 0
-      const prevPc = baselineEntry.totalItems;
-      if (prevPc > 0 && Math.abs(totalItems - prevPc) / prevPc > 0.4) {
-        dailyGrowth = 0;
-      }
-
-      // ★ 안전장치 2: 상품당 하루 리뷰 증가 상한 30개
-      const maxDailyGrowth = totalItems * 30;
-      if (dailyGrowth > maxDailyGrowth) {
-        dailyGrowth = 0;
-      }
-
-      reviewGrowth = dailyGrowth;
+    if (dailyNormalizedDelta >= 0) {
+      reviewGrowth = dailyNormalizedDelta;
+      reviewDeltaUsed = dailyNormalizedDelta;
+    } else {
+      // 음수 → fallback 평균 사용
+      const resolved = resolveReviewDeltaFn(dailyNormalizedDelta, fallbackDeltas);
+      reviewGrowth = resolved.reviewDeltaUsed;
+      reviewDeltaUsed = resolved.reviewDeltaUsed;
+      isProvisional = resolved.isProvisional;
+      provisionalReason = resolved.provisionalReason;
+      dataStatus = "provisional";
     }
-    // 음수면 0 유지 (수집 편차)
+
     priceChange = avgPrice - baselineEntry.avgPrice;
-  } else if (!todayReviewValid) {
-    // 오늘 리뷰 파싱 실패 → 증가 0 (잘못된 데이터로 계산하지 않음)
-    reviewGrowth = 0;
+  } else if (!todayValid.valid) {
+    // 비정상 데이터 → fallback
+    reviewGrowth = fallbackDeltas.last7Avg || 0;
+    reviewDeltaUsed = reviewGrowth;
+    isProvisional = true;
+    provisionalReason = todayValid.reason;
+    dataStatus = "anomaly";
   }
 
   // 전일 데이터로 상품수 변동 계산
@@ -619,6 +649,17 @@ export async function computeDailyAggregation(
     priceParseRate,
     ratingParseRate,
     reviewParseRate,
+    // ★ v7.5.0: 정규화 엔진 필드
+    baseProductCount: effectiveBase,
+    normalizedReviewSum: todayNorm.normalizedReviewSum,
+    coverageRatio: +(todayNorm.coverageRatio.toFixed(4)),
+    reviewDeltaObserved,
+    reviewDeltaUsed,
+    salesEstimateMa7: 0, // MA는 recomputeProvisionalEntries에서 계산
+    salesEstimateMa30: 0,
+    isProvisional,
+    provisionalReason,
+    dataStatus,
   };
 }
 
@@ -804,6 +845,17 @@ export async function runDailyBatch(
         priceParseRate: agg.priceParseRate,
         ratingParseRate: agg.ratingParseRate,
         reviewParseRate: agg.reviewParseRate,
+        // ★ v7.5.0: 정규화 엔진 필드
+        baseProductCount: agg.baseProductCount,
+        normalizedReviewSum: agg.normalizedReviewSum,
+        coverageRatio: String(agg.coverageRatio),
+        reviewDeltaObserved: agg.reviewDeltaObserved,
+        reviewDeltaUsed: agg.reviewDeltaUsed,
+        salesEstimateMa7: agg.salesEstimateMa7,
+        salesEstimateMa30: agg.salesEstimateMa30,
+        isProvisional: agg.isProvisional,
+        provisionalReason: agg.provisionalReason,
+        dataStatus: agg.dataStatus,
       };
 
       if (existing) {
@@ -834,7 +886,10 @@ export async function runDailyBatch(
         }
       }
 
-      // ★ v7.4.0: 7일 리뷰 증가 — 유효한 기준점 기반 계산
+      // ★ v7.5.0: UPSERT 완료 후 MA7/MA30 재계산 (실제 DB 값 기반)
+      await computeAndUpdateMA(userId, kw.keyword, today);
+
+      // ★ v7.5.0: 7일 리뷰 증가 — 정규화 엔진 기반 계산
       // 7일 전~14일 전 사이에서 리뷰가 정상 파싱된 가장 가까운 날 찾기
       const weekBaseline = await db.select({
         statDate: extKeywordDailyStatus.statDate,
@@ -852,35 +907,24 @@ export async function runDailyBatch(
         .limit(10);
 
       let reviewGrowth7d = 0;
-      // 유효한 기준점: totalReviewSum > 0 (파싱 성공)
+      // 유효한 기준점 찾기 (정규화 기반)
+      const effectiveBase7d = agg.baseProductCount > 0 ? agg.baseProductCount : agg.totalItems;
       const validWeekBase = weekBaseline.find(
-        e => N(e.totalReviewSum) > 0,
+        (e: any) => {
+          const v = isValidSnapshotFn(N(e.totalItems), N(e.totalReviewSum), effectiveBase7d);
+          return v.valid;
+        },
       );
-      if (validWeekBase && agg.totalReviewSum > 0) {
-        // ★ v7.6.0: 제품 수 변동 정규화 + 안전장치 (1d와 동일 기준)
-        const baseItems = N(validWeekBase.totalItems);
-        const avgReviewNow = agg.totalReviewSum / Math.max(1, agg.totalItems);
-        const avgReviewWeekBase = N(validWeekBase.totalReviewSum) / Math.max(1, baseItems);
-        const growthPerProduct7d = avgReviewNow - avgReviewWeekBase;
-        const refCount7d = Math.min(agg.totalItems, baseItems);
-        let rawGrowth7d = Math.max(0, Math.round(growthPerProduct7d * refCount7d));
+      if (validWeekBase && agg.totalReviewSum > 0 && effectiveBase7d > 0) {
+        // 정규화 기준 delta 계산
+        const baseNorm = normalizeReviewSumFn(N(validWeekBase.totalReviewSum), N(validWeekBase.totalItems), effectiveBase7d);
+        const todayNorm7d = normalizeReviewSumFn(agg.totalReviewSum, agg.totalItems, effectiveBase7d);
+        const rawGrowth7d = Math.max(0, todayNorm7d.normalizedReviewSum - baseNorm.normalizedReviewSum);
 
-        // ★ 안전장치 1: 상품수 변동 40% 초과 → 0
-        if (baseItems > 0 && Math.abs(agg.totalItems - baseItems) / baseItems > 0.4) {
-          rawGrowth7d = 0;
-        }
-
-        // 경과 일수 계산 (baseline이 정확히 7일 전이 아닐 수 있음)
+        // 경과 일수 계산
         const baseDateMs = new Date(String(validWeekBase.statDate) + "T00:00:00").getTime();
         const todayMs = new Date(today + "T00:00:00").getTime();
         const dayGap = Math.max(1, Math.round((todayMs - baseDateMs) / (24 * 60 * 60 * 1000)));
-
-        // ★ 안전장치 2: 상품당 하루 리뷰 증가 상한 30개 (일평균 기준)
-        const dailyAvg7d = Math.round(rawGrowth7d / dayGap);
-        const maxDailyGrowth = agg.totalItems * 30;
-        if (dailyAvg7d > maxDailyGrowth) {
-          rawGrowth7d = 0;
-        }
 
         reviewGrowth7d = rawGrowth7d;
       }
@@ -915,6 +959,15 @@ export async function runDailyBatch(
         })
         .where(eq(extWatchKeywords.id, kw.id));
 
+      // ★ v7.5.0: provisional 재보정 + MA 계산
+      // 오늘 데이터가 정상이면 과거 provisional 엔트리를 앵커 간 선형 보간으로 재보정
+      if (!agg.isProvisional) {
+        const recomputed = await recomputeProvisionalEntries(userId, kw.keyword, today);
+        if (recomputed > 0) {
+          console.log(`[runDailyBatch] "${kw.keyword}" provisional ${recomputed}건 재보정 완료`);
+        }
+      }
+
       // composite_score 재계산
       await recomputeCompositeScore(userId, kw.id);
 
@@ -937,6 +990,189 @@ export async function runDailyBatch(
   }
 
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
+}
+
+// ============================================================
+//  v7.5.0: Provisional 엔트리 재보정 (앵커 간 선형 보간)
+// ============================================================
+
+/**
+ * 오늘 정상 데이터가 들어왔을 때, 과거 provisional 엔트리를 재보정.
+ * 마지막 stable 앵커 ~ 오늘 사이를 선형 보간으로 채움.
+ */
+export async function recomputeProvisionalEntries(
+  userId: number,
+  keyword: string,
+  todayDate: string,
+): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  // 오늘 데이터 가져오기
+  const [todayEntry] = await db.select()
+    .from(extKeywordDailyStatus)
+    .where(and(
+      eq(extKeywordDailyStatus.userId, userId),
+      eq(extKeywordDailyStatus.keyword, keyword),
+      eq(extKeywordDailyStatus.statDate, todayDate),
+    ))
+    .limit(1);
+
+  if (!todayEntry || todayEntry.isProvisional) return 0;
+
+  // 최근 14일의 provisional 엔트리 찾기
+  const recentEntries = await db.select()
+    .from(extKeywordDailyStatus)
+    .where(and(
+      eq(extKeywordDailyStatus.userId, userId),
+      eq(extKeywordDailyStatus.keyword, keyword),
+      sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${todayDate}, INTERVAL 14 DAY)`,
+      sql`${extKeywordDailyStatus.statDate} < ${todayDate}`,
+    ))
+    .orderBy(asc(extKeywordDailyStatus.statDate));
+
+  // 마지막 stable 앵커 찾기 (provisional=false인 가장 최근 것)
+  let anchorIdx = -1;
+  for (let i = recentEntries.length - 1; i >= 0; i--) {
+    if (!recentEntries[i].isProvisional) {
+      anchorIdx = i;
+      break;
+    }
+  }
+
+  if (anchorIdx < 0) return 0; // 앵커 없으면 보간 불가
+
+  const anchor = recentEntries[anchorIdx];
+  const provisionalEntries = recentEntries.slice(anchorIdx + 1);
+  if (provisionalEntries.length === 0) return 0;
+
+  const anchorNorm = N(anchor.normalizedReviewSum);
+  const todayNorm = N(todayEntry.normalizedReviewSum);
+  const totalDays = provisionalEntries.length + 1; // anchor → today 사이 날짜 수
+  const totalDelta = todayNorm - anchorNorm;
+  const dailyDelta = totalDelta >= 0 ? Math.round(totalDelta / totalDays) : 0;
+
+  let updated = 0;
+  for (let i = 0; i < provisionalEntries.length; i++) {
+    const entry = provisionalEntries[i];
+    const dayIdx = i + 1;
+    const interpolatedNorm = Math.round(anchorNorm + dailyDelta * dayIdx);
+    const interpolatedSales = Math.max(0, dailyDelta * 20);
+
+    await db.update(extKeywordDailyStatus)
+      .set({
+        reviewGrowth: Math.max(0, dailyDelta),
+        normalizedReviewSum: interpolatedNorm,
+        estimatedDailySales: interpolatedSales,
+        reviewDeltaUsed: dailyDelta,
+        isProvisional: false,
+        provisionalReason: null,
+        dataStatus: "interpolated",
+      })
+      .where(eq(extKeywordDailyStatus.id, entry.id));
+    updated++;
+  }
+
+  return updated;
+}
+
+// ============================================================
+//  v7.5.0: MA7/MA30 이동평균 계산 및 업데이트
+// ============================================================
+
+/**
+ * 최근 7일/30일의 estimatedDailySales 이동평균을 계산하여
+ * ext_keyword_daily_status에 업데이트.
+ * db가 전달되면 그대로 사용, 없으면 getDb()로 획득.
+ */
+export async function computeAndUpdateMA(
+  dbOrUserId: any,
+  userIdOrKeyword: any,
+  keywordOrDate?: string,
+  targetDateArg?: string,
+): Promise<void> {
+  // 시그니처 호환: (db, userId, keyword, date) 또는 (userId, keyword, date)
+  let db: any;
+  let userId: number;
+  let keyword: string;
+  let targetDate: string;
+  if (typeof dbOrUserId === "number") {
+    // (userId, keyword, date) 형태
+    db = await getDb();
+    if (!db) return;
+    userId = dbOrUserId;
+    keyword = String(userIdOrKeyword);
+    targetDate = keywordOrDate!;
+  } else {
+    // (db, userId, keyword, date) 형태
+    db = dbOrUserId;
+    userId = Number(userIdOrKeyword);
+    keyword = keywordOrDate!;
+    targetDate = targetDateArg!;
+  }
+
+  try {
+    // 최근 30일 데이터 조회 (targetDate 포함)
+    const rows = await db.select({
+      id: extKeywordDailyStatus.id,
+      statDate: extKeywordDailyStatus.statDate,
+      estimatedDailySales: extKeywordDailyStatus.estimatedDailySales,
+    })
+      .from(extKeywordDailyStatus)
+      .where(and(
+        eq(extKeywordDailyStatus.userId, userId),
+        eq(extKeywordDailyStatus.keyword, keyword),
+        sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${targetDate}, INTERVAL 30 DAY)`,
+        sql`${extKeywordDailyStatus.statDate} <= ${targetDate}`,
+      ))
+      .orderBy(asc(extKeywordDailyStatus.statDate));
+
+    if (!rows.length) return;
+
+    // 날짜순 정렬된 판매추정 배열
+    const salesArr = rows.map((r: any) => ({
+      id: r.id,
+      statDate: String(r.statDate),
+      sales: N(r.estimatedDailySales),
+    }));
+
+    // 각 날짜별 MA7/MA30 계산 (최근 7일만 업데이트)
+    for (let i = 0; i < salesArr.length; i++) {
+      const targetDateObj = new Date(targetDate + "T00:00:00");
+      const entryDateObj = new Date(salesArr[i].statDate + "T00:00:00");
+      const daysDiff = Math.round(
+        (targetDateObj.getTime() - entryDateObj.getTime()) / (24 * 60 * 60 * 1000),
+      );
+      if (daysDiff > 7) continue;
+
+      // MA7: 현재 포함 최근 7개
+      const window7 = salesArr
+        .slice(Math.max(0, i - 6), i + 1)
+        .map((x: any) => x.sales)
+        .filter((s: number) => s > 0);
+      const ma7 = window7.length >= 2
+        ? Math.round(window7.reduce((a: number, b: number) => a + b, 0) / window7.length)
+        : window7.length === 1 ? window7[0] : 0;
+
+      // MA30: 현재 포함 최근 30개
+      const window30 = salesArr
+        .slice(Math.max(0, i - 29), i + 1)
+        .map((x: any) => x.sales)
+        .filter((s: number) => s > 0);
+      const ma30 = window30.length >= 2
+        ? Math.round(window30.reduce((a: number, b: number) => a + b, 0) / window30.length)
+        : window30.length === 1 ? window30[0] : 0;
+
+      await db.update(extKeywordDailyStatus)
+        .set({
+          salesEstimateMa7: ma7,
+          salesEstimateMa30: ma30,
+        })
+        .where(eq(extKeywordDailyStatus.id, salesArr[i].id));
+    }
+  } catch (err) {
+    console.error("[computeAndUpdateMA]", err);
+  }
 }
 
 // ============================================================

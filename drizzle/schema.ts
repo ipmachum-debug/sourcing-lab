@@ -534,6 +534,21 @@ export const extKeywordDailyStats = mysqlTable("ext_keyword_daily_stats", {
   salesEstimate: int("sales_estimate").default(0),                    // 추정 판매량 = reviewGrowth × 20
   priceChange: int("price_change").default(0),                        // 평균가 변동 (전일 대비)
   productCountChange: int("product_count_change").default(0),         // 상품수 변동
+  // ★ v7.6.0: 정규화 + 판매추정 + 이동평균 (단일 truth 테이블)
+  baseProductCount: int("base_product_count").default(0),             // 기준 상품수 (P70)
+  normalizedReviewSum: int("normalized_review_sum").default(0),       // 상품수 보정 리뷰합
+  coverageRatio: decimal("coverage_ratio", { precision: 6, scale: 4 }).default("0"),
+  reviewDeltaObserved: int("review_delta_observed").default(0),       // 원시 관측 delta
+  reviewDeltaUsed: int("review_delta_used").default(0),               // 실제 사용된 delta
+  salesEstimateMa7: int("sales_estimate_ma7").default(0),             // 7일 이동평균 판매추정
+  salesEstimateMa30: int("sales_estimate_ma30").default(0),           // 30일 이동평균 판매추정
+  isProvisional: boolean("is_provisional").default(false),            // 임시 보간값 여부
+  isFinalized: boolean("is_finalized").default(false),                // 확정값 여부
+  provisionalReason: varchar("provisional_reason", { length: 50 }),   // provisional 사유
+  dataStatus: varchar("data_status", { length: 30 }).default("raw_valid"), // raw_valid/interpolated/provisional/anomaly/missing
+  spikeRatio: decimal("spike_ratio", { precision: 8, scale: 2 }).default("0"),
+  spikeLevel: varchar("spike_level", { length: 20 }).default("normal"), // normal/rising/surging/explosive
+  anchorPrevDate: varchar("anchor_prev_date", { length: 10 }),        // 이전 정상 앵커 날짜
   // 검색 수요 추정 스코어
   demandScore: int("demand_score").default(0),                        // 검색 수요 점수 0~100
   keywordScore: int("keyword_score").default(0),                      // 종합 키워드 점수 (HiddenScore)
@@ -787,6 +802,17 @@ export const extKeywordDailyStatus = mysqlTable("ext_keyword_daily_status", {
   reviewParseRate: int("review_parse_rate").default(0),
   // 상위 상품 스냅샷
   topProductsJson: text("top_products_json"),
+  // ★ v7.5.0: 상품수 정규화 + 음수 보정 + 이동평균
+  baseProductCount: int("base_product_count").default(0),
+  normalizedReviewSum: int("normalized_review_sum").default(0),
+  coverageRatio: decimal("coverage_ratio", { precision: 6, scale: 4 }).default("0"),
+  reviewDeltaObserved: int("review_delta_observed").default(0),
+  reviewDeltaUsed: int("review_delta_used").default(0),
+  salesEstimateMa7: int("sales_estimate_ma7").default(0),
+  salesEstimateMa30: int("sales_estimate_ma30").default(0),
+  isProvisional: boolean("is_provisional").default(false),
+  provisionalReason: varchar("provisional_reason", { length: 50 }),
+  dataStatus: varchar("data_status", { length: 30 }).default("raw_valid"),
   // 타임스탬프
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),

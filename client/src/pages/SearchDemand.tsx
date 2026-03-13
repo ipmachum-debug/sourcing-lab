@@ -15,69 +15,12 @@ import {
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Legend,
+  BarChart, Bar, AreaChart, Area, Legend, ComposedChart,
 } from "recharts";
 
 function formatPrice(n: number | null | undefined) {
   if (n === null || n === undefined) return "-";
   return n.toLocaleString("ko-KR") + "원";
-}
-
-/**
- * 일별 데이터 보간 — 크롤링 날짜 사이 빈 날을 채우고 평균으로 분산
- * 예: 03-11(+100) → 03-13(+60) → 03-11(+80), 03-12(+80), 03-13(+80) (3일 평균)
- */
-function interpolateDailyData(rawData: any[]): any[] {
-  if (!rawData || rawData.length === 0) return [];
-  if (rawData.length === 1) return rawData;
-
-  const sorted = [...rawData].sort((a, b) => a.statDate.localeCompare(b.statDate));
-  const result: any[] = [];
-
-  for (let i = 0; i < sorted.length; i++) {
-    const curr = sorted[i];
-    if (i === 0) {
-      result.push(curr);
-      continue;
-    }
-
-    const prev = sorted[i - 1];
-    const prevDate = new Date(prev.statDate + "T00:00:00+09:00");
-    const currDate = new Date(curr.statDate + "T00:00:00+09:00");
-    const dayGap = Math.round((currDate.getTime() - prevDate.getTime()) / 86400000);
-
-    if (dayGap <= 1) {
-      result.push(curr);
-      continue;
-    }
-
-    // 갭이 있으면 보간: 현재 데이터의 growth를 갭 일수로 분산
-    const dailyGrowth = Math.round((Number(curr.reviewGrowth) || 0) / dayGap);
-    const dailySales = Math.round((Number(curr.salesEstimate) || 0) / dayGap);
-
-    // 중간 날짜들을 보간값으로 채움
-    for (let d = 1; d < dayGap; d++) {
-      const fillDate = new Date(prevDate);
-      fillDate.setDate(fillDate.getDate() + d);
-      const fillDateStr = fillDate.toISOString().slice(0, 10);
-      result.push({
-        ...curr,
-        statDate: fillDateStr,
-        reviewGrowth: dailyGrowth,
-        salesEstimate: dailySales,
-        _interpolated: true,
-      });
-    }
-
-    // 현재 날짜도 분산값으로 교체
-    result.push({
-      ...curr,
-      reviewGrowth: dailyGrowth,
-      salesEstimate: dailySales,
-    });
-  }
-
-  return result;
 }
 
 export default function SearchDemand() {
@@ -111,6 +54,24 @@ export default function SearchDemand() {
 
   // ===== Mutations =====
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
+  const rebuildDailyStats = trpc.extension.rebuildDailyStats.useMutation();
+  const rebuildNormalized = trpc.extension.rebuildNormalizedMetrics.useMutation();
+
+  const handleRebuildNormalized = useCallback(async () => {
+    try {
+      toast.info("정규화 재계산 시작...");
+      const [r1, r2] = await Promise.all([
+        rebuildNormalized.mutateAsync({ days: demandDays }),
+        rebuildDailyStats.mutateAsync({ days: demandDays }),
+      ]);
+      toast.success(`재계산 완료: ${r1.rebuilt + r2.rebuilt}건 (${r1.keywords + r2.keywords}개 키워드)`);
+      keywordStatsList.refetch();
+      keywordStatsOverview.refetch();
+      if (demandSelectedKw) keywordDailyStats.refetch();
+    } catch (err: any) {
+      toast.error(`재계산 오류: ${err.message}`);
+    }
+  }, [demandDays, demandSelectedKw]);
 
   const handleAutoStats = useCallback(async () => {
     if (statsRunning) return;
@@ -193,11 +154,18 @@ export default function SearchDemand() {
           </div>
           <div className="flex items-center gap-2">
             {!statsRunning ? (
-              <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
-                onClick={handleAutoStats}>
-                <Zap className="w-3 h-3" />
-                통계 계산
-              </Button>
+              <>
+                <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5"
+                  onClick={handleAutoStats}>
+                  <Zap className="w-3 h-3" />
+                  통계 계산
+                </Button>
+                <Button size="sm" variant="outline" className="text-xs gap-1.5 border-purple-300 text-purple-600 hover:bg-purple-50"
+                  onClick={handleRebuildNormalized}
+                  disabled={rebuildNormalized.isPending || rebuildDailyStats.isPending}>
+                  {rebuildNormalized.isPending ? "재계산중..." : "정규화 재계산"}
+                </Button>
+              </>
             ) : (
               <Button size="sm" variant="destructive" className="text-xs gap-1.5"
                 onClick={handleStopStats}>
@@ -377,6 +345,12 @@ export default function SearchDemand() {
                             productCount: kw.productCount,
                             avgPrice: kw.avgPrice,
                             categoryHint: kw.categoryHint,
+                            salesEstimateMa7: kw.salesEstimateMa7,
+                            salesEstimateMa30: kw.salesEstimateMa30,
+                            dataStatus: kw.dataStatus,
+                            isFinalized: kw.isFinalized,
+                            spikeLevel: kw.spikeLevel,
+                            spikeRatio: kw.spikeRatio ? Number(kw.spikeRatio) : undefined,
                           });
                           return (
                             <tr key={kw.id}
@@ -402,11 +376,20 @@ export default function SearchDemand() {
                               <td className="p-2 text-center">
                                 <div className="flex flex-col items-center">
                                   <span className="font-bold text-blue-600">{cal.correctedSalesEst.toLocaleString()}</span>
-                                  <Badge className={`text-[7px] px-1 py-0 border mt-0.5 ${
-                                    cal.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
-                                    cal.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                                    "bg-red-50 text-red-700 border-red-200"
-                                  }`}>{cal.surgeLabel}</Badge>
+                                  <div className="flex items-center gap-0.5 mt-0.5">
+                                    <Badge className={`text-[7px] px-1 py-0 border ${
+                                      cal.estimateType === "ma7" ? "bg-blue-50 text-blue-600 border-blue-200" :
+                                      cal.estimateType === "provisional" ? "bg-amber-50 text-amber-600 border-amber-200" :
+                                      "bg-gray-50 text-gray-500 border-gray-200"
+                                    }`}>{cal.estimateLabel}</Badge>
+                                    {cal.spikeLabel && (
+                                      <Badge className={`text-[7px] px-1 py-0 border ${
+                                        cal.spikeLabel === "폭발적" ? "bg-red-100 text-red-700 border-red-300 animate-pulse" :
+                                        cal.spikeLabel === "급등" ? "bg-orange-100 text-orange-700 border-orange-300" :
+                                        "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                      }`}>{cal.spikeLabel}</Badge>
+                                    )}
+                                  </div>
                                 </div>
                               </td>
                               <td className="p-2 text-center">
@@ -466,41 +449,35 @@ export default function SearchDemand() {
                       <Activity className="w-4 h-4 text-orange-500" />
                       "{demandSelectedKw}" 추이
                     </CardTitle>
-                    <div className="flex gap-1 mt-1">
-                      {[7, 14, 30, 60].map(d => (
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {[7, 14, 30, 60, 90, 180, 365].map(d => (
                         <button key={d} className={`px-2 py-0.5 text-[10px] rounded-full ${demandDays === d ? "bg-orange-600 text-white" : "bg-gray-100"}`}
-                          onClick={() => setDemandDays(d)}>{d}일</button>
+                          onClick={() => setDemandDays(d)}>{d <= 60 ? `${d}일` : d === 90 ? "3개월" : d === 180 ? "6개월" : "1년"}</button>
                       ))}
                     </div>
                   </CardHeader>
                   <CardContent className="pt-3">
                     {keywordDailyStats.data && keywordDailyStats.data.length > 1 ? (() => {
-                      const chartData = interpolateDailyData(keywordDailyStats.data as any[]);
+                      // ★ v7.7.3: baseline/missing 제외한 차트 데이터
+                      const chartData = (keywordDailyStats.data as any[]).filter(
+                        (d: any) => d.dataStatus !== "baseline" && d.dataStatus !== "missing"
+                      );
                       return (
                       <div className="space-y-4">
-                        {/* 리뷰 증가 + 판매 추정 그래프 (곡선 + 날짜별 분산) */}
+                        {/* 판매 추정 MA7/MA30 그래프 */}
                         <div>
-                          <div className="text-[10px] font-semibold text-gray-500 mb-1">리뷰 증가 / 판매 추정 (일평균)</div>
-                          <ResponsiveContainer width="100%" height={160}>
-                            <AreaChart data={chartData}>
-                              <defs>
-                                <linearGradient id="gradReview" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
-                                </linearGradient>
-                                <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                                </linearGradient>
-                              </defs>
+                          <div className="text-[10px] font-semibold text-gray-500 mb-1">판매 추정 (7일 이동평균)</div>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <ComposedChart data={chartData}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                               <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
                               <YAxis tick={{ fontSize: 9 }} />
                               <Tooltip contentStyle={{ fontSize: 11 }} />
                               <Legend wrapperStyle={{ fontSize: 10 }} />
-                              <Area type="monotone" dataKey="reviewGrowth" stroke="#16a34a" fill="url(#gradReview)" strokeWidth={2} name="리뷰 증가" dot={{ r: 2 }} />
-                              <Area type="monotone" dataKey="salesEstimate" stroke="#2563eb" fill="url(#gradSales)" strokeWidth={2} name="판매 추정" dot={{ r: 2 }} />
-                            </AreaChart>
+                              <Bar dataKey="reviewGrowth" fill="#86efac" name="리뷰 증가" radius={[3, 3, 0, 0]} />
+                              <Area type="monotone" dataKey="salesEstimateMa7" fill="#dbeafe" stroke="#2563eb" strokeWidth={2} name="판매추정(MA7)" fillOpacity={0.4} />
+                              <Line type="monotone" dataKey="salesEstimateMa30" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" name="MA30" dot={false} />
+                            </ComposedChart>
                           </ResponsiveContainer>
                         </div>
 
@@ -553,24 +530,36 @@ export default function SearchDemand() {
                       <CardTitle className="text-xs font-semibold">일별 상세 데이터</CardTitle>
                     </CardHeader>
                     <CardContent className="p-0">
-                      <div className="max-h-48 overflow-y-auto">
+                      <div className="max-h-64 overflow-y-auto">
                         <table className="w-full text-[10px]">
                           <thead className="sticky top-0 bg-white"><tr className="border-b text-gray-500">
                             <th className="p-1.5">날짜</th><th className="p-1.5">상품</th><th className="p-1.5">평균가</th>
-                            <th className="p-1.5">리뷰+</th><th className="p-1.5">판매</th><th className="p-1.5">경쟁</th><th className="p-1.5">수요</th>
+                            <th className="p-1.5">리뷰+</th><th className="p-1.5">판매</th><th className="p-1.5">MA7</th><th className="p-1.5">상태</th>
                           </tr></thead>
                           <tbody>
-                            {(keywordDailyStats.data as any[]).slice().reverse().map((d: any, i: number) => {
-                              const dayCal = calibrateSales({ reviewDelta: d.reviewGrowth || 0 });
+                            {(keywordDailyStats.data as any[]).slice().reverse()
+                              .filter((d: any) => d.dataStatus !== "missing")
+                              .map((d: any, i: number) => {
+                              const isBaseline = d.dataStatus === "baseline";
+                              const statusColor = d.dataStatus === "raw_valid" ? "text-green-600" :
+                                d.dataStatus === "interpolated" ? "text-blue-500" :
+                                d.dataStatus === "provisional" ? "text-amber-500" :
+                                d.dataStatus === "anomaly" ? "text-red-500" :
+                                isBaseline ? "text-purple-500" : "text-gray-400";
+                              const statusLabel = d.dataStatus === "raw_valid" ? "확정" :
+                                d.dataStatus === "interpolated" ? "보간" :
+                                d.dataStatus === "provisional" ? "임시" :
+                                d.dataStatus === "anomaly" ? "이상" :
+                                isBaseline ? "기준" : "-";
                               return (
-                                <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                                <tr key={i} className={`border-b border-gray-50 hover:bg-gray-50 ${d.dataStatus === "provisional" ? "bg-amber-50/30" : ""} ${isBaseline ? "bg-purple-50/30" : ""}`}>
                                   <td className="p-1.5 text-gray-500">{d.statDate?.slice(5)}</td>
                                   <td className="p-1.5 text-center">{d.productCount}</td>
                                   <td className="p-1.5 text-center">{formatPrice(d.avgPrice)}</td>
-                                  <td className="p-1.5 text-center font-medium text-green-600">{d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
-                                  <td className="p-1.5 text-center font-medium text-blue-600">{dayCal.correctedSalesEst || 0}</td>
-                                  <td className="p-1.5 text-center">{d.competitionScore}</td>
-                                  <td className="p-1.5 text-center font-bold text-orange-600">{d.demandScore}</td>
+                                  <td className="p-1.5 text-center font-medium text-green-600">{isBaseline ? "-" : d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
+                                  <td className="p-1.5 text-center font-medium text-blue-600">{isBaseline ? "-" : d.salesEstimate || 0}</td>
+                                  <td className="p-1.5 text-center font-bold text-indigo-600">{d.salesEstimateMa7 || "-"}</td>
+                                  <td className={`p-1.5 text-center font-medium ${statusColor}`}>{statusLabel}</td>
                                 </tr>
                               );
                             })}
@@ -596,11 +585,12 @@ export default function SearchDemand() {
               <CardContent className="pt-3 pb-3">
                 <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준</div>
                 <div className="space-y-1.5 text-[10px] text-gray-500">
-                  <div><span className="font-medium text-orange-600">수요점수</span>: 리뷰 증가량 기반 (증가량 × 카테고리별 전환율)</div>
-                  <div><span className="font-medium text-purple-600">종합점수</span>: 리뷰증가×0.5 + 상품당리뷰×30 + (1-광고비율)×20</div>
-                  <div><span className="font-medium text-green-600">판매추정</span>: base × (1 + alpha × 수요지수) · 카테고리별 보정 적용</div>
+                  <div><span className="font-medium text-orange-600">수요점수</span>: MA7(7일이동평균) 기반 판매추정으로 산출</div>
+                  <div><span className="font-medium text-purple-600">종합점수</span>: MA7 리뷰증가 + 상품당리뷰 + 경쟁도 + 수요 복합</div>
+                  <div><span className="font-medium text-green-600">판매추정</span>: MA7 우선 → 기본(리뷰증가 × 전환율) fallback</div>
                   <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수·평점·광고비율 종합 (0=블루오션, 100=레드오션)</div>
-                  <div><span className="font-medium text-indigo-600">보정배지</span>: 실수요/프로모의심/선행트렌드/안정/기본추정</div>
+                  <div><span className="font-medium text-blue-600">MA7</span>=7일평균(안정) · <span className="font-medium text-amber-600">임시추정</span>=데이터 확정 대기 · <span className="font-medium text-gray-500">일간추정</span>=MA7 편차 3x↑ · <span className="font-medium text-gray-500">기본추정</span>=MA 없음</div>
+                  <div><span className="font-medium text-red-500">급등뱃지</span>: today/MA7 비율 — 상승(1.8x) · 급등(2.5x) · 폭발적(4x)</div>
                 </div>
               </CardContent>
             </Card>
