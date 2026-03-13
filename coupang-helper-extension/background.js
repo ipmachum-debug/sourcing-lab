@@ -37,6 +37,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
   // 하이브리드 일일 배치 알람 (매 24시간마다)
   chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
+  // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
+  chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -48,9 +50,14 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v7.4.1 — human-behavior delay + anti-bot evasion`);
+    console.log(`[SH] Extension ${details.reason}d — v8.1.0 — AI 자동 발견 + 시장 데이터 + CPC`);
   }
 });
+
+// v8.1: 서비스 워커 시작 시 10초 후 자동 폴링 체크 (알람 대기 없이 즉시)
+setTimeout(() => {
+  discoveryAutoCheck().catch(() => {});
+}, 10000);
 
 // ---- v5.3: SPA 재주입 제거 ----
 // content.js가 자체적으로 setInterval + popstate + MutationObserver로 URL 변경 감지
@@ -72,7 +79,35 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'dailyBatchCollection') {
     await autoRunDailyBatch();
   }
+  // v8.1: AI 제품 발견 자동 폴링
+  if (alarm.name === 'discoveryPolling') {
+    await discoveryAutoCheck();
+  }
 });
+
+// v8.1: 자동 발견 폴링 — pending 작업이 있으면 자동으로 크롤링 시작
+async function discoveryAutoCheck() {
+  try {
+    // 이미 실행 중이면 스킵
+    if (discoveryState.running) return;
+    
+    // 로그인 상태 확인
+    const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+    if (!serverLoggedIn) return;
+    
+    // 서버에 pending 작업 확인
+    const resp = await apiClient.discoveryGetPendingJobs();
+    const jobs = resp?.result?.data || [];
+    
+    if (jobs.length > 0) {
+      console.log(`[Discovery] 🔍 자동 폴링: ${jobs.length}개 대기 작업 발견 → 크롤링 시작`);
+      startDiscoveryCrawl();
+    }
+  } catch (err) {
+    // 폴링 에러는 조용히 무시 (서버 연결 끊김 등)
+    console.warn('[Discovery] 자동 폴링 체크 실패:', err.message);
+  }
+}
 
 // ---- 메시지 핸들러 ----
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
