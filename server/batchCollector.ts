@@ -508,21 +508,32 @@ export async function computeDailyAggregation(
   let priceChange = 0;
   let itemCountChange = 0;
 
-  if (todayReviewValid && baselineEntry) {
-    // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반 성장 계산
-    // 크롤링 시 제품 수가 달라지면 totalReviewSum도 변동하므로
-    // 제품당 평균 리뷰로 정규화 후 보수적(min) 제품 수에 곱해 성장 산출
+  if (todayReviewValid && baselineEntry && baselineEntry.totalItems > 0) {
+    // ★ v7.6.0: 제품 수 변동 정규화 + 안전장치
     const avgReviewToday = totalReviewSum / Math.max(1, totalItems);
     const avgReviewBaseline = baselineEntry.totalReviewSum / Math.max(1, baselineEntry.totalItems);
     const growthPerProduct = avgReviewToday - avgReviewBaseline;
     const referenceCount = Math.min(totalItems, baselineEntry.totalItems);
     const normalizedGrowth = Math.round(growthPerProduct * referenceCount);
 
-    if (normalizedGrowth >= 0) {
-      // 경과일수로 나눠 일평균 증가분 산출
-      reviewGrowth = daysSinceBaseline > 1
+    if (normalizedGrowth > 0) {
+      let dailyGrowth = daysSinceBaseline > 1
         ? Math.round(normalizedGrowth / daysSinceBaseline)
         : normalizedGrowth;
+
+      // ★ 안전장치 1: 상품수 변동 40% 초과 시 신뢰도 낮음 → 0
+      const prevPc = baselineEntry.totalItems;
+      if (prevPc > 0 && Math.abs(totalItems - prevPc) / prevPc > 0.4) {
+        dailyGrowth = 0;
+      }
+
+      // ★ 안전장치 2: 상품당 하루 리뷰 증가 상한 30개
+      const maxDailyGrowth = totalItems * 30;
+      if (dailyGrowth > maxDailyGrowth) {
+        dailyGrowth = 0;
+      }
+
+      reviewGrowth = dailyGrowth;
     }
     // 음수면 0 유지 (수집 편차)
     priceChange = avgPrice - baselineEntry.avgPrice;
