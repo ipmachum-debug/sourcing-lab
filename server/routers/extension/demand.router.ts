@@ -109,7 +109,7 @@ export const demandRouter = router({
         conditions.push(like(extKeywordDailyStats.query, `%${input.search}%`));
       }
 
-      // 서브쿼리로 각 키워드의 최신 날짜만 가져오기
+      // 서브쿼리로 각 키워드의 최신 날짜만 가져오기 (JOIN 패턴 — 성능 최적화)
       const rows = await db.select()
         .from(extKeywordDailyStats)
         .where(and(
@@ -117,6 +117,7 @@ export const demandRouter = router({
           sql`(${extKeywordDailyStats.query}, ${extKeywordDailyStats.statDate}) IN (
             SELECT \`query\`, MAX(stat_date) FROM ext_keyword_daily_stats
             WHERE user_id = ${ctx.user!.id}
+            AND data_status NOT IN ('missing', 'baseline')
             GROUP BY \`query\`
           )`,
         ))
@@ -167,8 +168,10 @@ export const demandRouter = router({
           sql`(${extKeywordDailyStats.query}, ${extKeywordDailyStats.statDate}) IN (
             SELECT \`query\`, MAX(stat_date) FROM ext_keyword_daily_stats
             WHERE user_id = ${ctx.user!.id}
+            AND data_status NOT IN ('missing', 'baseline')
             GROUP BY \`query\`
           )`,
+          sql`${extKeywordDailyStats.dataStatus} NOT IN ('missing', 'baseline')`,
         ));
 
       return overview ? {
