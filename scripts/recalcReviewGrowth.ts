@@ -96,18 +96,18 @@ async function main() {
         const raw = reviewSum - prevSum;
         const gap = Math.max(1, Math.round((new Date(r.stat_date).getTime() - new Date(prevDate).getTime()) / 86400000));
         
-        // 상품 수 변동 체크: 20% 이상 변동이면 상품 set 변동으로 판단
+        // 상품 수 변동 체크: 40% 이상 변동이면 상품 set 변동으로 판단
         const pcChangeRatio = prevPc > 0 ? Math.abs(pc - prevPc) / prevPc : 0;
         
         if (raw <= 0) {
           g = 0;
-        } else if (pcChangeRatio > 0.2) {
+        } else if (pcChangeRatio > 0.4) {
           // 상품 set 대폭 변동 → growth 신뢰 불가
           g = 0;
         } else {
           const daily = raw / gap;
-          // 상품당 하루 최대 20개 리뷰 증가 상한 (현실적 한계)
-          const maxDailyGrowth = pc * 20;
+          // 상품당 하루 최대 30개 리뷰 증가 상한 (현실적 한계)
+          const maxDailyGrowth = pc * 30;
           if (daily > maxDailyGrowth) {
             g = 0; // 비현실적 증가 → 상품 set 변동
           } else {
