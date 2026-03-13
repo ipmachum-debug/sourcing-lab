@@ -5,7 +5,6 @@ import { calibrateSales } from "@/lib/salesCalibration";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -14,1069 +13,588 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Search, Gem, TrendingUp, AlertTriangle, Sparkles,
-  Filter, Star, Loader2, Lightbulb, Plus,
-  AlertCircle, Zap, ThumbsUp, ThumbsDown, Brain,
-  Eye, EyeOff, Flame, Target, BarChart3, Trash2,
-  Database, RefreshCw, Settings, Wand2, Download,
+  Search, Gem, TrendingUp, Sparkles, Loader2, Plus,
+  AlertCircle, Zap, ThumbsUp, ThumbsDown, Eye, Trash2,
+  RefreshCw, CheckCircle, XCircle, Clock, Star, ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
-function formatPrice(n: number | null | undefined) {
-  if (n === null || n === undefined) return "-";
-  return n.toLocaleString("ko-KR") + "원";
+type MainTab = "candidates" | "validated" | "recommended";
+
+function formatNum(n: number | null | undefined) {
+  if (n === null || n === undefined || n === 0) return "-";
+  return n.toLocaleString("ko-KR");
 }
 
-type SortKey = "opportunity" | "demand_score" | "sales_estimate" | "competition_score" | "avg_price";
-type MainTab = "opportunity" | "discovery" | "data_mgmt";
-type DiscoveryTab = "trending" | "blue_ocean" | "hidden" | "high_margin" | "overheated";
-
-function calcOpportunityScore(kw: any): number {
-  const demand = Number(kw.demandScore) || 0;
-  const competition = Number(kw.competitionScore) || 0;
-  const sales = Number(kw.salesEstimate) || 0;
-  const reviewGrowth = Number(kw.reviewGrowth) || 0;
-  const adRatio = Number(kw.adRatio) || 0;
-  let score = demand * 0.3;
-  score += (100 - competition) * 0.25;
-  score += Math.min(30, Math.log10(sales + 1) * 15);
-  score += Math.min(15, reviewGrowth * 0.5);
-  if (adRatio < 0.15) score += 5;
-  return Math.round(Math.min(100, Math.max(0, score)));
+function gradeColor(score: number): string {
+  if (score >= 80) return "text-yellow-500";
+  if (score >= 60) return "text-green-500";
+  if (score >= 40) return "text-blue-500";
+  if (score >= 20) return "text-gray-500";
+  return "text-red-400";
 }
 
-function getOpportunityGrade(score: number): { label: string; color: string; emoji: string } {
-  if (score >= 70) return { label: "블루오션", emoji: "💎", color: "text-blue-600 bg-blue-50 border-blue-200" };
-  if (score >= 55) return { label: "유망", emoji: "🌟", color: "text-green-600 bg-green-50 border-green-200" };
-  if (score >= 40) return { label: "보통", emoji: "📊", color: "text-amber-600 bg-amber-50 border-amber-200" };
-  if (score >= 25) return { label: "경쟁적", emoji: "⚔️", color: "text-orange-600 bg-orange-50 border-orange-200" };
-  return { label: "레드오션", emoji: "🔴", color: "text-red-600 bg-red-50 border-red-200" };
+function gradeBadge(score: number): string {
+  if (score >= 80) return "S";
+  if (score >= 60) return "A";
+  if (score >= 40) return "B";
+  if (score >= 20) return "C";
+  return "D";
 }
 
-function getGradeInfo(grade: string) {
-  switch (grade) {
-    case "S": return { color: "text-purple-700 bg-purple-50 border-purple-200", label: "S" };
-    case "A": return { color: "text-blue-700 bg-blue-50 border-blue-200", label: "A" };
-    case "B": return { color: "text-green-700 bg-green-50 border-green-200", label: "B" };
-    case "C": return { color: "text-amber-700 bg-amber-50 border-amber-200", label: "C" };
-    default: return { color: "text-gray-700 bg-gray-50 border-gray-200", label: "D" };
+function statusBadge(status: string) {
+  switch (status) {
+    case "pending": return <Badge variant="outline" className="text-xs"><Clock className="w-3 h-3 mr-1" />대기</Badge>;
+    case "validated": return <Badge className="bg-green-600 text-xs"><CheckCircle className="w-3 h-3 mr-1" />검증됨</Badge>;
+    case "rejected": return <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />탈락</Badge>;
+    case "recommended": return <Badge className="bg-purple-600 text-xs"><Star className="w-3 h-3 mr-1" />추천</Badge>;
+    default: return <Badge variant="outline" className="text-xs">{status}</Badge>;
   }
 }
 
 export default function NicheFinder() {
-  const [mainTab, setMainTab] = useState<MainTab>("opportunity");
-  const [minDemand, setMinDemand] = useState(20);
-  const [maxCompetition, setMaxCompetition] = useState(70);
-  const [minSales, setMinSales] = useState(0);
-  const [sortBy, setSortBy] = useState<SortKey>("opportunity");
-  const [priceRange, setPriceRange] = useState<"all" | "low" | "mid" | "high">("all");
-
-  // 키워드 디스커버리 탭
-  const [discoveryTab, setDiscoveryTab] = useState<DiscoveryTab>("trending");
-  const [seedInput, setSeedInput] = useState("");
+  const [tab, setTab] = useState<MainTab>("candidates");
+  const [searchText, setSearchText] = useState("");
   const [manualInput, setManualInput] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [detailKeyword, setDetailKeyword] = useState<any>(null);
 
-  // AI 리포트 모달
-  const [reportQuery, setReportQuery] = useState<string | null>(null);
-  const [reportOpen, setReportOpen] = useState(false);
+  // API calls
+  const overview = trpc.keywordDiscovery.overview.useQuery();
+  const naverConfig = trpc.keywordDiscovery.checkNaverApiConfig.useQuery();
 
-  const reviewAnalysis = trpc.extension.getReviewAnalysis.useQuery(
-    { query: reportQuery!, limit: 1 },
-    { enabled: !!reportQuery },
-  );
-
-  const analyzeMut = trpc.extension.analyzeReviews.useMutation({
-    onSuccess: () => {
-      reviewAnalysis.refetch();
-      toast.success("AI 분석 완료");
-    },
-    onError: e => toast.error(e.message),
+  const candidatesQuery = trpc.keywordDiscovery.listCandidates.useQuery({
+    search: searchText,
+    status: tab === "candidates" ? "pending" : tab === "validated" ? "validated" : "recommended",
+    sortBy: "priority",
+    sortDir: "desc",
+    page: 1,
+    perPage: 50,
   });
 
-  const openReport = (query: string) => {
-    setReportQuery(query);
-    setReportOpen(true);
-  };
+  const validationQueue = trpc.keywordDiscovery.getValidationQueue.useQuery({ limit: 20 });
 
-  // 기존 키워드 통계 (기회 분석 탭)
-  const keywordStatsList = trpc.extension.listKeywordStats.useQuery(
-    { sortBy: "demand_score", sortDir: "desc", limit: 500 },
-  );
-
-  // 키워드 디스커버리 API
-  const discoveryOverview = trpc.keywordDiscovery.overview.useQuery(
-    undefined,
-    { enabled: mainTab === "discovery" },
-  );
-
-  const discoveryList = trpc.keywordDiscovery.getDiscoveryList.useQuery(
-    { tab: discoveryTab, limit: 30 },
-    { enabled: mainTab === "discovery" },
-  );
-
-  const naverApiConfig = trpc.keywordDiscovery.checkNaverApiConfig.useQuery(
-    undefined,
-    { enabled: mainTab === "discovery" },
-  );
-
-  const expandNaverMut = trpc.keywordDiscovery.expandFromNaver.useMutation({
-    onSuccess: res => {
-      toast.success(`${res.inserted}개 키워드 추가됨 (중복 ${res.skipped}개)`);
-      discoveryOverview.refetch();
-      discoveryList.refetch();
-      setSeedInput("");
+  const validateMutation = trpc.keywordDiscovery.validateWithNaver.useMutation({
+    onSuccess: data => {
+      toast.success(`검증 완료: ${data.validated}건 통과, ${data.rejected}건 탈락, ${data.recommendedInserted}건 추천`);
+      candidatesQuery.refetch();
+      overview.refetch();
+      validationQueue.refetch();
+      setSelectedIds([]);
     },
-    onError: e => toast.error(e.message),
+    onError: err => toast.error(`검증 실패: ${err.message}`),
   });
 
-  const addManualMut = trpc.keywordDiscovery.addManualKeywords.useMutation({
-    onSuccess: res => {
-      toast.success(`${res.inserted}개 키워드 추가됨`);
-      discoveryOverview.refetch();
-      discoveryList.refetch();
+  const addManualMutation = trpc.keywordDiscovery.addManualKeywords.useMutation({
+    onSuccess: data => {
+      toast.success(`${data.inserted}건 등록 완료`);
       setManualInput("");
+      candidatesQuery.refetch();
+      overview.refetch();
     },
-    onError: e => toast.error(e.message),
+    onError: err => toast.error(`등록 실패: ${err.message}`),
   });
 
-  const scoreMut = trpc.keywordDiscovery.scoreKeywords.useMutation({
-    onSuccess: res => {
-      toast.success(`${res.scored}개 키워드 점수 계산 완료`);
-      discoveryList.refetch();
-    },
-    onError: e => toast.error(e.message),
-  });
-
-  const deleteMut = trpc.keywordDiscovery.deleteKeywords.useMutation({
+  const acceptMutation = trpc.keywordDiscovery.acceptRecommendation.useMutation({
     onSuccess: () => {
-      discoveryList.refetch();
-      discoveryOverview.refetch();
+      toast.success("추천 키워드를 후보로 전환했습니다");
+      candidatesQuery.refetch();
+      overview.refetch();
+      setSelectedIds([]);
     },
   });
 
-  // 데이터 관리 API
-  const dbStats = trpc.keywordDiscovery.dbStats.useQuery(
-    undefined,
-    { enabled: mainTab === "data_mgmt" },
-  );
-
-  const autoCleanupMut = trpc.keywordDiscovery.autoCleanup.useMutation({
-    onSuccess: res => {
-      toast.success(`정리 완료: 지표 ${res.deletedMetrics}개, 키워드 ${res.deletedKeywords}개 삭제`);
-      dbStats.refetch();
-      discoveryOverview.refetch();
+  const promoteMutation = trpc.keywordDiscovery.promoteToWatch.useMutation({
+    onSuccess: data => {
+      toast.success(`${data.promoted}건 감시 목록에 추가`);
+      setSelectedIds([]);
     },
-    onError: e => toast.error(e.message),
   });
 
-  const autoExpandMut = trpc.keywordDiscovery.autoExpandExtensionKeywords.useMutation({
-    onSuccess: res => {
-      toast.success(`${res.message} (추가 ${res.inserted}개 / 중복 ${res.skipped}개)`);
-      dbStats.refetch();
-      discoveryOverview.refetch();
-      discoveryList.refetch();
+  const deleteMutation = trpc.keywordDiscovery.deleteKeywords.useMutation({
+    onSuccess: () => {
+      toast.success("삭제 완료");
+      candidatesQuery.refetch();
+      overview.refetch();
+      setSelectedIds([]);
     },
-    onError: e => toast.error(e.message),
   });
 
-  const bulkRefreshMut = trpc.keywordDiscovery.bulkRefreshNaverData.useMutation({
-    onSuccess: res => {
-      toast.success(`${res.refreshed}/${res.total}개 키워드 네이버 데이터 갱신 완료`);
-      dbStats.refetch();
-      discoveryList.refetch();
+  const cleanExpiredMutation = trpc.keywordDiscovery.cleanExpiredRecommendations.useMutation({
+    onSuccess: data => {
+      toast.success(`만료된 추천 ${data.deleted}건 정리 완료`);
+      candidatesQuery.refetch();
+      overview.refetch();
     },
-    onError: e => toast.error(e.message),
   });
 
-  // 기회 분석 계산
-  const opportunities = useMemo(() => {
-    if (!keywordStatsList.data) return [];
-    return (keywordStatsList.data as any[])
-      .map(kw => ({ ...kw, opportunityScore: calcOpportunityScore(kw) }))
-      .filter(kw => {
-        if ((kw.demandScore || 0) < minDemand) return false;
-        if ((kw.competitionScore || 0) > maxCompetition) return false;
-        if ((kw.salesEstimate || 0) < minSales) return false;
-        if (priceRange === "low" && (kw.avgPrice || 0) > 15000) return false;
-        if (priceRange === "mid" && ((kw.avgPrice || 0) < 15000 || (kw.avgPrice || 0) > 50000)) return false;
-        if (priceRange === "high" && (kw.avgPrice || 0) < 50000) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        switch (sortBy) {
-          case "opportunity": return b.opportunityScore - a.opportunityScore;
-          case "demand_score": return (b.demandScore || 0) - (a.demandScore || 0);
-          case "sales_estimate": return (b.salesEstimate || 0) - (a.salesEstimate || 0);
-          case "competition_score": return (a.competitionScore || 0) - (b.competitionScore || 0);
-          case "avg_price": return (b.avgPrice || 0) - (a.avgPrice || 0);
-          default: return 0;
-        }
-      });
-  }, [keywordStatsList.data, minDemand, maxCompetition, minSales, sortBy, priceRange]);
+  const items = candidatesQuery.data?.items || [];
+  const isLoading = candidatesQuery.isLoading;
 
-  const topBlueOcean = opportunities.filter(o => o.opportunityScore >= 70).length;
-  const topPromising = opportunities.filter(o => o.opportunityScore >= 55 && o.opportunityScore < 70).length;
+  function toggleSelect(id: number) {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
+    );
+  }
 
-  const handleExpandNaver = () => {
-    const seeds = seedInput.split(",").map(s => s.trim()).filter(Boolean);
-    if (!seeds.length) return toast.error("키워드를 입력하세요");
-    expandNaverMut.mutate({ seeds });
-  };
+  function selectAll() {
+    if (selectedIds.length === items.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(items.map(i => i.id));
+    }
+  }
 
-  const handleAddManual = () => {
-    const keywords = manualInput.split(",").map(s => s.trim()).filter(Boolean);
-    if (!keywords.length) return toast.error("키워드를 입력하세요");
-    addManualMut.mutate({ keywords });
-  };
+  function handleAddManual() {
+    const keywords = manualInput.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    if (!keywords.length) return;
+    addManualMutation.mutate({ keywords });
+  }
+
+  function handleValidateSelected() {
+    if (!selectedIds.length) {
+      toast.error("검증할 키워드를 선택하세요");
+      return;
+    }
+    validateMutation.mutate({ keywordIds: selectedIds });
+  }
+
+  function handleValidateQueue() {
+    const queueIds = validationQueue.data?.map(k => k.id) || [];
+    if (!queueIds.length) {
+      toast.error("검증 대기 중인 키워드가 없습니다");
+      return;
+    }
+    validateMutation.mutate({ keywordIds: queueIds.slice(0, 20) });
+  }
+
+  const stats = overview.data;
 
   return (
     <DashboardLayout>
-      <div className="space-y-4 max-w-[1400px] mx-auto">
+      <div className="space-y-4">
         {/* 헤더 */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <Gem className="w-6 h-6 text-blue-500" /> 니치 파인더
-            </h2>
-            <p className="text-xs text-gray-500 mt-1">아이템 채굴 알고리즘 7종 · 블루오션 / 숨은아이템 / 트렌드 자동 발굴</p>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Gem className="w-6 h-6 text-purple-500" />
+              니치파인더
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              쿠팡 후보 키워드 → 네이버 검증 → 추천 관리
+            </p>
           </div>
-          <Button variant="outline" size="sm" className="text-xs gap-1"
-            onClick={() => {
-              keywordStatsList.refetch();
-              discoveryList.refetch();
-              discoveryOverview.refetch();
-              toast.success("데이터 갱신됨");
-            }}>
-            <Sparkles className="w-3 h-3" /> 새로고침
-          </Button>
+
+          {/* 네이버 API 상태 */}
+          {naverConfig.data && (
+            <Badge variant={naverConfig.data.configured ? "default" : "destructive"} className="text-xs">
+              {naverConfig.data.configured ? "네이버 API 연결됨" : "네이버 API 미설정"}
+            </Badge>
+          )}
         </div>
 
-        {/* 메인 탭 */}
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          <button
-            className={`flex-1 py-2 px-3 rounded-md text-xs font-medium transition ${mainTab === "opportunity" ? "bg-white shadow text-indigo-700" : "text-gray-500 hover:text-gray-700"}`}
-            onClick={() => setMainTab("opportunity")}
-          >
-            <Target className="w-3.5 h-3.5 inline mr-1" /> 기회 분석 (익스텐션)
-          </button>
-          <button
-            className={`flex-1 py-2 px-3 rounded-md text-xs font-medium transition ${mainTab === "discovery" ? "bg-white shadow text-purple-700" : "text-gray-500 hover:text-gray-700"}`}
-            onClick={() => setMainTab("discovery")}
-          >
-            <Search className="w-3.5 h-3.5 inline mr-1" /> 키워드 채굴 (네이버+쿠팡)
-          </button>
-          <button
-            className={`flex-1 py-2 px-3 rounded-md text-xs font-medium transition ${mainTab === "data_mgmt" ? "bg-white shadow text-orange-700" : "text-gray-500 hover:text-gray-700"}`}
-            onClick={() => setMainTab("data_mgmt")}
-          >
-            <Database className="w-3.5 h-3.5 inline mr-1" /> 데이터 관리
-          </button>
+        {/* 요약 카드 */}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <Card className="cursor-pointer hover:border-primary" onClick={() => setTab("candidates")}>
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold">{stats.totalKeywords}</div>
+                <div className="text-xs text-muted-foreground">전체</div>
+              </CardContent>
+            </Card>
+            <Card className="cursor-pointer hover:border-primary" onClick={() => setTab("candidates")}>
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-yellow-500">{stats.pendingCount}</div>
+                <div className="text-xs text-muted-foreground">대기중</div>
+              </CardContent>
+            </Card>
+            <Card className="cursor-pointer hover:border-primary" onClick={() => setTab("validated")}>
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-green-500">{stats.validatedCount}</div>
+                <div className="text-xs text-muted-foreground">검증됨</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-red-400">{stats.rejectedCount}</div>
+                <div className="text-xs text-muted-foreground">탈락</div>
+              </CardContent>
+            </Card>
+            <Card className="cursor-pointer hover:border-primary" onClick={() => setTab("recommended")}>
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-purple-500">{stats.recommendedCount}</div>
+                <div className="text-xs text-muted-foreground">추천</div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* 탭 */}
+        <div className="flex gap-2 border-b pb-2">
+          {([
+            { key: "candidates", label: "후보 (대기)", icon: Clock },
+            { key: "validated", label: "검증 완료", icon: CheckCircle },
+            { key: "recommended", label: "추천 키워드", icon: Star },
+          ] as const).map(t => (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); setSelectedIds([]); }}
+              className={`px-4 py-2 rounded-t text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                tab === t.key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <t.icon className="w-4 h-4" />
+              {t.label}
+            </button>
+          ))}
         </div>
 
-        {/* ======== 기회 분석 탭 (기존) ======== */}
-        {mainTab === "opportunity" && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card><CardContent className="pt-3 pb-3 text-center">
-                <div className="text-2xl font-bold text-indigo-600">{keywordStatsList.data?.length || 0}</div>
-                <div className="text-[10px] text-gray-500">전체 키워드</div>
-              </CardContent></Card>
-              <Card><CardContent className="pt-3 pb-3 text-center">
-                <div className="text-2xl font-bold text-green-600">{opportunities.length}</div>
-                <div className="text-[10px] text-gray-500">필터 통과</div>
-              </CardContent></Card>
-              <Card className="border-blue-200 bg-blue-50/30"><CardContent className="pt-3 pb-3 text-center">
-                <div className="text-2xl font-bold text-blue-600">{topBlueOcean}</div>
-                <div className="text-[10px] text-gray-500">블루오션</div>
-              </CardContent></Card>
-              <Card className="border-green-200 bg-green-50/30"><CardContent className="pt-3 pb-3 text-center">
-                <div className="text-2xl font-bold text-emerald-600">{topPromising}</div>
-                <div className="text-[10px] text-gray-500">유망</div>
-              </CardContent></Card>
+        {/* 액션 바 */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 검색 */}
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="키워드 검색..."
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              className="pl-9 h-9"
+            />
+          </div>
+
+          {/* 수동 추가 */}
+          {tab === "candidates" && (
+            <div className="flex items-center gap-1">
+              <Input
+                placeholder="키워드 직접 추가 (콤마 구분)"
+                value={manualInput}
+                onChange={e => setManualInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAddManual()}
+                className="h-9 w-60"
+              />
+              <Button size="sm" variant="outline" onClick={handleAddManual} disabled={addManualMutation.isPending}>
+                <Plus className="w-3.5 h-3.5 mr-1" />추가
+              </Button>
             </div>
+          )}
 
-            <Card>
-              <CardContent className="pt-3 pb-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-1">
-                    <Filter className="w-3 h-3 text-gray-400" />
-                    <span className="text-[10px] font-semibold text-gray-500">필터:</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-gray-500">수요 ≥</span>
-                    <Input type="number" value={minDemand} onChange={e => setMinDemand(Number(e.target.value))}
-                      className="h-7 w-16 text-xs text-center" />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-gray-500">경쟁 ≤</span>
-                    <Input type="number" value={maxCompetition} onChange={e => setMaxCompetition(Number(e.target.value))}
-                      className="h-7 w-16 text-xs text-center" />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-gray-500">판매 ≥</span>
-                    <Input type="number" value={minSales} onChange={e => setMinSales(Number(e.target.value))}
-                      className="h-7 w-16 text-xs text-center" />
-                  </div>
-                  <Select value={priceRange} onValueChange={v => setPriceRange(v as any)}>
-                    <SelectTrigger className="h-7 w-28 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">전체 가격</SelectItem>
-                      <SelectItem value="low">~1.5만원</SelectItem>
-                      <SelectItem value="mid">1.5~5만원</SelectItem>
-                      <SelectItem value="high">5만원~</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="flex gap-1 text-[10px]">
-                    {([
-                      ["opportunity", "기회점수"],
-                      ["demand_score", "수요"],
-                      ["sales_estimate", "판매"],
-                      ["competition_score", "경쟁(낮은순)"],
-                      ["avg_price", "가격"],
-                    ] as const).map(([key, label]) => (
-                      <button key={key}
-                        className={`px-2 py-1 rounded-full transition ${sortBy === key ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                        onClick={() => setSortBy(key)}>{label}</button>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {!opportunities.length ? (
-              <Card className="border-dashed">
-                <CardContent className="py-16 text-center text-gray-400">
-                  <Search className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm font-medium">조건에 맞는 키워드가 없습니다</p>
-                  <p className="text-[10px] mt-1">필터 조건을 완화하거나 더 많은 키워드를 수집하세요</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {opportunities.slice(0, 30).map((kw, i) => {
-                  const grade = getOpportunityGrade(kw.opportunityScore);
-                  const cal = calibrateSales({
-                    reviewDelta: kw.reviewGrowth || 0,
-                    productCount: kw.productCount,
-                    avgPrice: kw.avgPrice,
-                    categoryHint: kw.categoryHint,
-                  });
-                  return (
-                    <Card key={kw.id || i} className={`hover:shadow-md transition-shadow ${i < 3 ? "border-blue-200 ring-1 ring-blue-100" : ""}`}>
-                      <CardContent className="pt-4 pb-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-bold text-sm text-indigo-700 truncate">
-                              {i < 3 && <span className="text-amber-500 mr-1">#{i + 1}</span>}
-                              "{kw.query}"
-                            </div>
-                          </div>
-                          <Badge className={`text-[9px] shrink-0 ml-2 border ${grade.color}`}>
-                            {grade.emoji} {grade.label}
-                          </Badge>
-                        </div>
-                        <div className="mb-3">
-                          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                            <span>기회 점수</span>
-                            <span className="font-bold text-blue-600">{kw.opportunityScore}</span>
-                          </div>
-                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                kw.opportunityScore >= 70 ? "bg-blue-500" :
-                                kw.opportunityScore >= 55 ? "bg-green-500" :
-                                kw.opportunityScore >= 40 ? "bg-amber-500" : "bg-red-400"
-                              }`}
-                              style={{ width: `${kw.opportunityScore}%` }}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-center">
-                          <div className="bg-gray-50 rounded-lg py-1.5 px-1">
-                            <div className="text-[9px] text-gray-400">수요</div>
-                            <div className={`text-xs font-bold ${(kw.demandScore || 0) >= 50 ? "text-green-600" : "text-gray-600"}`}>{kw.demandScore || 0}</div>
-                          </div>
-                          <div className="bg-gray-50 rounded-lg py-1.5 px-1">
-                            <div className="text-[9px] text-gray-400">경쟁</div>
-                            <div className={`text-xs font-bold ${(kw.competitionScore || 0) <= 40 ? "text-green-600" : (kw.competitionScore || 0) <= 60 ? "text-amber-600" : "text-red-600"}`}>{kw.competitionScore || 0}</div>
-                          </div>
-                          <div className="bg-gray-50 rounded-lg py-1.5 px-1">
-                            <div className="text-[9px] text-gray-400">판매추정</div>
-                            <div className="text-xs font-bold text-blue-600">{cal.correctedSalesEst.toLocaleString()}</div>
-                          </div>
-                        </div>
-                        {/* 보정 신뢰도 */}
-                        <div className="flex items-center justify-between mt-2 bg-gradient-to-r from-indigo-50 to-blue-50 rounded px-2 py-1">
-                          <div className="flex items-center gap-1">
-                            <span className="text-[9px] text-gray-400">보정:</span>
-                            <span className="text-[9px] text-gray-400 line-through">{cal.baseSalesEst.toLocaleString()}</span>
-                            <span className="text-[10px] font-bold text-indigo-700">{cal.correctedSalesEst.toLocaleString()}</span>
-                          </div>
-                          <Badge className={`text-[8px] border ${
-                            cal.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
-                            cal.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                            "bg-red-50 text-red-700 border-red-200"
-                          }`}>
-                            {cal.surgeLabel}
-                          </Badge>
-                        </div>
-                        <div className="flex justify-between items-center mt-2 text-[10px] text-gray-500">
-                          <span>상품수: {kw.productCount || 0}</span>
-                          <span>평균가: {formatPrice(kw.avgPrice)}</span>
-                          <span>리뷰+: <span className="text-green-600 font-medium">{kw.reviewGrowth > 0 ? `+${kw.reviewGrowth}` : "0"}</span></span>
-                          <button
-                            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 hover:bg-purple-100 transition text-[9px] font-medium"
-                            onClick={() => openReport(kw.query)}
-                          >
-                            <Brain className="w-3 h-3" /> AI
-                          </button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-            {opportunities.length > 30 && (
-              <p className="text-center text-[10px] text-gray-400">
-                상위 30개 표시 중 (전체 {opportunities.length}개)
-              </p>
-            )}
-          </>
-        )}
-
-        {/* ======== 키워드 채굴 탭 (신규) ======== */}
-        {mainTab === "discovery" && (
-          <>
-            {/* 요약 + 키워드 수집 영역 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              {/* 요약 카드 */}
-              <Card>
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-[10px] text-gray-500 mb-1 font-semibold">키워드 DB</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-indigo-600">{discoveryOverview.data?.totalKeywords || 0}</div>
-                      <div className="text-[9px] text-gray-400">전체</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-blue-600">{discoveryOverview.data?.naverCount || 0}</div>
-                      <div className="text-[9px] text-gray-400">네이버</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-green-600">{discoveryOverview.data?.extensionCount || 0}</div>
-                      <div className="text-[9px] text-gray-400">익스텐션</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-gray-600">{discoveryOverview.data?.manualCount || 0}</div>
-                      <div className="text-[9px] text-gray-400">수동</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* 네이버 키워드 확장 */}
-              <Card>
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-[10px] text-gray-500 mb-2 font-semibold flex items-center gap-1">
-                    <Search className="w-3 h-3" /> 네이버 키워드 확장
-                    {naverApiConfig.data?.configured ? (
-                      <Badge className="text-[8px] bg-green-50 text-green-600 border-green-200">연동됨</Badge>
-                    ) : (
-                      <Badge className="text-[8px] bg-red-50 text-red-600 border-red-200">미설정</Badge>
-                    )}
-                  </div>
-                  <div className="flex gap-1">
-                    <Input
-                      value={seedInput}
-                      onChange={e => setSeedInput(e.target.value)}
-                      placeholder="시드 키워드 (쉼표 구분)"
-                      className="h-8 text-xs"
-                      onKeyDown={e => e.key === "Enter" && handleExpandNaver()}
-                    />
-                    <Button
-                      size="sm"
-                      className="h-8 text-xs gap-1 shrink-0"
-                      disabled={expandNaverMut.isPending || !naverApiConfig.data?.configured}
-                      onClick={handleExpandNaver}
-                    >
-                      {expandNaverMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                      확장
-                    </Button>
-                  </div>
-                  <p className="text-[9px] text-gray-400 mt-1">예: 차량용, 수납, 캠핑 → 연관키워드 자동 수집</p>
-                </CardContent>
-              </Card>
-
-              {/* 수동 키워드 추가 */}
-              <Card>
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-[10px] text-gray-500 mb-2 font-semibold flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> 수동 키워드 추가
-                  </div>
-                  <div className="flex gap-1">
-                    <Input
-                      value={manualInput}
-                      onChange={e => setManualInput(e.target.value)}
-                      placeholder="키워드 입력 (쉼표 구분)"
-                      className="h-8 text-xs"
-                      onKeyDown={e => e.key === "Enter" && handleAddManual()}
-                    />
-                    <Button
-                      size="sm"
-                      className="h-8 text-xs gap-1 shrink-0"
-                      disabled={addManualMut.isPending}
-                      onClick={handleAddManual}
-                    >
-                      {addManualMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                      추가
-                    </Button>
-                  </div>
-                  <div className="flex gap-1 mt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[10px] gap-1"
-                      disabled={scoreMut.isPending}
-                      onClick={() => scoreMut.mutate({})}
-                    >
-                      {scoreMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
-                      전체 점수 계산
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* 디스커버리 서브탭 */}
-            <div className="flex gap-1 text-[10px] flex-wrap">
-              {([
-                ["trending", "급상승", TrendingUp, "text-red-600"],
-                ["blue_ocean", "블루오션", Gem, "text-blue-600"],
-                ["hidden", "숨은아이템", EyeOff, "text-purple-600"],
-                ["high_margin", "마진좋음", Star, "text-green-600"],
-                ["overheated", "과열시장", Flame, "text-orange-600"],
-              ] as const).map(([key, label, Icon, iconColor]) => (
-                <button key={key}
-                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full transition ${discoveryTab === key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                  onClick={() => setDiscoveryTab(key as DiscoveryTab)}
-                >
-                  <Icon className={`w-3 h-3 ${discoveryTab === key ? "text-white" : iconColor}`} />
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* 디스커버리 결과 */}
-            {discoveryList.isLoading ? (
-              <div className="flex items-center justify-center py-12 text-gray-400">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" /> 분석 중...
-              </div>
-            ) : !discoveryList.data?.length ? (
-              <Card className="border-dashed">
-                <CardContent className="py-12 text-center text-gray-400">
-                  <Search className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm font-medium">
-                    {discoveryOverview.data?.totalKeywords
-                      ? "해당 카테고리에 키워드가 없습니다"
-                      : "키워드를 수집해보세요"}
-                  </p>
-                  <p className="text-[10px] mt-1">
-                    네이버 키워드 확장 또는 수동 추가로 키워드를 등록하세요
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {(discoveryList.data as any[]).map((item: any, i: number) => {
-                  const scores = item.scores || {};
-                  const metrics = item.metrics || {};
-                  const gradeInfo = getGradeInfo(scores.grade || "D");
-                  const tags: string[] = scores.tags || [];
-
-                  return (
-                    <Card key={item.id} className={`hover:shadow-md transition-shadow ${i < 3 ? "border-purple-200 ring-1 ring-purple-100" : ""}`}>
-                      <CardContent className="pt-4 pb-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-bold text-sm text-indigo-700 truncate">
-                              {i < 3 && <span className="text-purple-500 mr-1">#{i + 1}</span>}
-                              "{item.keyword}"
-                            </div>
-                            <div className="flex gap-1 mt-1 flex-wrap">
-                              {tags.map(tag => (
-                                <span key={tag} className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{tag}</span>
-                              ))}
-                              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{item.sourceType}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
-                            <Badge className={`text-[9px] border ${gradeInfo.color}`}>
-                              {gradeInfo.label}등급
-                            </Badge>
-                            <button
-                              className="text-gray-300 hover:text-red-400 transition"
-                              onClick={() => deleteMut.mutate({ ids: [item.id] })}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 종합 점수 바 */}
-                        <div className="mb-3">
-                          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                            <span>종합 점수</span>
-                            <span className="font-bold text-purple-600">{Math.round(scores.finalScore || 0)}</span>
-                          </div>
-                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                (scores.finalScore || 0) >= 70 ? "bg-purple-500" :
-                                (scores.finalScore || 0) >= 50 ? "bg-blue-500" :
-                                (scores.finalScore || 0) >= 30 ? "bg-amber-500" : "bg-gray-400"
-                              }`}
-                              style={{ width: `${Math.min(100, scores.finalScore || 0)}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* 알고리즘 점수 그리드 */}
-                        <div className="grid grid-cols-4 gap-1 text-center mb-2">
-                          <div className="bg-gray-50 rounded py-1">
-                            <div className="text-[8px] text-gray-400">시장갭</div>
-                            <div className="text-[10px] font-bold text-blue-600">{Math.round(scores.marketGapScore || 0)}</div>
-                          </div>
-                          <div className="bg-gray-50 rounded py-1">
-                            <div className="text-[8px] text-gray-400">판매속도</div>
-                            <div className="text-[10px] font-bold text-green-600">{Math.round(scores.salesVelocityScore || 0)}</div>
-                          </div>
-                          <div className="bg-gray-50 rounded py-1">
-                            <div className="text-[8px] text-gray-400">트렌드</div>
-                            <div className="text-[10px] font-bold text-red-600">{Math.round(scores.trendSpikeScore || 0)}</div>
-                          </div>
-                          <div className="bg-gray-50 rounded py-1">
-                            <div className="text-[8px] text-gray-400">숨은</div>
-                            <div className="text-[10px] font-bold text-purple-600">{Math.round(scores.hiddenItemScore || 0)}</div>
-                          </div>
-                        </div>
-
-                        {/* 판매추정 보정 */}
-                        {scores.calibration && (
-                          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded p-2 mb-2">
-                            <div className="flex items-center justify-between text-[10px] mb-1">
-                              <span className="text-gray-500">판매추정 (보정)</span>
-                              <Badge className={`text-[8px] border ${
-                                scores.calibration.confidence === "high" ? "bg-green-50 text-green-700 border-green-200" :
-                                scores.calibration.confidence === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                                "bg-red-50 text-red-700 border-red-200"
-                              }`}>
-                                {scores.calibration.surgeLabel}
-                              </Badge>
-                            </div>
-                            <div className="flex items-baseline gap-2">
-                              <span className="text-[9px] text-gray-400 line-through">{scores.calibration.baseSalesEst.toLocaleString()}</span>
-                              <span className="text-sm font-bold text-indigo-700">{scores.calibration.correctedSalesEst.toLocaleString()}</span>
-                              <span className="text-[9px] text-gray-400">건/월</span>
-                            </div>
-                            <div className="text-[8px] text-gray-400 mt-0.5">
-                              수요지수 {scores.calibration.naverDemandIndex} | alpha {scores.calibration.categoryAlpha}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* 네이버 검색량 */}
-                        <div className="flex justify-between text-[10px] text-gray-500">
-                          <span>검색량: <span className="font-medium text-gray-700">{(metrics.naverTotalSearch || 0).toLocaleString()}</span></span>
-                          <span>상품수: <span className="font-medium">{(metrics.coupangProductCount || 0).toLocaleString()}</span></span>
-                          <span>경쟁: <span className={`font-medium ${metrics.naverCompetitionIndex === "높음" ? "text-red-600" : metrics.naverCompetitionIndex === "중간" ? "text-amber-600" : "text-green-600"}`}>
-                            {metrics.naverCompetitionIndex || "-"}</span></span>
-                          <button
-                            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 hover:bg-purple-100 transition text-[9px] font-medium"
-                            onClick={() => openReport(item.keyword)}
-                          >
-                            <Brain className="w-3 h-3" /> AI
-                          </button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-        {/* ======== 데이터 관리 탭 (신규) ======== */}
-        {mainTab === "data_mgmt" && (
-          <>
-            {/* DB 통계 요약 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card>
-                <CardContent className="pt-3 pb-3 text-center">
-                  <div className="text-2xl font-bold text-indigo-600">{dbStats.data?.keywordMaster.total || 0}</div>
-                  <div className="text-[10px] text-gray-500">키워드 마스터</div>
-                  <div className="flex justify-center gap-2 mt-1 text-[9px] text-gray-400">
-                    <span>네이버 {dbStats.data?.keywordMaster.naverCount || 0}</span>
-                    <span>익스텐션 {dbStats.data?.keywordMaster.extensionCount || 0}</span>
-                    <span>수동 {dbStats.data?.keywordMaster.manualCount || 0}</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-3 pb-3 text-center">
-                  <div className="text-2xl font-bold text-blue-600">{dbStats.data?.dailyMetrics.total || 0}</div>
-                  <div className="text-[10px] text-gray-500">일별 지표 레코드</div>
-                  <div className="text-[9px] text-gray-400 mt-1">{dbStats.data?.dailyMetrics.uniqueDates || 0}일 데이터</div>
-                </CardContent>
-              </Card>
-              <Card className={`${(dbStats.data?.dailyMetrics.oldCount || 0) > 0 ? "border-orange-200 bg-orange-50/30" : ""}`}>
-                <CardContent className="pt-3 pb-3 text-center">
-                  <div className={`text-2xl font-bold ${(dbStats.data?.dailyMetrics.oldCount || 0) > 0 ? "text-orange-600" : "text-green-600"}`}>
-                    {dbStats.data?.dailyMetrics.oldCount || 0}
-                  </div>
-                  <div className="text-[10px] text-gray-500">30일+ 오래된 지표</div>
-                  {(dbStats.data?.dailyMetrics.oldCount || 0) > 0 && (
-                    <div className="text-[9px] text-orange-500 mt-1">정리 권장</div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card className={`${(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 ? "border-purple-200 bg-purple-50/30" : ""}`}>
-                <CardContent className="pt-3 pb-3 text-center">
-                  <div className={`text-2xl font-bold ${(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 ? "text-purple-600" : "text-green-600"}`}>
-                    {dbStats.data?.unmatchedExtensionKeywords || 0}
-                  </div>
-                  <div className="text-[10px] text-gray-500">미확장 익스텐션 키워드</div>
-                  {(dbStats.data?.unmatchedExtensionKeywords || 0) > 0 && (
-                    <div className="text-[9px] text-purple-500 mt-1">네이버 확장 가능</div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* 자동화 기능 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              {/* 익스텐션 → 네이버 자동 확장 */}
-              <Card className="border-purple-200">
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
-                    <Wand2 className="w-3.5 h-3.5" /> 익스텐션 키워드 자동 확장
-                  </div>
-                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
-                    크롬 익스텐션에서 수집된 키워드를 자동으로 네이버 API에 조회하여
-                    연관 키워드 + 검색량 데이터를 수집합니다.
-                    <br />
-                    <strong>현재 미확장: {dbStats.data?.unmatchedExtensionKeywords || 0}개</strong>
-                  </p>
-                  <Button
-                    size="sm"
-                    className="w-full h-8 text-xs gap-1 bg-purple-600 hover:bg-purple-700"
-                    disabled={autoExpandMut.isPending || (dbStats.data?.unmatchedExtensionKeywords || 0) === 0}
-                    onClick={() => autoExpandMut.mutate()}
-                  >
-                    {autoExpandMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                    {autoExpandMut.isPending ? "확장 중... (최대 50개)" : "일괄 확장 실행"}
-                  </Button>
-                  <p className="text-[9px] text-gray-400 mt-1.5">
-                    한번에 최대 50개 키워드 처리 / 네이버 API 호출 포함
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* 네이버 데이터 일괄 갱신 */}
-              <Card className="border-blue-200">
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1">
-                    <RefreshCw className="w-3.5 h-3.5" /> 네이버 검색량 일괄 갱신
-                  </div>
-                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
-                    keyword_master에 등록된 키워드 중 오늘 네이버 데이터가 없는
-                    키워드의 검색량/CPC/경쟁도를 일괄 갱신합니다.
-                    <br />
-                    <strong>키워드 총: {dbStats.data?.keywordMaster.total || 0}개</strong>
-                  </p>
-                  <Button
-                    size="sm"
-                    className="w-full h-8 text-xs gap-1"
-                    disabled={bulkRefreshMut.isPending || (dbStats.data?.keywordMaster.total || 0) === 0}
-                    onClick={() => bulkRefreshMut.mutate()}
-                  >
-                    {bulkRefreshMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                    {bulkRefreshMut.isPending ? "갱신 중... (최대 100개)" : "네이버 데이터 갱신"}
-                  </Button>
-                  <p className="text-[9px] text-gray-400 mt-1.5">
-                    한번에 최대 100개 / 키워드가 많으면 여러번 실행
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* 데이터 정리 */}
-              <Card className="border-orange-200">
-                <CardContent className="pt-3 pb-3">
-                  <div className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
-                    <Trash2 className="w-3.5 h-3.5" /> 오래된 데이터 정리
-                  </div>
-                  <p className="text-[10px] text-gray-500 mb-3 leading-relaxed">
-                    30일 이전 일별 지표를 삭제하여 DB 용량을 관리합니다.
-                    <br />
-                    <strong className="text-orange-600">삭제 대상: {dbStats.data?.dailyMetrics.oldCount || 0}개 지표</strong>
-                  </p>
-                  <div className="space-y-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full h-8 text-xs gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
-                      disabled={autoCleanupMut.isPending}
-                      onClick={() => autoCleanupMut.mutate({ retentionDays: 30, deleteZeroScore: false, deleteInactive: false })}
-                    >
-                      {autoCleanupMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                      오래된 지표만 정리 (30일+)
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full h-8 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
-                      disabled={autoCleanupMut.isPending}
-                      onClick={() => {
-                        if (confirm("점수 0인 키워드와 관련 지표를 모두 삭제합니다. 계속하시겠습니까?")) {
-                          autoCleanupMut.mutate({ retentionDays: 30, deleteZeroScore: true, deleteInactive: true });
-                        }
-                      }}
-                    >
-                      {autoCleanupMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                      전체 정리 (오래된 지표 + 점수0 키워드)
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* 워크플로우 가이드 */}
-            <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
-              <CardContent className="pt-4 pb-4">
-                <h3 className="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-1.5">
-                  <Lightbulb className="w-4 h-4" /> 사용 가이드 — 이렇게 쓰세요!
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">1단계: 키워드 수집</h4>
-                    <div className="space-y-1 text-[10px] text-gray-600">
-                      <p>• <strong>크롬 익스텐션</strong>: 쿠팡에서 검색하면 자동 수집됨</p>
-                      <p>• <strong>수동 추가</strong>: "키워드 채굴" 탭 → 수동 키워드 추가</p>
-                      <p>• <strong>네이버 확장</strong>: 시드 키워드 입력 → 연관키워드 자동 수집</p>
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">2단계: 네이버 데이터 매칭</h4>
-                    <div className="space-y-1 text-[10px] text-gray-600">
-                      <p>• <strong className="text-purple-600">자동 확장</strong>: 이 페이지에서 "일괄 확장" 클릭</p>
-                      <p>→ 익스텐션 키워드가 자동으로 네이버 검색량 데이터와 매칭</p>
-                      <p>→ 하나하나 수동 입력할 필요 없음!</p>
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">3단계: 점수 계산</h4>
-                    <div className="space-y-1 text-[10px] text-gray-600">
-                      <p>• "키워드 채굴" 탭 → <strong>"전체 점수 계산"</strong> 클릭</p>
-                      <p>→ 7종 알고리즘(블루오션/급상승/숨은아이템 등)이 자동 점수화</p>
-                      <p>→ 서브탭에서 카테고리별 키워드 확인</p>
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-indigo-700 mb-1.5">4단계: 데이터 관리</h4>
-                    <div className="space-y-1 text-[10px] text-gray-600">
-                      <p>• <strong className="text-orange-600">자동 정리</strong>: 30일+ 오래된 데이터 삭제</p>
-                      <p>• 점수 0인 키워드 일괄 정리 가능</p>
-                      <p>• 데이터가 계속 쌓이면 여기서 정리!</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 p-2 bg-white/60 rounded-lg">
-                  <p className="text-[10px] text-indigo-600 font-medium">
-                    Q: 자동 삭제되나요? → <strong>아닙니다. 데이터는 계속 쌓입니다.</strong> "데이터 관리" 탭에서 주기적으로 정리해주세요.
-                  </p>
-                  <p className="text-[10px] text-indigo-600 font-medium mt-1">
-                    Q: 크롬 수집 키워드는 자동 매칭되나요? → <strong>"일괄 확장" 버튼으로 한번에 처리 가능합니다.</strong> 수동으로 하나씩 할 필요 없습니다.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* 기존 ext_keyword_daily_stats 통계 */}
-            <Card>
-              <CardContent className="pt-3 pb-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                  <BarChart3 className="w-3.5 h-3.5" /> 기존 익스텐션 데이터 (ext_keyword_daily_stats)
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-gray-50 rounded p-2 text-center">
-                    <div className="text-lg font-bold text-gray-600">{dbStats.data?.extKeywordStats.total || 0}</div>
-                    <div className="text-[9px] text-gray-400">총 레코드</div>
-                  </div>
-                  <div className="bg-gray-50 rounded p-2 text-center">
-                    <div className="text-lg font-bold text-gray-600">{dbStats.data?.extKeywordStats.uniqueKeywords || 0}</div>
-                    <div className="text-[9px] text-gray-400">고유 키워드</div>
-                  </div>
-                </div>
-                <p className="text-[9px] text-gray-400 mt-2">
-                  "기회 분석" 탭은 이 데이터를 사용합니다. "키워드 채굴" 탭은 keyword_master + keyword_daily_metrics를 사용합니다.
-                </p>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
-
-      {/* AI 리포트 모달 */}
-      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Brain className="w-5 h-5 text-purple-600" />
-              AI 리뷰 분석 — "{reportQuery}"
-            </DialogTitle>
-          </DialogHeader>
-
-          {(() => {
-            const analysis = reviewAnalysis.data?.[0];
-            const loading = reviewAnalysis.isLoading;
-            const analyzing = analyzeMut.isPending;
-
-            if (loading) return (
-              <div className="flex items-center justify-center py-12 text-gray-400">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" /> 불러오는 중...
-              </div>
-            );
-
-            if (!analysis) return (
-              <div className="text-center py-10">
-                <AlertCircle className="w-10 h-10 mx-auto mb-3 text-gray-300" />
-                <p className="text-sm text-gray-500 mb-1">아직 분석 데이터가 없습니다</p>
-                <p className="text-[10px] text-gray-400 mb-4">
-                  크롬 익스텐션에서 수집한 검색 데이터를 기반으로 AI가 분석합니다
-                </p>
+          {/* 선택 액션 */}
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-1">
+              <Badge variant="secondary" className="text-xs">{selectedIds.length}건 선택</Badge>
+              {tab === "candidates" && (
                 <Button
                   size="sm"
-                  className="gap-1"
-                  disabled={analyzing}
-                  onClick={() => reportQuery && analyzeMut.mutate({ query: reportQuery })}
+                  onClick={handleValidateSelected}
+                  disabled={validateMutation.isPending}
                 >
-                  {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                  {analyzing ? "분석 중..." : "AI 분석 실행"}
+                  {validateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Zap className="w-3.5 h-3.5 mr-1" />}
+                  네이버 검증
                 </Button>
-              </div>
-            );
+              )}
+              {tab === "validated" && (
+                <Button
+                  size="sm"
+                  onClick={() => promoteMutation.mutate({ keywordIds: selectedIds })}
+                  disabled={promoteMutation.isPending}
+                >
+                  <Eye className="w-3.5 h-3.5 mr-1" />감시 추가
+                </Button>
+              )}
+              {tab === "recommended" && (
+                <Button
+                  size="sm"
+                  onClick={() => acceptMutation.mutate({ keywordIds: selectedIds })}
+                  disabled={acceptMutation.isPending}
+                >
+                  <ThumbsUp className="w-3.5 h-3.5 mr-1" />수락
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => deleteMutation.mutate({ ids: selectedIds })}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />삭제
+              </Button>
+            </div>
+          )}
 
-            return (
-              <div className="space-y-4">
-                <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3">
-                  <div className="flex items-center gap-1 text-xs font-semibold text-purple-700 mb-1">
-                    <Lightbulb className="w-3.5 h-3.5" /> 종합 요약
-                    {analysis.aiPowered && (
-                      <Badge className="text-[8px] ml-1 bg-purple-100 text-purple-700 border-purple-200">AI</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-700 leading-relaxed">{analysis.summaryText}</p>
-                  <div className="flex gap-3 mt-2 text-[10px] text-gray-500">
-                    <span>분석 상품: {analysis.totalProductsAnalyzed}개</span>
-                    <span>평균 평점: {analysis.avgRating}</span>
-                    <span>평균 리뷰: {analysis.avgReviewCount}개</span>
-                  </div>
-                </div>
+          <div className="ml-auto flex gap-1">
+            {tab === "candidates" && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleValidateQueue}
+                disabled={validateMutation.isPending || !validationQueue.data?.length}
+              >
+                {validateMutation.isPending
+                  ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                  : <Sparkles className="w-3.5 h-3.5 mr-1" />}
+                자동 검증 ({validationQueue.data?.length || 0}건)
+              </Button>
+            )}
+            {tab === "recommended" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => cleanExpiredMutation.mutate()}
+                disabled={cleanExpiredMutation.isPending}
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" />만료 정리
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => { selectAll(); }}>
+              {selectedIds.length === items.length ? "선택 해제" : "전체 선택"}
+            </Button>
+          </div>
+        </div>
 
-                {analysis.opportunities?.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-green-700">
-                      <Zap className="w-3.5 h-3.5" /> 기회 요인
-                    </h4>
-                    <div className="space-y-1.5">
-                      {analysis.opportunities.map((item: any, idx: number) => (
-                        <div key={idx} className="bg-green-50 rounded p-2 text-xs text-gray-700">
-                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+        {/* 키워드 목록 */}
+        {isLoading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : items.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              {tab === "candidates" && "대기 중인 후보 키워드가 없습니다. 위에서 직접 추가하거나 크롬 익스텐션으로 수집하세요."}
+              {tab === "validated" && "검증 완료된 키워드가 없습니다. 후보 탭에서 네이버 검증을 실행하세요."}
+              {tab === "recommended" && "추천 키워드가 없습니다. 검증 시 네이버 연관 키워드가 자동 추천됩니다."}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {items.map(item => {
+              const m = item.metrics;
+              const finalScore = Number(m?.finalScore || 0);
+              const coupangScore = Number(m?.coupangBaseScore || 0);
+              const naverScore = Number(m?.naverValidationScore || 0);
+              const totalSearch = m?.naverTotalSearch || 0;
 
-                {analysis.painPoints?.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-red-700">
-                      <AlertTriangle className="w-3.5 h-3.5" /> 고객 불만 포인트
-                    </h4>
-                    <div className="space-y-1.5">
-                      {analysis.painPoints.map((item: any, idx: number) => (
-                        <div key={idx} className="bg-red-50 rounded p-2 text-xs text-gray-700">
-                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              // 클라이언트 보정
+              const cal = m ? calibrateSales({
+                reviewDelta: m.coupangTop10ReviewDelta || 0,
+                productCount: m.coupangProductCount || 0,
+                avgPrice: m.coupangAvgPrice || 0,
+                categoryHint: item.categoryHint || undefined,
+                naverTotalSearch: totalSearch,
+                naverCompetition: m.naverCompetitionIndex || undefined,
+              }) : null;
 
-                <div className="grid grid-cols-2 gap-3">
-                  {analysis.commonPraises?.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-blue-700">
-                        <ThumbsUp className="w-3.5 h-3.5" /> 공통 칭찬
-                      </h4>
-                      <div className="space-y-1">
-                        {analysis.commonPraises.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-blue-50 rounded p-1.5 text-[11px] text-gray-700">
-                            {typeof item === "string" ? item : item.text || JSON.stringify(item)}
-                          </div>
-                        ))}
+              const selected = selectedIds.includes(item.id);
+
+              return (
+                <Card
+                  key={item.id}
+                  className={`transition-all cursor-pointer ${selected ? "border-primary bg-primary/5" : "hover:border-muted-foreground/30"}`}
+                  onClick={() => toggleSelect(item.id)}
+                >
+                  <CardContent className="p-3">
+                    <div className="flex items-center gap-3">
+                      {/* 체크박스 영역 */}
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                        selected ? "border-primary bg-primary text-white" : "border-muted-foreground/30"
+                      }`}>
+                        {selected && <CheckCircle className="w-3.5 h-3.5" />}
                       </div>
-                    </div>
-                  )}
-                  {analysis.commonComplaints?.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-orange-700">
-                        <ThumbsDown className="w-3.5 h-3.5" /> 공통 불만
-                      </h4>
-                      <div className="space-y-1">
-                        {analysis.commonComplaints.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-orange-50 rounded p-1.5 text-[11px] text-gray-700">
-                            {typeof item === "string" ? item : item.text || JSON.stringify(item)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
 
-                {analysis.recommendations?.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold flex items-center gap-1 mb-2 text-indigo-700">
-                      <Star className="w-3.5 h-3.5" /> 소싱 추천
-                    </h4>
-                    <div className="space-y-1.5">
-                      {analysis.recommendations.map((item: any, idx: number) => (
-                        <div key={idx} className="bg-indigo-50 rounded p-2 text-xs text-gray-700 flex items-start gap-1.5">
-                          <span className="text-indigo-500 font-bold shrink-0">{idx + 1}.</span>
-                          {typeof item === "string" ? item : item.text || item.description || JSON.stringify(item)}
+                      {/* 점수 */}
+                      <div className="text-center flex-shrink-0 w-12">
+                        <div className={`text-lg font-bold ${gradeColor(finalScore)}`}>
+                          {gradeBadge(finalScore)}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        <div className="text-[10px] text-muted-foreground">{finalScore.toFixed(0)}점</div>
+                      </div>
 
-                <div className="flex justify-end pt-2 border-t">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs gap-1"
-                    disabled={analyzing}
-                    onClick={() => reportQuery && analyzeMut.mutate({ query: reportQuery })}
-                  >
-                    {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                    {analyzing ? "분석 중..." : "재분석"}
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+                      {/* 키워드 + 상태 */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{item.keyword}</span>
+                          {statusBadge(item.validationStatus)}
+                          {item.sourceType === "extension" && <Badge variant="outline" className="text-[10px]">EXT</Badge>}
+                          {item.sourceType === "manual" && <Badge variant="outline" className="text-[10px]">수동</Badge>}
+                        </div>
+                        {item.canonicalKeyword && (
+                          <div className="text-xs text-muted-foreground">대표: {item.canonicalKeyword}</div>
+                        )}
+                      </div>
+
+                      {/* 점수 바 */}
+                      <div className="hidden md:flex items-center gap-3 flex-shrink-0">
+                        <div className="text-center">
+                          <div className="text-xs font-medium">{coupangScore.toFixed(0)}</div>
+                          <div className="text-[10px] text-muted-foreground">쿠팡</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs font-medium">{naverScore.toFixed(0)}</div>
+                          <div className="text-[10px] text-muted-foreground">네이버</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs font-medium">{formatNum(totalSearch)}</div>
+                          <div className="text-[10px] text-muted-foreground">월검색량</div>
+                        </div>
+                        {cal && (
+                          <div className="text-center">
+                            <div className="text-xs font-medium">{formatNum(cal.correctedSalesEst)}</div>
+                            <div className="text-[10px] text-muted-foreground">추정판매</div>
+                          </div>
+                        )}
+                        {cal && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {cal.surgeLabel}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* 상세 버튼 */}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="flex-shrink-0"
+                        onClick={e => { e.stopPropagation(); setDetailKeyword(item); }}
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 상세 다이얼로그 */}
+        <Dialog open={!!detailKeyword} onOpenChange={() => setDetailKeyword(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Gem className="w-5 h-5 text-purple-500" />
+                {detailKeyword?.keyword}
+              </DialogTitle>
+            </DialogHeader>
+            {detailKeyword && <KeywordDetailView item={detailKeyword} />}
+          </DialogContent>
+        </Dialog>
+      </div>
     </DashboardLayout>
+  );
+}
+
+function KeywordDetailView({ item }: { item: any }) {
+  const m = item.metrics;
+  const finalScore = Number(m?.finalScore || 0);
+  const coupangScore = Number(m?.coupangBaseScore || 0);
+  const naverScore = Number(m?.naverValidationScore || 0);
+
+  const cal = m ? calibrateSales({
+    reviewDelta: m.coupangTop10ReviewDelta || 0,
+    productCount: m.coupangProductCount || 0,
+    avgPrice: m.coupangAvgPrice || 0,
+    categoryHint: item.categoryHint || undefined,
+    naverTotalSearch: m.naverTotalSearch || 0,
+    naverCompetition: m.naverCompetitionIndex || undefined,
+  }) : null;
+
+  return (
+    <div className="space-y-4">
+      {/* 상태 + 등급 */}
+      <div className="flex items-center gap-3">
+        {statusBadge(item.validationStatus)}
+        <span className={`text-2xl font-bold ${gradeColor(finalScore)}`}>
+          {gradeBadge(finalScore)} ({finalScore.toFixed(1)}점)
+        </span>
+      </div>
+
+      {/* 점수 분해 */}
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-sm font-medium mb-2">쿠팡 기본 점수 (70%)</div>
+            <div className="text-2xl font-bold text-blue-500">{coupangScore.toFixed(1)}</div>
+            {m && (
+              <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                <div>상품수: {formatNum(m.coupangProductCount)}</div>
+                <div>평균가: {formatNum(m.coupangAvgPrice)}원</div>
+                <div>리뷰합: {formatNum(m.coupangTop10ReviewSum)}</div>
+                <div>리뷰증가: {formatNum(m.coupangTop10ReviewDelta)}</div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-sm font-medium mb-2">네이버 검증 점수 (30%)</div>
+            <div className="text-2xl font-bold text-green-500">{naverScore.toFixed(1)}</div>
+            {m && (
+              <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                <div>PC 검색: {formatNum(m.naverPcSearch)}</div>
+                <div>모바일 검색: {formatNum(m.naverMobileSearch)}</div>
+                <div>총 검색: {formatNum(m.naverTotalSearch)}</div>
+                <div>경쟁도: {m.naverCompetitionIndex || "-"}</div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 세부 점수 */}
+      {m && (
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "시장갭", value: Number(m.marketGapScore || 0) },
+            { label: "트렌드", value: Number(m.trendScore || 0) },
+            { label: "숨은아이템", value: Number(m.hiddenScore || 0) },
+            { label: "소싱점수", value: Number(m.sourcingScore || 0) },
+          ].map(s => (
+            <div key={s.label} className="text-center p-2 bg-muted/50 rounded">
+              <div className="text-sm font-bold">{s.value.toFixed(0)}</div>
+              <div className="text-[10px] text-muted-foreground">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 판매추정 보정 */}
+      {cal && (
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-sm font-medium mb-2">판매추정 보정</div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-lg font-bold">{formatNum(cal.baseSalesEst)}</div>
+                <div className="text-[10px] text-muted-foreground">기본추정</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-blue-500">{formatNum(cal.correctedSalesEst)}</div>
+                <div className="text-[10px] text-muted-foreground">보정추정</div>
+              </div>
+              <div>
+                <Badge variant={
+                  cal.confidence === "high" ? "default" :
+                  cal.confidence === "medium" ? "secondary" : "destructive"
+                } className="text-xs">
+                  {cal.surgeLabel}
+                </Badge>
+                <div className="text-[10px] text-muted-foreground mt-1">신뢰도: {cal.confidence}</div>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">{cal.confidenceReason}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 메타 정보 */}
+      <div className="text-xs text-muted-foreground space-y-1">
+        <div>소스: {item.sourceType} | 우선순위: {item.validationPriority}</div>
+        <div>최초 등록: {item.firstSeenAt ? new Date(item.firstSeenAt).toLocaleDateString("ko-KR") : "-"}</div>
+        {item.lastValidatedAt && <div>마지막 검증: {new Date(item.lastValidatedAt).toLocaleString("ko-KR")}</div>}
+        {item.recommendedExpiresAt && <div>추천 만료: {new Date(item.recommendedExpiresAt).toLocaleString("ko-KR")}</div>}
+      </div>
+    </div>
   );
 }

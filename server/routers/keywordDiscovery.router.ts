@@ -3,37 +3,257 @@ import { getDb } from "../db";
 import {
   keywordMaster,
   keywordDailyMetrics,
-  keywordRelation,
-  keywordSourcingCandidate,
   extKeywordDailyStats,
+  extWatchKeywords,
 } from "../../drizzle/schema";
-import { and, desc, eq, like, sql, inArray, asc } from "drizzle-orm";
+import { and, desc, eq, like, sql, inArray, asc, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { expandNaverKeywords } from "../lib/naverAds";
+import { validateKeywordsWithNaver } from "../lib/naverAds";
 import { normalizeKeyword, scoreKeyword } from "../lib/keywordScorer";
 
 export const keywordDiscoveryRouter = router({
-  // ===== Seed 키워드로 네이버 연관키워드 확장 수집 =====
-  expandFromNaver: protectedProcedure
+  // ===== 1. 후보 키워드 목록 (쿠팡 수집 기반) =====
+  listCandidates: protectedProcedure
     .input(z.object({
-      seeds: z.array(z.string().min(1).max(100)).min(1).max(10),
+      search: z.string().max(200).default(""),
+      status: z.enum(["all", "pending", "validated", "rejected", "recommended"]).default("all"),
+      sortBy: z.enum(["keyword", "priority", "final_score", "created"]).default("priority"),
+      sortDir: z.enum(["asc", "desc"]).default("desc"),
+      page: z.number().int().min(1).default(1),
+      perPage: z.number().int().min(10).max(100).default(30),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const conditions: any[] = [eq(keywordMaster.userId, ctx.user!.id)];
+      if (input.search) {
+        conditions.push(like(keywordMaster.keyword, `%${input.search}%`));
+      }
+      if (input.status !== "all") {
+        conditions.push(eq(keywordMaster.validationStatus, input.status));
+      }
+
+      const [countResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(keywordMaster)
+        .where(and(...conditions));
+
+      const total = Number(countResult?.count ?? 0);
+      const offset = (input.page - 1) * input.perPage;
+
+      let orderBy: any;
+      if (input.sortBy === "keyword") {
+        orderBy = input.sortDir === "asc" ? asc(keywordMaster.keyword) : desc(keywordMaster.keyword);
+      } else if (input.sortBy === "priority") {
+        orderBy = input.sortDir === "asc" ? asc(keywordMaster.validationPriority) : desc(keywordMaster.validationPriority);
+      } else {
+        orderBy = input.sortDir === "asc" ? asc(keywordMaster.firstSeenAt) : desc(keywordMaster.firstSeenAt);
+      }
+
+      const keywords = await db.select()
+        .from(keywordMaster)
+        .where(and(...conditions))
+        .orderBy(orderBy)
+        .limit(input.perPage)
+        .offset(offset);
+
+      if (!keywords.length) return { items: [], total, page: input.page, totalPages: Math.ceil(total / input.perPage) };
+
+      // 최신 지표 조인
+      const keywordIds = keywords.map(k => k.id);
+      const metrics = await db.select()
+        .from(keywordDailyMetrics)
+        .where(and(
+          eq(keywordDailyMetrics.userId, ctx.user!.id),
+          inArray(keywordDailyMetrics.keywordId, keywordIds),
+          sql`(${keywordDailyMetrics.keywordId}, ${keywordDailyMetrics.metricDate}) IN (
+            SELECT keyword_id, MAX(metric_date) FROM keyword_daily_metrics
+            WHERE user_id = ${ctx.user!.id}
+            AND keyword_id IN (${sql.join(keywordIds.map(id => sql`${id}`), sql`, `)})
+            GROUP BY keyword_id
+          )`,
+        ));
+
+      const metricsMap = new Map(metrics.map(m => [m.keywordId, m]));
+
+      const items = keywords.map(kw => ({
+        ...kw,
+        metrics: metricsMap.get(kw.id) || null,
+      }));
+
+      // final_score 정렬
+      if (input.sortBy === "final_score") {
+        items.sort((a, b) => {
+          const av = Number(a.metrics?.finalScore || 0);
+          const bv = Number(b.metrics?.finalScore || 0);
+          return input.sortDir === "desc" ? bv - av : av - bv;
+        });
+      }
+
+      return { items, total, page: input.page, totalPages: Math.ceil(total / input.perPage) };
+    }),
+
+  // ===== 2. 네이버 검증 실행 (확장 아닌 검증만) =====
+  validateWithNaver: protectedProcedure
+    .input(z.object({
+      keywordIds: z.array(z.number().int()).min(1).max(20),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const results = await expandNaverKeywords(input.seeds);
-      let inserted = 0;
-      let skipped = 0;
+      // 대상 키워드 조회
+      const keywords = await db.select()
+        .from(keywordMaster)
+        .where(and(
+          eq(keywordMaster.userId, ctx.user!.id),
+          inArray(keywordMaster.id, input.keywordIds),
+        ));
+
+      if (!keywords.length) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "키워드를 찾을 수 없습니다" });
+      }
+
+      const keywordTexts = keywords.map(k => k.keyword);
       const today = new Date().toISOString().slice(0, 10);
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
-      for (const r of results) {
-        const normalized = normalizeKeyword(r.keyword);
-        if (!normalized) { skipped++; continue; }
+      // 네이버 API 검증 (배치 5개씩)
+      let validated = 0;
+      let rejected = 0;
+      const recommendedKeywords: { keyword: string; totalSearch: number; competition: string; parentId: number }[] = [];
 
-        // 중복 체크
-        const existing = await db.select({ id: keywordMaster.id })
+      const batchSize = 5;
+      for (let i = 0; i < keywordTexts.length; i += batchSize) {
+        const batch = keywordTexts.slice(i, i + batchSize);
+        const batchKeywords = keywords.slice(i, i + batchSize);
+
+        try {
+          const results = await validateKeywordsWithNaver(batch);
+          const resultMap = new Map(results.map(r => [r.keyword.trim().toLowerCase().replace(/\s+/g, " "), r]));
+
+          for (const kw of batchKeywords) {
+            const key = kw.keyword.trim().toLowerCase().replace(/\s+/g, " ");
+            const result = resultMap.get(key);
+
+            if (!result) {
+              // 네이버 데이터 없음 → rejected
+              await db.update(keywordMaster)
+                .set({
+                  validationStatus: "rejected",
+                  lastValidatedAt: now,
+                })
+                .where(eq(keywordMaster.id, kw.id));
+              rejected++;
+              continue;
+            }
+
+            // 검증 상태 업데이트
+            await db.update(keywordMaster)
+              .set({
+                validationStatus: result.passed ? "validated" : "rejected",
+                lastValidatedAt: now,
+              })
+              .where(eq(keywordMaster.id, kw.id));
+
+            if (result.passed) validated++;
+            else rejected++;
+
+            // 쿠팡 데이터 조회 (점수 계산용)
+            const [coupangData] = await db.select()
+              .from(extKeywordDailyStats)
+              .where(and(
+                eq(extKeywordDailyStats.userId, ctx.user!.id),
+                like(extKeywordDailyStats.query, `%${kw.keyword}%`),
+              ))
+              .orderBy(desc(extKeywordDailyStats.statDate))
+              .limit(1);
+
+            // 점수 계산
+            const scores = scoreKeyword({
+              naverTotalSearch: result.totalSearch,
+              naverCompetition: result.competition,
+              naverAvgCpc: result.avgCpc,
+              coupangProductCount: coupangData?.productCount || 0,
+              coupangAvgPrice: coupangData?.avgPrice || 0,
+              coupangTop10ReviewSum: coupangData?.totalReviewSum || 0,
+              coupangTop10ReviewDelta: coupangData?.reviewGrowth || 0,
+            });
+
+            // 일별 지표 upsert
+            const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
+              .from(keywordDailyMetrics)
+              .where(and(
+                eq(keywordDailyMetrics.userId, ctx.user!.id),
+                eq(keywordDailyMetrics.keywordId, kw.id),
+                eq(keywordDailyMetrics.metricDate, today),
+              ))
+              .limit(1);
+
+            const metricData = {
+              naverPcSearch: result.pcSearch,
+              naverMobileSearch: result.mobileSearch,
+              naverTotalSearch: result.totalSearch,
+              naverCompetitionIndex: result.competition,
+              coupangProductCount: coupangData?.productCount || 0,
+              coupangAvgPrice: coupangData?.avgPrice || 0,
+              coupangTop10ReviewSum: coupangData?.totalReviewSum || 0,
+              coupangTop10ReviewDelta: coupangData?.reviewGrowth || 0,
+              marketGapScore: scores.marketGapScore.toFixed(4),
+              trendScore: scores.trendSpikeScore.toFixed(4),
+              hiddenScore: scores.hiddenItemScore.toFixed(4),
+              sourcingScore: scores.coupangBaseScore.toFixed(4),
+              finalScore: scores.finalScore.toFixed(4),
+              coupangBaseScore: scores.coupangBaseScore.toFixed(4),
+              naverValidationScore: scores.naverValidationScore.toFixed(4),
+              validationPassed: result.passed,
+              rejectReason: result.rejectReason || null,
+            };
+
+            if (existingMetric) {
+              await db.update(keywordDailyMetrics)
+                .set(metricData)
+                .where(eq(keywordDailyMetrics.id, existingMetric.id));
+            } else {
+              await db.insert(keywordDailyMetrics).values({
+                userId: ctx.user!.id,
+                keywordId: kw.id,
+                metricDate: today,
+                ...metricData,
+              });
+            }
+
+            // 추천 키워드 수집
+            for (const rec of result.recommendations) {
+              recommendedKeywords.push({
+                keyword: rec.keyword,
+                totalSearch: rec.totalSearch,
+                competition: rec.competition,
+                parentId: kw.id,
+              });
+            }
+          }
+        } catch (err: any) {
+          console.error(`Naver validation batch error:`, err.message);
+        }
+
+        if (i + batchSize < keywordTexts.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // 추천 키워드 등록 (TTL 7일, 중복 제외)
+      let recommendedInserted = 0;
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        .toISOString().replace("T", " ").slice(0, 19);
+
+      for (const rec of recommendedKeywords) {
+        const normalized = normalizeKeyword(rec.keyword);
+        if (!normalized) continue;
+
+        const [existing] = await db.select({ id: keywordMaster.id })
           .from(keywordMaster)
           .where(and(
             eq(keywordMaster.userId, ctx.user!.id),
@@ -41,55 +261,98 @@ export const keywordDiscoveryRouter = router({
           ))
           .limit(1);
 
-        let keywordId: number;
+        if (existing) continue;
 
-        if (existing.length > 0) {
-          keywordId = existing[0].id;
-          // lastSeenAt 갱신
-          await db.update(keywordMaster)
-            .set({ lastSeenAt: new Date().toISOString().replace("T", " ").slice(0, 19) })
-            .where(eq(keywordMaster.id, keywordId));
-          skipped++;
-        } else {
-          const res = await db.insert(keywordMaster).values({
-            userId: ctx.user!.id,
-            keyword: r.keyword,
-            normalizedKeyword: normalized,
-            sourceType: "naver_api",
-            rootKeyword: input.seeds[0],
-            keywordDepth: 1,
-          });
-          keywordId = Number((res as any)[0]?.insertId);
-          inserted++;
-        }
+        await db.insert(keywordMaster).values({
+          userId: ctx.user!.id,
+          keyword: rec.keyword,
+          normalizedKeyword: normalized,
+          sourceType: "naver_api",
+          rootKeyword: keywords.find(k => k.id === rec.parentId)?.keyword,
+          keywordDepth: 1,
+          validationStatus: "recommended",
+          validationPriority: 30,
+          recommendedExpiresAt: expiresAt,
+        });
+        recommendedInserted++;
+      }
 
-        // 일별 지표 저장 (당일 중복이면 스킵)
-        const existingMetric = await db.select({ id: keywordDailyMetrics.id })
-          .from(keywordDailyMetrics)
+      return { success: true, validated, rejected, recommendedInserted };
+    }),
+
+  // ===== 3. 추천 키워드 수락 (recommended → pending 전환) =====
+  acceptRecommendation: protectedProcedure
+    .input(z.object({
+      keywordIds: z.array(z.number().int()).min(1).max(50),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      await db.update(keywordMaster)
+        .set({
+          validationStatus: "pending",
+          validationPriority: 60,
+          recommendedExpiresAt: null,
+        })
+        .where(and(
+          eq(keywordMaster.userId, ctx.user!.id),
+          inArray(keywordMaster.id, input.keywordIds),
+          eq(keywordMaster.validationStatus, "recommended"),
+        ));
+
+      return { success: true, accepted: input.keywordIds.length };
+    }),
+
+  // ===== 4. 감시 목록에 추가 (validated → ext_watch_keywords 연동) =====
+  promoteToWatch: protectedProcedure
+    .input(z.object({
+      keywordIds: z.array(z.number().int()).min(1).max(20),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const keywords = await db.select()
+        .from(keywordMaster)
+        .where(and(
+          eq(keywordMaster.userId, ctx.user!.id),
+          inArray(keywordMaster.id, input.keywordIds),
+        ));
+
+      let promoted = 0;
+      for (const kw of keywords) {
+        // ext_watch_keywords에 중복 체크
+        const [existing] = await db.select({ id: extWatchKeywords.id })
+          .from(extWatchKeywords)
           .where(and(
-            eq(keywordDailyMetrics.userId, ctx.user!.id),
-            eq(keywordDailyMetrics.keywordId, keywordId),
-            eq(keywordDailyMetrics.metricDate, today),
+            eq(extWatchKeywords.userId, ctx.user!.id),
+            eq(extWatchKeywords.keyword, kw.keyword),
           ))
           .limit(1);
 
-        if (!existingMetric.length) {
-          await db.insert(keywordDailyMetrics).values({
+        if (existing) {
+          // 연결만 업데이트
+          await db.update(extWatchKeywords)
+            .set({ keywordMasterId: kw.id, watchReason: "naver_validated", watchStatus: "promoted" })
+            .where(eq(extWatchKeywords.id, existing.id));
+        } else {
+          await db.insert(extWatchKeywords).values({
             userId: ctx.user!.id,
-            keywordId,
-            metricDate: today,
-            naverPcSearch: r.pcSearch,
-            naverMobileSearch: r.mobileSearch,
-            naverTotalSearch: r.totalSearch,
-            naverCompetitionIndex: r.competition,
+            keyword: kw.keyword,
+            priority: 70,
+            keywordMasterId: kw.id,
+            watchReason: "naver_validated",
+            watchStatus: "promoted",
           });
         }
+        promoted++;
       }
 
-      return { success: true, inserted, skipped, total: results.length };
+      return { success: true, promoted };
     }),
 
-  // ===== 수동 키워드 등록 =====
+  // ===== 5. 수동 키워드 등록 =====
   addManualKeywords: protectedProcedure
     .input(z.object({
       keywords: z.array(z.string().min(1).max(255)).min(1).max(100),
@@ -117,6 +380,8 @@ export const keywordDiscoveryRouter = router({
             keyword: kw.trim(),
             normalizedKeyword: normalized,
             sourceType: "manual",
+            validationStatus: "pending",
+            validationPriority: 60,
           });
           inserted++;
         }
@@ -125,94 +390,7 @@ export const keywordDiscoveryRouter = router({
       return { success: true, inserted };
     }),
 
-  // ===== 키워드 마스터 목록 (필터/정렬/검색) =====
-  listKeywords: protectedProcedure
-    .input(z.object({
-      search: z.string().max(200).default(""),
-      sourceType: z.enum(["all", "naver_api", "coupang_autocomplete", "manual", "china", "extension"]).default("all"),
-      sortBy: z.enum(["keyword", "total_search", "final_score", "created"]).default("created"),
-      sortDir: z.enum(["asc", "desc"]).default("desc"),
-      page: z.number().int().min(1).default(1),
-      perPage: z.number().int().min(10).max(100).default(30),
-    }))
-    .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
-      const conditions: any[] = [eq(keywordMaster.userId, ctx.user!.id)];
-      if (input.search) {
-        conditions.push(like(keywordMaster.keyword, `%${input.search}%`));
-      }
-      if (input.sourceType !== "all") {
-        conditions.push(eq(keywordMaster.sourceType, input.sourceType));
-      }
-
-      const [countResult] = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(keywordMaster)
-        .where(and(...conditions));
-
-      const total = Number(countResult?.count ?? 0);
-      const offset = (input.page - 1) * input.perPage;
-
-      // 키워드 목록 + 최신 지표 조인
-      const keywords = await db.select()
-        .from(keywordMaster)
-        .where(and(...conditions))
-        .orderBy(
-          input.sortBy === "keyword"
-            ? (input.sortDir === "asc" ? asc(keywordMaster.keyword) : desc(keywordMaster.keyword))
-            : (input.sortDir === "asc" ? asc(keywordMaster.firstSeenAt) : desc(keywordMaster.firstSeenAt)),
-        )
-        .limit(input.perPage)
-        .offset(offset);
-
-      // 각 키워드의 최신 지표 가져오기
-      if (!keywords.length) return { items: [], total, page: input.page, totalPages: Math.ceil(total / input.perPage) };
-
-      const keywordIds = keywords.map(k => k.id);
-      const metrics = await db.select()
-        .from(keywordDailyMetrics)
-        .where(and(
-          eq(keywordDailyMetrics.userId, ctx.user!.id),
-          inArray(keywordDailyMetrics.keywordId, keywordIds),
-          sql`(${keywordDailyMetrics.keywordId}, ${keywordDailyMetrics.metricDate}) IN (
-            SELECT keyword_id, MAX(metric_date) FROM keyword_daily_metrics
-            WHERE user_id = ${ctx.user!.id}
-            AND keyword_id IN (${sql.join(keywordIds.map(id => sql`${id}`), sql`, `)})
-            GROUP BY keyword_id
-          )`,
-        ));
-
-      const metricsMap = new Map(metrics.map(m => [m.keywordId, m]));
-
-      const items = keywords.map(kw => {
-        const m = metricsMap.get(kw.id);
-        return {
-          ...kw,
-          metrics: m || null,
-        };
-      });
-
-      // 정렬 (지표 기반)
-      if (input.sortBy === "total_search") {
-        items.sort((a, b) => {
-          const av = a.metrics?.naverTotalSearch || 0;
-          const bv = b.metrics?.naverTotalSearch || 0;
-          return input.sortDir === "desc" ? bv - av : av - bv;
-        });
-      } else if (input.sortBy === "final_score") {
-        items.sort((a, b) => {
-          const av = Number(a.metrics?.finalScore || 0);
-          const bv = Number(b.metrics?.finalScore || 0);
-          return input.sortDir === "desc" ? bv - av : av - bv;
-        });
-      }
-
-      return { items, total, page: input.page, totalPages: Math.ceil(total / input.perPage) };
-    }),
-
-  // ===== 키워드 점수 계산 (배치 또는 단건) =====
+  // ===== 6. 점수 계산 (배치) =====
   scoreKeywords: protectedProcedure
     .input(z.object({
       keywordIds: z.array(z.number().int()).min(1).max(50).optional(),
@@ -222,8 +400,6 @@ export const keywordDiscoveryRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
       const today = new Date().toISOString().slice(0, 10);
-
-      // 대상 키워드 조회
       const conditions: any[] = [eq(keywordMaster.userId, ctx.user!.id)];
       if (input?.keywordIds) {
         conditions.push(inArray(keywordMaster.id, input.keywordIds));
@@ -237,7 +413,6 @@ export const keywordDiscoveryRouter = router({
       let scored = 0;
 
       for (const kw of keywords) {
-        // 최신 지표
         const [metric] = await db.select()
           .from(keywordDailyMetrics)
           .where(and(
@@ -249,7 +424,6 @@ export const keywordDiscoveryRouter = router({
 
         if (!metric) continue;
 
-        // 쿠팡 데이터 연동 (extKeywordDailyStats에서 가져오기)
         const [coupangData] = await db.select()
           .from(extKeywordDailyStats)
           .where(and(
@@ -259,7 +433,6 @@ export const keywordDiscoveryRouter = router({
           .orderBy(desc(extKeywordDailyStats.statDate))
           .limit(1);
 
-        // 점수 계산
         const result = scoreKeyword({
           naverTotalSearch: metric.naverTotalSearch || 0,
           naverCompetition: metric.naverCompetitionIndex || undefined,
@@ -272,13 +445,15 @@ export const keywordDiscoveryRouter = router({
           coupangOutOfStockCount: metric.coupangOutOfStockCount || 0,
         });
 
-        // 지표 업데이트
         await db.update(keywordDailyMetrics)
           .set({
             marketGapScore: result.marketGapScore.toFixed(4),
             trendScore: result.trendSpikeScore.toFixed(4),
             hiddenScore: result.hiddenItemScore.toFixed(4),
+            sourcingScore: result.coupangBaseScore.toFixed(4),
             finalScore: result.finalScore.toFixed(4),
+            coupangBaseScore: result.coupangBaseScore.toFixed(4),
+            naverValidationScore: result.naverValidationScore.toFixed(4),
           })
           .where(eq(keywordDailyMetrics.id, metric.id));
 
@@ -288,7 +463,7 @@ export const keywordDiscoveryRouter = router({
       return { success: true, scored };
     }),
 
-  // ===== 키워드 삭제 =====
+  // ===== 7. 키워드 삭제 =====
   deleteKeywords: protectedProcedure
     .input(z.object({
       ids: z.array(z.number().int()).min(1).max(50),
@@ -297,14 +472,12 @@ export const keywordDiscoveryRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // 관련 지표 삭제
       await db.delete(keywordDailyMetrics)
         .where(and(
           eq(keywordDailyMetrics.userId, ctx.user!.id),
           inArray(keywordDailyMetrics.keywordId, input.ids),
         ));
 
-      // 키워드 삭제
       await db.delete(keywordMaster)
         .where(and(
           eq(keywordMaster.userId, ctx.user!.id),
@@ -314,7 +487,7 @@ export const keywordDiscoveryRouter = router({
       return { success: true, deleted: input.ids.length };
     }),
 
-  // ===== 대시보드 요약 =====
+  // ===== 8. 대시보드 요약 =====
   overview: protectedProcedure
     .query(async ({ ctx }) => {
       const db = await getDb();
@@ -322,114 +495,24 @@ export const keywordDiscoveryRouter = router({
 
       const [stats] = await db.select({
         totalKeywords: sql<number>`COUNT(*)`,
-        naverCount: sql<number>`SUM(CASE WHEN source_type = 'naver_api' THEN 1 ELSE 0 END)`,
-        manualCount: sql<number>`SUM(CASE WHEN source_type = 'manual' THEN 1 ELSE 0 END)`,
-        extensionCount: sql<number>`SUM(CASE WHEN source_type = 'extension' THEN 1 ELSE 0 END)`,
+        pendingCount: sql<number>`SUM(CASE WHEN validation_status = 'pending' THEN 1 ELSE 0 END)`,
+        validatedCount: sql<number>`SUM(CASE WHEN validation_status = 'validated' THEN 1 ELSE 0 END)`,
+        rejectedCount: sql<number>`SUM(CASE WHEN validation_status = 'rejected' THEN 1 ELSE 0 END)`,
+        recommendedCount: sql<number>`SUM(CASE WHEN validation_status = 'recommended' THEN 1 ELSE 0 END)`,
       })
         .from(keywordMaster)
         .where(eq(keywordMaster.userId, ctx.user!.id));
 
       return {
         totalKeywords: Number(stats?.totalKeywords || 0),
-        naverCount: Number(stats?.naverCount || 0),
-        manualCount: Number(stats?.manualCount || 0),
-        extensionCount: Number(stats?.extensionCount || 0),
+        pendingCount: Number(stats?.pendingCount || 0),
+        validatedCount: Number(stats?.validatedCount || 0),
+        rejectedCount: Number(stats?.rejectedCount || 0),
+        recommendedCount: Number(stats?.recommendedCount || 0),
       };
     }),
 
-  // ===== 급상승 / 블루오션 / 숨은아이템 탭별 조회 =====
-  getDiscoveryList: protectedProcedure
-    .input(z.object({
-      tab: z.enum(["trending", "blue_ocean", "hidden", "high_margin", "overheated"]).default("trending"),
-      limit: z.number().int().min(10).max(100).default(30),
-    }))
-    .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
-      // 모든 키워드 + 최신 지표 가져와서 점수별 정렬
-      const keywords = await db.select()
-        .from(keywordMaster)
-        .where(eq(keywordMaster.userId, ctx.user!.id));
-
-      if (!keywords.length) return [];
-
-      const keywordIds = keywords.map(k => k.id);
-      const metrics = await db.select()
-        .from(keywordDailyMetrics)
-        .where(and(
-          eq(keywordDailyMetrics.userId, ctx.user!.id),
-          inArray(keywordDailyMetrics.keywordId, keywordIds),
-          sql`(${keywordDailyMetrics.keywordId}, ${keywordDailyMetrics.metricDate}) IN (
-            SELECT keyword_id, MAX(metric_date) FROM keyword_daily_metrics
-            WHERE user_id = ${ctx.user!.id}
-            GROUP BY keyword_id
-          )`,
-        ));
-
-      const metricsMap = new Map(metrics.map(m => [m.keywordId, m]));
-
-      const items = keywords
-        .map(kw => {
-          const m = metricsMap.get(kw.id);
-          const search = m?.naverTotalSearch || 0;
-          const products = m?.coupangProductCount || 0;
-          const reviewDelta = m?.coupangTop10ReviewDelta || 0;
-
-          // 점수 계산
-          const scores = scoreKeyword({
-            naverTotalSearch: search,
-            coupangProductCount: products,
-            coupangTop10ReviewSum: m?.coupangTop10ReviewSum || 0,
-            coupangTop10ReviewDelta: reviewDelta,
-            coupangAvgPrice: m?.coupangAvgPrice || 0,
-            coupangNewProductReview30d: m?.coupangNewProductReview30d || 0,
-            coupangOutOfStockCount: m?.coupangOutOfStockCount || 0,
-          });
-
-          return { ...kw, metrics: m, scores };
-        });
-
-      // 탭별 필터/정렬
-      switch (input.tab) {
-        case "trending":
-          return items
-            .filter(i => i.scores.salesVelocityScore > 0 || i.scores.trendSpikeScore > 0)
-            .sort((a, b) => (b.scores.salesVelocityScore + b.scores.trendSpikeScore) - (a.scores.salesVelocityScore + a.scores.trendSpikeScore))
-            .slice(0, input.limit);
-
-        case "blue_ocean":
-          return items
-            .filter(i => i.scores.marketGapScore >= 30)
-            .sort((a, b) => b.scores.marketGapScore - a.scores.marketGapScore)
-            .slice(0, input.limit);
-
-        case "hidden":
-          return items
-            .filter(i => i.scores.hiddenItemScore >= 20)
-            .sort((a, b) => b.scores.hiddenItemScore - a.scores.hiddenItemScore)
-            .slice(0, input.limit);
-
-        case "high_margin":
-          return items
-            .filter(i => i.scores.chinaArbitrageScore > 0)
-            .sort((a, b) => b.scores.chinaArbitrageScore - a.scores.chinaArbitrageScore)
-            .slice(0, input.limit);
-
-        case "overheated":
-          return items
-            .filter(i => i.scores.marketGapScore < 20 && (i.metrics?.naverTotalSearch || 0) > 0)
-            .sort((a, b) => a.scores.marketGapScore - b.scores.marketGapScore)
-            .slice(0, input.limit);
-
-        default:
-          return items
-            .sort((a, b) => b.scores.finalScore - a.scores.finalScore)
-            .slice(0, input.limit);
-      }
-    }),
-
-  // ===== 네이버 API 설정 상태 확인 =====
+  // ===== 9. 네이버 API 설정 상태 확인 =====
   checkNaverApiConfig: protectedProcedure
     .query(() => {
       return {
@@ -441,368 +524,60 @@ export const keywordDiscoveryRouter = router({
       };
     }),
 
-  // ===== DB 통계 (데이터 관리용) =====
-  dbStats: protectedProcedure
-    .query(async ({ ctx }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
-      // keyword_master 수
-      const [masterStats] = await db.select({
-        total: sql<number>`COUNT(*)`,
-        naverCount: sql<number>`SUM(CASE WHEN source_type = 'naver_api' THEN 1 ELSE 0 END)`,
-        extensionCount: sql<number>`SUM(CASE WHEN source_type = 'extension' THEN 1 ELSE 0 END)`,
-        manualCount: sql<number>`SUM(CASE WHEN source_type = 'manual' THEN 1 ELSE 0 END)`,
-        noScoreCount: sql<number>`COUNT(*) - (
-          SELECT COUNT(DISTINCT km2.id) FROM keyword_master km2
-          JOIN keyword_daily_metrics kdm ON km2.id = kdm.keyword_id
-          WHERE km2.user_id = ${ctx.user!.id} AND kdm.final_score > 0
-        )`,
-      }).from(keywordMaster).where(eq(keywordMaster.userId, ctx.user!.id));
-
-      // keyword_daily_metrics 수
-      const [metricsStats] = await db.select({
-        total: sql<number>`COUNT(*)`,
-        oldCount: sql<number>`SUM(CASE WHEN metric_date < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 30 DAY), '%Y-%m-%d') THEN 1 ELSE 0 END)`,
-        uniqueDates: sql<number>`COUNT(DISTINCT metric_date)`,
-      }).from(keywordDailyMetrics).where(eq(keywordDailyMetrics.userId, ctx.user!.id));
-
-      // ext_keyword_daily_stats 수
-      const [extStats] = await db.select({
-        total: sql<number>`COUNT(*)`,
-        uniqueKeywords: sql<number>`COUNT(DISTINCT \`query\`)`,
-      }).from(extKeywordDailyStats).where(eq(extKeywordDailyStats.userId, ctx.user!.id));
-
-      // 확장(extension) 키워드 중 아직 네이버 확장 안된 키워드 수
-      const [unmatchedExt] = await db.select({
-        count: sql<number>`COUNT(DISTINCT ess.query)`,
-      }).from(sql`ext_search_snapshots ess`)
-        .where(sql`ess.user_id = ${ctx.user!.id}
-          AND NOT EXISTS (
-            SELECT 1 FROM keyword_master km
-            WHERE km.user_id = ${ctx.user!.id}
-            AND km.normalized_keyword = LOWER(TRIM(ess.query))
-          )`);
-
-      return {
-        keywordMaster: {
-          total: Number(masterStats?.total || 0),
-          naverCount: Number(masterStats?.naverCount || 0),
-          extensionCount: Number(masterStats?.extensionCount || 0),
-          manualCount: Number(masterStats?.manualCount || 0),
-          noScoreCount: Number(masterStats?.noScoreCount || 0),
-        },
-        dailyMetrics: {
-          total: Number(metricsStats?.total || 0),
-          oldCount: Number(metricsStats?.oldCount || 0),
-          uniqueDates: Number(metricsStats?.uniqueDates || 0),
-        },
-        extKeywordStats: {
-          total: Number(extStats?.total || 0),
-          uniqueKeywords: Number(extStats?.uniqueKeywords || 0),
-        },
-        unmatchedExtensionKeywords: Number(unmatchedExt?.count || 0),
-      };
-    }),
-
-  // ===== 자동 정리 (오래된 메트릭 + 저점수 키워드 삭제) =====
-  autoCleanup: protectedProcedure
-    .input(z.object({
-      retentionDays: z.number().int().min(7).max(365).default(30),
-      deleteZeroScore: z.boolean().default(false),
-      deleteInactive: z.boolean().default(false),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
-      let deletedMetrics = 0;
-      let deletedKeywords = 0;
-
-      // 1. 오래된 일별 지표 삭제 (retentionDays 이전)
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - input.retentionDays);
-      const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-
-      const oldMetricsResult = await db.delete(keywordDailyMetrics)
-        .where(and(
-          eq(keywordDailyMetrics.userId, ctx.user!.id),
-          sql`${keywordDailyMetrics.metricDate} < ${cutoffStr}`,
-        ));
-      deletedMetrics = (oldMetricsResult as any)?.[0]?.affectedRows || 0;
-
-      // 2. 점수 0인 키워드 삭제 (옵션)
-      if (input.deleteZeroScore) {
-        // 점수가 없는(finalScore = 0이거나 메트릭이 아예 없는) 키워드 찾기
-        const zeroScoreKeywords = await db.select({ id: keywordMaster.id })
-          .from(keywordMaster)
-          .where(and(
-            eq(keywordMaster.userId, ctx.user!.id),
-            sql`${keywordMaster.id} NOT IN (
-              SELECT DISTINCT keyword_id FROM keyword_daily_metrics
-              WHERE user_id = ${ctx.user!.id} AND CAST(final_score AS DECIMAL(10,4)) > 0
-            )`,
-          ))
-          .limit(500);
-
-        if (zeroScoreKeywords.length) {
-          const ids = zeroScoreKeywords.map(k => k.id);
-          await db.delete(keywordDailyMetrics)
-            .where(and(
-              eq(keywordDailyMetrics.userId, ctx.user!.id),
-              inArray(keywordDailyMetrics.keywordId, ids),
-            ));
-          await db.delete(keywordMaster)
-            .where(and(
-              eq(keywordMaster.userId, ctx.user!.id),
-              inArray(keywordMaster.id, ids),
-            ));
-          deletedKeywords = ids.length;
-        }
-      }
-
-      // 3. 비활성 키워드 삭제 (30일 이상 미접근)
-      if (input.deleteInactive) {
-        const inactiveCutoff = new Date();
-        inactiveCutoff.setDate(inactiveCutoff.getDate() - 30);
-        const inactiveStr = inactiveCutoff.toISOString().replace("T", " ").slice(0, 19);
-
-        const inactiveKeywords = await db.select({ id: keywordMaster.id })
-          .from(keywordMaster)
-          .where(and(
-            eq(keywordMaster.userId, ctx.user!.id),
-            eq(keywordMaster.isActive, false),
-            sql`${keywordMaster.lastSeenAt} < ${inactiveStr}`,
-          ))
-          .limit(500);
-
-        if (inactiveKeywords.length) {
-          const ids = inactiveKeywords.map(k => k.id);
-          await db.delete(keywordDailyMetrics)
-            .where(and(
-              eq(keywordDailyMetrics.userId, ctx.user!.id),
-              inArray(keywordDailyMetrics.keywordId, ids),
-            ));
-          await db.delete(keywordMaster)
-            .where(and(
-              eq(keywordMaster.userId, ctx.user!.id),
-              inArray(keywordMaster.id, ids),
-            ));
-          deletedKeywords += ids.length;
-        }
-      }
-
-      return { success: true, deletedMetrics, deletedKeywords };
-    }),
-
-  // ===== 익스텐션 키워드 일괄 확장 (크롬에서 수집된 키워드 → 네이버 자동 확장) =====
-  autoExpandExtensionKeywords: protectedProcedure
+  // ===== 10. 만료된 추천 키워드 자동 정리 =====
+  cleanExpiredRecommendations: protectedProcedure
     .mutation(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // 익스텐션(ext_search_snapshots)에서 수집된 키워드 중
-      // keyword_master에 아직 없는 것들 가져오기
-      const unmatchedRows = await db.select({
-        query: sql<string>`DISTINCT ess.query`,
-      }).from(sql`ext_search_snapshots ess`)
-        .where(sql`ess.user_id = ${ctx.user!.id}
-          AND NOT EXISTS (
-            SELECT 1 FROM keyword_master km
-            WHERE km.user_id = ${ctx.user!.id}
-            AND km.normalized_keyword = LOWER(TRIM(ess.query))
-          )`)
-        .limit(50); // 한번에 50개씩 처리
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
-      if (!unmatchedRows.length) {
-        return { success: true, message: "확장할 키워드가 없습니다", expanded: 0, inserted: 0, skipped: 0 };
-      }
-
-      const seeds = unmatchedRows.map((r: any) => r.query).filter(Boolean);
-      if (!seeds.length) {
-        return { success: true, message: "유효한 키워드가 없습니다", expanded: 0, inserted: 0, skipped: 0 };
-      }
-
-      // 네이버 API 호출 (최대 10개씩 배치)
-      const today = new Date().toISOString().slice(0, 10);
-      let totalInserted = 0;
-      let totalSkipped = 0;
-
-      // 네이버 API는 한번에 최대 5개 seed 가능, 총 10배치 = 50키워드
-      const batchSize = 5;
-      for (let i = 0; i < seeds.length; i += batchSize) {
-        const batch = seeds.slice(i, i + batchSize);
-        try {
-          const results = await expandNaverKeywords(batch);
-
-          for (const r of results) {
-            const normalized = normalizeKeyword(r.keyword);
-            if (!normalized) { totalSkipped++; continue; }
-
-            const existing = await db.select({ id: keywordMaster.id })
-              .from(keywordMaster)
-              .where(and(
-                eq(keywordMaster.userId, ctx.user!.id),
-                eq(keywordMaster.normalizedKeyword, normalized),
-              ))
-              .limit(1);
-
-            let keywordId: number;
-
-            if (existing.length > 0) {
-              keywordId = existing[0].id;
-              await db.update(keywordMaster)
-                .set({ lastSeenAt: new Date().toISOString().replace("T", " ").slice(0, 19) })
-                .where(eq(keywordMaster.id, keywordId));
-              totalSkipped++;
-            } else {
-              const res = await db.insert(keywordMaster).values({
-                userId: ctx.user!.id,
-                keyword: r.keyword,
-                normalizedKeyword: normalized,
-                sourceType: "naver_api",
-                rootKeyword: batch[0],
-                keywordDepth: 1,
-              });
-              keywordId = Number((res as any)[0]?.insertId);
-              totalInserted++;
-            }
-
-            // 일별 지표 저장
-            const existingMetric = await db.select({ id: keywordDailyMetrics.id })
-              .from(keywordDailyMetrics)
-              .where(and(
-                eq(keywordDailyMetrics.userId, ctx.user!.id),
-                eq(keywordDailyMetrics.keywordId, keywordId),
-                eq(keywordDailyMetrics.metricDate, today),
-              ))
-              .limit(1);
-
-            if (!existingMetric.length) {
-              await db.insert(keywordDailyMetrics).values({
-                userId: ctx.user!.id,
-                keywordId,
-                metricDate: today,
-                naverPcSearch: r.pcSearch,
-                naverMobileSearch: r.mobileSearch,
-                naverTotalSearch: r.totalSearch,
-                naverCompetitionIndex: r.competition,
-              });
-            }
-          }
-        } catch (err: any) {
-          // 개별 배치 실패는 건너뛰기 (API 제한 등)
-          console.error(`Naver API batch error for seeds [${batch.join(", ")}]:`, err.message);
-        }
-
-        // 네이버 API 호출 간격 (rate limit 방지)
-        if (i + batchSize < seeds.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-
-      return {
-        success: true,
-        message: `${seeds.length}개 키워드 처리 완료`,
-        expanded: seeds.length,
-        inserted: totalInserted,
-        skipped: totalSkipped,
-      };
-    }),
-
-  // ===== 전체 키워드 일괄 네이버 확장 (keyword_master의 모든 키워드 재수집) =====
-  bulkRefreshNaverData: protectedProcedure
-    .mutation(async ({ ctx }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
-      // keyword_master에서 오늘 메트릭이 없는 키워드 가져오기
-      const today = new Date().toISOString().slice(0, 10);
-      const keywords = await db.select({
-        id: keywordMaster.id,
-        keyword: keywordMaster.keyword,
-      })
+      // 만료된 추천 키워드 삭제
+      const expired = await db.select({ id: keywordMaster.id })
         .from(keywordMaster)
         .where(and(
           eq(keywordMaster.userId, ctx.user!.id),
-          eq(keywordMaster.isActive, true),
-          sql`${keywordMaster.id} NOT IN (
-            SELECT keyword_id FROM keyword_daily_metrics
-            WHERE user_id = ${ctx.user!.id} AND metric_date = ${today}
-          )`,
+          eq(keywordMaster.validationStatus, "recommended"),
+          sql`${keywordMaster.recommendedExpiresAt} IS NOT NULL AND ${keywordMaster.recommendedExpiresAt} < ${now}`,
         ))
-        .limit(100); // 한번에 100개씩
+        .limit(200);
 
-      if (!keywords.length) {
-        return { success: true, message: "모든 키워드가 최신 상태입니다", refreshed: 0 };
-      }
+      if (!expired.length) return { success: true, deleted: 0 };
 
-      let refreshed = 0;
-      const batchSize = 5;
-      const seedBatches: string[][] = [];
+      const ids = expired.map(k => k.id);
+      await db.delete(keywordDailyMetrics)
+        .where(and(
+          eq(keywordDailyMetrics.userId, ctx.user!.id),
+          inArray(keywordDailyMetrics.keywordId, ids),
+        ));
+      await db.delete(keywordMaster)
+        .where(and(
+          eq(keywordMaster.userId, ctx.user!.id),
+          inArray(keywordMaster.id, ids),
+        ));
 
-      for (let i = 0; i < keywords.length; i += batchSize) {
-        seedBatches.push(keywords.slice(i, i + batchSize).map(k => k.keyword));
-      }
+      return { success: true, deleted: ids.length };
+    }),
 
-      for (const batch of seedBatches) {
-        try {
-          const results = await expandNaverKeywords(batch);
+  // ===== 11. 검증 대상 자동 선택 (우선순위 기반 top N) =====
+  getValidationQueue: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(20).default(10),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-          for (const r of results) {
-            const normalized = normalizeKeyword(r.keyword);
-            if (!normalized) continue;
+      const keywords = await db.select()
+        .from(keywordMaster)
+        .where(and(
+          eq(keywordMaster.userId, ctx.user!.id),
+          eq(keywordMaster.validationStatus, "pending"),
+          eq(keywordMaster.isActive, true),
+        ))
+        .orderBy(desc(keywordMaster.validationPriority))
+        .limit(input.limit);
 
-            // 기존 키워드 매칭
-            const [match] = await db.select({ id: keywordMaster.id })
-              .from(keywordMaster)
-              .where(and(
-                eq(keywordMaster.userId, ctx.user!.id),
-                eq(keywordMaster.normalizedKeyword, normalized),
-              ))
-              .limit(1);
-
-            if (!match) continue;
-
-            // 오늘 메트릭 upsert
-            const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
-              .from(keywordDailyMetrics)
-              .where(and(
-                eq(keywordDailyMetrics.userId, ctx.user!.id),
-                eq(keywordDailyMetrics.keywordId, match.id),
-                eq(keywordDailyMetrics.metricDate, today),
-              ))
-              .limit(1);
-
-            if (existingMetric) {
-              await db.update(keywordDailyMetrics)
-                .set({
-                  naverPcSearch: r.pcSearch,
-                  naverMobileSearch: r.mobileSearch,
-                  naverTotalSearch: r.totalSearch,
-                  naverCompetitionIndex: r.competition,
-                })
-                .where(eq(keywordDailyMetrics.id, existingMetric.id));
-            } else {
-              await db.insert(keywordDailyMetrics).values({
-                userId: ctx.user!.id,
-                keywordId: match.id,
-                metricDate: today,
-                naverPcSearch: r.pcSearch,
-                naverMobileSearch: r.mobileSearch,
-                naverTotalSearch: r.totalSearch,
-                naverCompetitionIndex: r.competition,
-              });
-            }
-            refreshed++;
-          }
-        } catch (err: any) {
-          console.error(`Naver refresh batch error:`, err.message);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      return { success: true, refreshed, total: keywords.length };
+      return keywords;
     }),
 });
