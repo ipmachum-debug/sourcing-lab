@@ -629,9 +629,9 @@ export const coupangRouter = router({
         .limit(5);
 
       return {
-        daily: { qty: N(dailySales?.totalQty), grossSales: dailyGrossSales, adSpend: N(dailySales?.totalAdSpend), payout: dailyPayout, commission: dailyCommission, label: today, isEstimated },
-        weekly: { qty: N(weeklySales?.totalQty), grossSales: N(weeklySales?.totalGrossSales), adSpend: N(weeklySales?.totalAdSpend), payout: N(weeklySettle?.totalPayout), commission: N(weeklySettle?.totalCommission), label: `${weekStart} ~ ${weekEnd}` },
-        monthly: { qty: N(monthlySales?.totalQty), grossSales: N(monthlySales?.totalGrossSales), adSpend: N(monthlySales?.totalAdSpend), payout: N(monthlySettle?.totalPayout), commission: N(monthlySettle?.totalCommission), label: `${year}년 ${month}월` },
+        daily: { qty: N(dailySales?.totalQty), orders: N(dailySales?.totalOrders), grossSales: dailyGrossSales, adSpend: N(dailySales?.totalAdSpend), payout: dailyPayout, commission: dailyCommission, label: today, isEstimated },
+        weekly: { qty: N(weeklySales?.totalQty), orders: N(weeklySales?.totalOrders), grossSales: N(weeklySales?.totalGrossSales), adSpend: N(weeklySales?.totalAdSpend), payout: N(weeklySettle?.totalPayout), commission: N(weeklySettle?.totalCommission), label: `${weekStart} ~ ${weekEnd}` },
+        monthly: { qty: N(monthlySales?.totalQty), orders: N(monthlySales?.totalOrders), grossSales: N(monthlySales?.totalGrossSales), adSpend: N(monthlySales?.totalAdSpend), payout: N(monthlySettle?.totalPayout), commission: N(monthlySettle?.totalCommission), label: `${year}년 ${month}월` },
         mappingCount: N(mappingCount?.count),
         activeMappingCount: N(activeMappingCount?.count),
         recentJobs,
@@ -883,10 +883,16 @@ export const coupangRouter = router({
         let totalRecords = 0;
         const newMappingsCreated: string[] = [];
 
-        // 날짜별로 집계
+        // ★ 날짜별로 집계 — orderedAt에서 날짜를 추출하되,
+        //   KST 기준 오늘 날짜와 비교하여 오늘 범위 주문은 today로 강제 (syncAll과 동일 로직)
+        const todayStr = getTodayStr();
         const ordersByDate = new Map<string, typeof orders>();
         for (const order of orders) {
-          const orderDate = order.orderedAt?.split("T")[0] || order.paidAt?.split("T")[0] || input.dateFrom;
+          let orderDate = order.orderedAt?.split("T")[0] || order.paidAt?.split("T")[0] || "";
+          // orderedAt이 없거나, 날짜가 입력 범위 바깥이면 오늘로 처리
+          if (!orderDate || orderDate < input.dateFrom || orderDate > input.dateTo) {
+            orderDate = todayStr;
+          }
           if (!ordersByDate.has(orderDate)) ordersByDate.set(orderDate, []);
           ordersByDate.get(orderDate)!.push(order);
         }
