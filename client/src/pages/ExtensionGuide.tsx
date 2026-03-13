@@ -11,9 +11,9 @@ import {
   Sparkles, Brain, Bell, HelpCircle, Clock
 } from "lucide-react";
 
-const EXTENSION_VERSION = "7.4.1";
+const EXTENSION_VERSION = "8.0.0";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
-const EXTENSION_FILE_SIZE = "165KB";
+const EXTENSION_FILE_SIZE = "174KB";
 
 function AccordionSection({
   icon: Icon,
@@ -586,9 +586,21 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
+                    version: "v8.0.0",
+                    date: "2026-03-14",
+                    badge: "Latest",
+                    changes: [
+                      "AI 제품 발견 시스템 (키워드→크롤링→AI분석→추적/거절)",
+                      "1차 필터링: 광고 제외, 리뷰/가격/평점/랭크/로켓 기반 점수",
+                      "AI 분석: LLM 시장 개요 + 상세 크롤링 데이터 → 근거/리스크/기회",
+                      "규칙기반 폴백: LLM 실패 시 자동 대체",
+                      "확장프로그램 startDiscoveryCrawl() 파이프라인 추가",
+                      "추적/거절: ext_product_trackings 자동 등록",
+                    ],
+                  },
+                  {
                     version: "v7.4.1",
                     date: "2026-03-12",
-                    badge: "Latest",
                     changes: [
                       "인간 행동 모방 딜레이 전면 개편 (봇 탐지 회피 강화)",
                       "지수분포 + 피로도 + 시간대 가중치 + 지터 적용",
