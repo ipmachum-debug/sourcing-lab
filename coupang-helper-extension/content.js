@@ -2156,8 +2156,28 @@
       const clean = items.map(({ _box, ...c }) => c);
       const q = getQ();
 
-      // 기존 SEARCH_RESULTS_PARSED 유지 (하위호환)
-      chrome.runtime.sendMessage({ type: 'SEARCH_RESULTS_PARSED', query: q, items: clean }).catch(() => {});
+      // v8.0: 총 상품수 추출 (쿠팡 검색 페이지 헤더)
+      let totalProductCount = 0;
+      try {
+        // 전략 1: "총 N개의 검색결과" 텍스트 검색
+        const resultCountEl = document.querySelector('.search-result-count, [class*="resultCount"], [class*="search-count"], .search-result__count');
+        if (resultCountEl) {
+          const m = tx(resultCountEl).match(/([\d,]+)/);
+          if (m) totalProductCount = parseInt(m[1].replace(/,/g, ''), 10) || 0;
+        }
+        // 전략 2: "N개의 상품" 패턴
+        if (!totalProductCount) {
+          for (const el of document.querySelectorAll('span, em, strong, div, p')) {
+            if (el.closest('#sh-panel')) continue;
+            const t = tx(el);
+            const m = t.match(/([\d,]+)\s*개의?\s*(검색|상품|결과)/);
+            if (m) { totalProductCount = parseInt(m[1].replace(/,/g, ''), 10) || 0; break; }
+          }
+        }
+      } catch (_) {}
+
+      // 기존 SEARCH_RESULTS_PARSED 유지 (하위호환) + 총 상품수 추가
+      chrome.runtime.sendMessage({ type: 'SEARCH_RESULTS_PARSED', query: q, items: clean, totalProductCount }).catch(() => {});
 
       // ★ 새 하이브리드 수집: SAVE_SEARCH_EVENT ★
       // 개별 상품 데이터 + 파싱 품질 메트릭을 포함하여 서버에 전송

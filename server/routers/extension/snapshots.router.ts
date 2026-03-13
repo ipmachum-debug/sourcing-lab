@@ -23,6 +23,22 @@ export const snapshotsRouter = router({
       competitionScore: z.number().int().default(0),
       competitionLevel: z.enum(["easy", "medium", "hard"]).default("medium"),
       items: z.array(z.any()).optional(),
+      // v8.0: 셀러라이프 수준 시장 데이터
+      totalProductCount: z.number().int().default(0),
+      minPrice: z.number().int().default(0),
+      maxPrice: z.number().int().default(0),
+      medianPrice: z.number().int().default(0),
+      totalReviewSum: z.number().int().default(0),
+      maxReviewCount: z.number().int().default(0),
+      minReviewCount: z.number().int().default(0),
+      rocketCount: z.number().int().default(0),
+      sellerRocketCount: z.number().int().default(0),
+      globalRocketCount: z.number().int().default(0),
+      normalDeliveryCount: z.number().int().default(0),
+      overseasDeliveryCount: z.number().int().default(0),
+      priceDistribution: z.array(z.any()).optional(),
+      reviewDistribution: z.array(z.any()).optional(),
+      highReviewCount: z.number().int().default(0),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -52,6 +68,23 @@ export const snapshotsRouter = router({
         competitionScore: input.competitionScore,
         competitionLevel: input.competitionLevel,
         itemsJson: input.items ? JSON.stringify(input.items) : null,
+        // v8.0: 확장 시장 데이터
+        totalProductCount: input.totalProductCount,
+        minPrice: input.minPrice,
+        maxPrice: input.maxPrice,
+        medianPrice: input.medianPrice,
+        totalReviewSum: input.totalReviewSum,
+        maxReviewCount: input.maxReviewCount,
+        minReviewCount: input.minReviewCount,
+        avgRatingAll: input.avgRating.toFixed(2),
+        rocketCount: input.rocketCount,
+        sellerRocketCount: input.sellerRocketCount,
+        globalRocketCount: input.globalRocketCount,
+        normalDeliveryCount: input.normalDeliveryCount,
+        overseasDeliveryCount: input.overseasDeliveryCount,
+        priceDistributionJson: input.priceDistribution || null,
+        reviewDistributionJson: input.reviewDistribution || null,
+        highReviewCount: input.highReviewCount,
       };
 
       let resultId: number | undefined;

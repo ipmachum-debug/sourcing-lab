@@ -270,6 +270,19 @@ class ApiClient {
     return this._call('extension.submitDetailResults', data, 'mutation');
   }
 
+  // ===== v8.0: 시장 데이터 (검색량 & CPC) =====
+  async saveCpcData(data) {
+    return this._call('extension.saveCpcData', data, 'mutation');
+  }
+
+  async fetchSearchVolume(data) {
+    return this._call('extension.fetchSearchVolume', data, 'mutation');
+  }
+
+  async getKeywordMarketData(data) {
+    return this._call('extension.getKeywordMarketData', data, 'query');
+  }
+
   // ===== v7.2: 내부 통신 (리트라이·타임아웃·인증 갱신 강화) =====
 
   // 동시 요청 큐 — 서버 과부하 방지 (최대 3개)

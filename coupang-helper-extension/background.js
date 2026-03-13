@@ -790,6 +790,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.0: 쿠팡 애즈 CPC 데이터 수신 (content-coupang-ads.js → background)
+    case 'COUPANG_ADS_CPC_DATA': {
+      (async () => {
+        try {
+          const items = message.data || [];
+          let saved = 0;
+          for (const item of items) {
+            try {
+              await apiClient.saveCpcData({
+                keyword: item.keyword,
+                categoryId: item.categoryId || '',
+                categoryName: item.categoryName || '',
+                suggestedBid: item.suggestedBid || 0,
+                minBid: item.minBid || 0,
+                maxBid: item.maxBid || 0,
+                estimatedImpressions: item.estimatedImpressions || 0,
+                estimatedClicks: item.estimatedClicks || 0,
+                estimatedCtr: item.estimatedCtr || 0,
+                competitionLevel: item.competitionLevel || '',
+              });
+              saved++;
+            } catch (e) {
+              console.warn('[CPC] Save failed for', item.keyword, e);
+            }
+          }
+          console.log(`[CPC] Saved ${saved}/${items.length} CPC records`);
+          sendResponse({ ok: true, saved });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     // content.js → background: 자동 수집 파싱 완료
     case 'SEARCH_PARSE_SUCCESS': {
       handleAutoCollectSuccess(message).then(() => {
@@ -881,12 +915,61 @@ async function syncSnapshotToServer(payload) {
 
   const competitionLevel = competitionScore >= 70 ? 'hard' : competitionScore >= 45 ? 'medium' : 'easy';
 
+  // v8.0: 셀러라이프 수준 시장 데이터 계산
+  const minPrice = prices.length ? Math.min(...prices) : 0;
+  const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const sortedPrices = [...prices].sort((a, b) => a - b);
+  const medianPrice = sortedPrices.length ? sortedPrices[Math.floor(sortedPrices.length / 2)] : 0;
+  const totalReviewSum = reviews.reduce((a, b) => a + b, 0);
+  const maxReviewCount = reviews.length ? Math.max(...reviews) : 0;
+  const minReviewCount = reviews.length ? Math.min(...reviews) : 0;
+
+  // 배송 타입별 카운트
+  let rocketCnt = 0, sellerRocketCnt = 0, globalRocketCnt = 0;
+  let normalDeliveryCnt = 0, overseasDeliveryCnt = 0;
+  for (const it of items) {
+    const dt = it.deliveryType || '';
+    if (dt === 'rocketDelivery') rocketCnt++;
+    else if (dt === 'sellerRocketDelivery') sellerRocketCnt++;
+    else if (dt === 'globalRocketDelivery') globalRocketCnt++;
+    else if (dt === 'normalDelivery') normalDeliveryCnt++;
+    else if (dt === 'internationalDelivery') overseasDeliveryCnt++;
+  }
+
+  // 가격/리뷰 분포 히스토그램
+  function makeDistribution(values, bucketCount) {
+    if (!values.length) return [];
+    const vMin = Math.min(...values);
+    const vMax = Math.max(...values);
+    if (vMin === vMax) return [{ range: `${vMin}`, count: values.length }];
+    const step = (vMax - vMin) / bucketCount;
+    return Array.from({ length: bucketCount }, (_, i) => {
+      const lo = Math.round(vMin + step * i);
+      const hi = Math.round(vMin + step * (i + 1));
+      const count = values.filter(v => v >= lo && (i === bucketCount - 1 ? v <= hi : v < hi)).length;
+      return { range: `${lo}~${hi}`, count };
+    });
+  }
+
   await apiClient.saveSnapshot({
     query: payload.query,
     totalItems: payload.count,
     avgPrice, avgRating, avgReview, highReviewRatio, adCount,
     competitionScore, competitionLevel,
-    items: items.slice(0, 20),
+    items: items.slice(0, 36),
+    // v8.0: 확장 시장 데이터
+    totalProductCount: payload.totalProductCount || 0,
+    minPrice, maxPrice, medianPrice,
+    totalReviewSum: Math.min(totalReviewSum, 2147483647),
+    maxReviewCount, minReviewCount,
+    rocketCount: rocketCnt,
+    sellerRocketCount: sellerRocketCnt,
+    globalRocketCount: globalRocketCnt,
+    normalDeliveryCount: normalDeliveryCnt,
+    overseasDeliveryCount: overseasDeliveryCnt,
+    priceDistribution: makeDistribution(prices, 6),
+    reviewDistribution: makeDistribution(reviews, 5),
+    highReviewCount,
   });
 }
 
