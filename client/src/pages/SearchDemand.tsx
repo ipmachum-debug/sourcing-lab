@@ -55,23 +55,24 @@ export default function SearchDemand() {
   // ===== Mutations =====
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
   const rebuildDailyStats = trpc.extension.rebuildDailyStats.useMutation();
-  const rebuildNormalized = trpc.extension.rebuildNormalizedMetrics.useMutation();
 
+  const [rebuildRunning, setRebuildRunning] = useState(false);
   const handleRebuildNormalized = useCallback(async () => {
+    if (rebuildRunning) return;
+    setRebuildRunning(true);
     try {
-      toast.info("정규화 재계산 시작...");
-      const [r1, r2] = await Promise.all([
-        rebuildNormalized.mutateAsync({ days: demandDays }),
-        rebuildDailyStats.mutateAsync({ days: demandDays }),
-      ]);
-      toast.success(`재계산 완료: ${r1.rebuilt + r2.rebuilt}건 (${r1.keywords + r2.keywords}개 키워드)`);
+      toast.info("정규화 재계산 시작 (v7.7.4 엔진)...");
+      const r = await rebuildDailyStats.mutateAsync({ days: Math.max(demandDays, 90) });
+      toast.success(`재계산 완료: ${r.rebuilt}건 (${r.keywords}개 키워드)`);
       keywordStatsList.refetch();
       keywordStatsOverview.refetch();
       if (demandSelectedKw) keywordDailyStats.refetch();
     } catch (err: any) {
       toast.error(`재계산 오류: ${err.message}`);
+    } finally {
+      setRebuildRunning(false);
     }
-  }, [demandDays, demandSelectedKw]);
+  }, [demandDays, demandSelectedKw, rebuildRunning]);
 
   const handleAutoStats = useCallback(async () => {
     if (statsRunning) return;
@@ -162,8 +163,8 @@ export default function SearchDemand() {
                 </Button>
                 <Button size="sm" variant="outline" className="text-xs gap-1.5 border-purple-300 text-purple-600 hover:bg-purple-50"
                   onClick={handleRebuildNormalized}
-                  disabled={rebuildNormalized.isPending || rebuildDailyStats.isPending}>
-                  {rebuildNormalized.isPending ? "재계산중..." : "정규화 재계산"}
+                  disabled={rebuildRunning || rebuildDailyStats.isPending}>
+                  {rebuildRunning ? "재계산중..." : "정규화 재계산"}
                 </Button>
               </>
             ) : (
@@ -457,10 +458,17 @@ export default function SearchDemand() {
                     </div>
                   </CardHeader>
                   <CardContent className="pt-3">
-                    {keywordDailyStats.data && keywordDailyStats.data.length > 1 ? (() => {
+                    {keywordDailyStats.data && keywordDailyStats.data.length > 0 ? (() => {
                       // ★ v7.7.3: baseline/missing 제외한 차트 데이터
                       const chartData = (keywordDailyStats.data as any[]).filter(
                         (d: any) => d.dataStatus !== "baseline" && d.dataStatus !== "missing"
+                      );
+                      if (chartData.length < 2) return (
+                        <div className="py-8 text-center text-gray-400">
+                          <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">첫 번째 크롤링이 완료되었습니다.</p>
+                          <p className="text-[10px] mt-1">내일부터 일별 추이가 표시됩니다.</p>
+                        </div>
                       );
                       return (
                       <div className="space-y-4">
@@ -498,17 +506,20 @@ export default function SearchDemand() {
                           </ResponsiveContainer>
                         </div>
 
-                        {/* 평균가 추이 */}
+                        {/* 평균가 + 상품수 추이 */}
                         <div>
                           <div className="text-[10px] font-semibold text-gray-500 mb-1">평균가 / 상품수 추이</div>
                           <ResponsiveContainer width="100%" height={130}>
-                            <AreaChart data={chartData}>
+                            <ComposedChart data={chartData}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                               <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
-                              <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
-                              <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number) => formatPrice(v)} />
-                              <Area type="monotone" dataKey="avgPrice" stroke="#d97706" fill="#fef3c7" name="평균가" />
-                            </AreaChart>
+                              <YAxis yAxisId="price" tick={{ fontSize: 9 }} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
+                              <YAxis yAxisId="count" orientation="right" tick={{ fontSize: 9 }} />
+                              <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number, name: string) => name === "평균가" ? formatPrice(v) : v} />
+                              <Legend wrapperStyle={{ fontSize: 10 }} />
+                              <Area yAxisId="price" type="monotone" dataKey="avgPrice" stroke="#d97706" fill="#fef3c7" name="평균가" />
+                              <Line yAxisId="count" type="monotone" dataKey="productCount" stroke="#6366f1" strokeWidth={1.5} dot={{ r: 1.5 }} name="상품수" />
+                            </ComposedChart>
                           </ResponsiveContainer>
                         </div>
                       </div>
@@ -546,11 +557,11 @@ export default function SearchDemand() {
                                 d.dataStatus === "provisional" ? "text-amber-500" :
                                 d.dataStatus === "anomaly" ? "text-red-500" :
                                 isBaseline ? "text-purple-500" : "text-gray-400";
-                              const statusLabel = d.dataStatus === "raw_valid" ? "확정" :
-                                d.dataStatus === "interpolated" ? "보간" :
-                                d.dataStatus === "provisional" ? "임시" :
-                                d.dataStatus === "anomaly" ? "이상" :
-                                isBaseline ? "기준" : "-";
+                              const statusLabel = d.dataStatus === "raw_valid" ? "✓ 확정" :
+                                d.dataStatus === "interpolated" ? "~ 보간" :
+                                d.dataStatus === "provisional" ? "◌ 임시" :
+                                d.dataStatus === "anomaly" ? "⚠ 이상" :
+                                isBaseline ? "◆ 기준" : "-";
                               return (
                                 <tr key={i} className={`border-b border-gray-50 hover:bg-gray-50 ${d.dataStatus === "provisional" ? "bg-amber-50/30" : ""} ${isBaseline ? "bg-purple-50/30" : ""}`}>
                                   <td className="p-1.5 text-gray-500">{d.statDate?.slice(5)}</td>
@@ -591,6 +602,7 @@ export default function SearchDemand() {
                   <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수·평점·광고비율 종합 (0=블루오션, 100=레드오션)</div>
                   <div><span className="font-medium text-blue-600">MA7</span>=7일평균(안정) · <span className="font-medium text-amber-600">임시추정</span>=데이터 확정 대기 · <span className="font-medium text-gray-500">일간추정</span>=MA7 편차 3x↑ · <span className="font-medium text-gray-500">기본추정</span>=MA 없음</div>
                   <div><span className="font-medium text-red-500">급등뱃지</span>: today/MA7 비율 — 상승(1.8x) · 급등(2.5x) · 폭발적(4x)</div>
+                  <div className="border-t border-gray-200 pt-1 mt-1"><span className="font-medium text-gray-600">📊 MA 기준</span>: MA7/MA30은 <b>최근 90일</b> 윈도우에서 계산됩니다. 차트 조회 기간과 무관합니다.</div>
                 </div>
               </CardContent>
             </Card>

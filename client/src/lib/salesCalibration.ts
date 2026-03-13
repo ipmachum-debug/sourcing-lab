@@ -158,6 +158,12 @@ export function calibrateSales(input: CalibrationInput): CalibrationOutput {
   let estimateType: CalibrationOutput["estimateType"];
   let finalSalesEst: number;
 
+  // spike 라벨 (서버 값 기준 + 편차 초과 시 자동 보정)
+  let spikeLabel: string | null = null;
+  if (input.spikeLevel === "explosive") spikeLabel = "폭발적";
+  else if (input.spikeLevel === "surging") spikeLabel = "급등";
+  else if (input.spikeLevel === "rising") spikeLabel = "상승";
+
   if (!hasMa7) {
     // MA 데이터 없음
     finalSalesEst = dailyEst;
@@ -174,22 +180,23 @@ export function calibrateSales(input: CalibrationInput): CalibrationOutput {
     estimateLabel = "일간추정";
     estimateType = "basic";
   } else if (dailyEst > 0 && dailyEst / ma7SalesEst > MAX_DIVERGENCE) {
-    // 일간추정이 MA7의 3배 초과 → 오늘 튀는 날, MA7 유지하되 spike 표시
+    // 일간추정이 MA7의 3배 초과 → 오늘 튀는 날, MA7 유지
     finalSalesEst = ma7SalesEst;
     estimateLabel = "MA7";
     estimateType = "ma7";
+    // ★ v7.7.4+: 편차 초과 시 spike 자동 동기화 (spike 미감지 보정)
+    if (!input.spikeLevel || input.spikeLevel === "normal") {
+      const autoRatio = dailyEst / ma7SalesEst;
+      if (autoRatio >= 4.0) spikeLabel = "폭발적";
+      else if (autoRatio >= 2.5) spikeLabel = "급등";
+      else if (autoRatio >= 1.8) spikeLabel = "상승";
+    }
   } else {
     // 정상 범위 — MA7 신뢰
     finalSalesEst = ma7SalesEst;
     estimateLabel = "MA7";
     estimateType = "ma7";
   }
-
-  // spike 라벨
-  let spikeLabel: string | null = null;
-  if (input.spikeLevel === "explosive") spikeLabel = "폭발적";
-  else if (input.spikeLevel === "surging") spikeLabel = "급등";
-  else if (input.spikeLevel === "rising") spikeLabel = "상승";
 
   return {
     baseSalesEst,

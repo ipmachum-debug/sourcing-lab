@@ -1,28 +1,27 @@
 /**
  * ============================================================
- * Keyword Daily Stats Service (v7.8.0)
+ * Keyword Daily Stats Service (v7.7.5)
  * ============================================================
  *
  * ext_keyword_daily_stats의 단일 계산 경로 (Single Source of Truth).
  *
  * 모든 배치/라우터/헬퍼는 이 서비스만 호출한다.
  * 내부 흐름:
- *   1. 최근 90일 raw 조회
+ *   1. 최근 45일 raw 조회
  *   2. P70 baseProductCount 계산
- *   3. 상품수 정규화 (per-product delta)
- *   4. normalizeReviewSeries() v7.8.0 실행
- *      — 기준점 기반 순수 delta: 음수/0 분산, 3일 룰 기준점 이동
+ *   3. 상품수 정규화
+ *   4. normalizeReviewSeries() 실행 (앵커 간 선형 보간)
  *   5. provisional/finalized 상태 결정
  *   6. salesEstimateDaily 계산
- *   7. MA7/MA30 계산 (기준점 이후, baseline/missing 제외)
+ *   7. MA7/MA30 계산 (주 지표)
  *   8. spike 탐지 (today / ma7 비율)
  *   9. ext_keyword_daily_stats upsert
  *
- * ★ v7.8.0:
- *   - 기준점 기반 순수 delta 엔진 (음수/0 분산 + 3일 룰)
+ * ★ v7.7.0:
  *   - MA7/MA30 기반 demandScore/keywordScore
  *   - per-product delta 우선 사용 (itemsJson 비교)
- *   - 상품수 비례 정규화 강화
+ *   - provisional/finalized 명확 구분
+ *   - 음수 delta = 데이터 품질 문제 → fallback 평균 사용
  */
 import {
   extKeywordDailyStats,
@@ -429,10 +428,13 @@ export async function rebuildKeywordDailyStatsForKeyword(
   let todayReviewGrowth = todayMetric?.reviewDeltaUsed ?? 0;
   let todaySalesEstimate = todayMetric?.salesEstimateDaily ?? 0;
 
+  // ★ per-product delta: finalized + raw_valid인 경우에만 보수적 비교 적용
   if (
     perProductDeltaResult &&
     perProductDeltaResult.delta >= 0 &&
-    perProductDeltaResult.matchedCount >= 5
+    perProductDeltaResult.matchedCount >= 5 &&
+    todayMetric?.isFinalized &&
+    todayMetric?.dataStatus === "raw_valid"
   ) {
     // per-product delta가 신뢰할 만하면 우선 사용
     const ppDelta = perProductDeltaResult.delta;
@@ -440,8 +442,8 @@ export async function rebuildKeywordDailyStatsForKeyword(
     const perProductCap = Math.max(50 * effectiveBase, 200);
     const cappedDelta = Math.min(ppDelta, perProductCap, 5000);
 
-    // normalizeReviewSeries 결과와 비교: 더 보수적인 값 사용
-    if (todayReviewGrowth === 0 || cappedDelta < todayReviewGrowth) {
+    // normalizeReviewSeries 결과보다 per-product이 더 작으면 교체 (보수적)
+    if (todayReviewGrowth > 0 && cappedDelta < todayReviewGrowth) {
       todayReviewGrowth = cappedDelta;
       todaySalesEstimate = Math.round(cappedDelta * factor);
     }
@@ -490,8 +492,9 @@ export async function rebuildKeywordDailyStatsForKeyword(
   // ================================================================
   let anchorPrevDate: string | null = null;
   for (let i = normalizedMetrics.length - 2; i >= 0; i--) {
+    const ds = normalizedMetrics[i].dataStatus;
     if (
-      normalizedMetrics[i].dataStatus === "raw_valid" &&
+      (ds === "raw_valid" || ds === "baseline") &&
       normalizedMetrics[i].isFinalized
     ) {
       anchorPrevDate = normalizedMetrics[i].metricDate;
@@ -546,15 +549,35 @@ export async function rebuildKeywordDailyStatsForKeyword(
     keywordScore,
   };
 
-  // ★ v7.8.0: 정규화 엔진의 결과를 신뢰 — 항상 전체 덮어쓰기
-  // 이전: 양수 보호 로직으로 잘못된 값이 잔존하는 문제 발생
-  // 개선: normalizeReviewSeries가 기준점/음수분산/3일룰을 정확히 처리하므로
-  //       엔진 결과를 그대로 DB에 반영
+  // ★ 양수 reviewGrowth 보호: 기존에 양수값이 있으면 0으로 덮어쓰지 않음
+  // ★ v7.7.4: finalized/missing/baseline 모두 보호 우회 (정확한 재계산)
+  const todayIsFinalized = todayMetric?.isFinalized ?? false;
+  const todayIsBaseline = todayMetric?.dataStatus === "baseline";
+  const todayIsMissing = todayMetric?.dataStatus === "missing";
   if (existingToday) {
-    await db
-      .update(extKeywordDailyStats)
-      .set(statData)
-      .where(eq(extKeywordDailyStats.id, existingToday.id));
+    if (
+      todayReviewGrowth <= 0 &&
+      existingToday.reviewGrowth > 0 &&
+      !todayIsFinalized &&
+      !todayIsBaseline &&
+      !todayIsMissing
+    ) {
+      const {
+        reviewGrowth: _rg,
+        salesEstimate: _se,
+        reviewDeltaUsed: _rdu,
+        ...nonGrowthFields
+      } = statData;
+      await db
+        .update(extKeywordDailyStats)
+        .set(nonGrowthFields)
+        .where(eq(extKeywordDailyStats.id, existingToday.id));
+    } else {
+      await db
+        .update(extKeywordDailyStats)
+        .set(statData)
+        .where(eq(extKeywordDailyStats.id, existingToday.id));
+    }
   } else {
     try {
       await db
@@ -606,10 +629,24 @@ export async function rebuildKeywordDailyStatsForKeyword(
         provisionalReason: metric.provisionalReason,
       };
 
-      // ★ v7.8.0: 엔진 결과를 전체 반영 (양수 보호 제거)
-      // 기준점 기반 순수 delta 엔진이 정확한 값을 산출하므로
-      // 항상 엔진 결과로 덮어쓴다.
-      updateData.reviewGrowth = metric.reviewDeltaUsed;
+      // ★ 양수 reviewGrowth 보호 (과거 데이터도)
+      // ★ v7.7.2: finalized 메트릭은 재계산 값이 정확하므로 보호 우회
+      // ★ v7.7.3: "missing" (before_first_real_crawl) 메트릭도 보호 우회
+      //   — 옛날 코드가 쓴 잘못된 양수값을 0으로 정정해야 함
+      const shouldOverride =
+        metric.isFinalized ||
+        metric.dataStatus === "missing" ||
+        metric.dataStatus === "baseline";
+      if (
+        metric.reviewDeltaUsed <= 0 &&
+        existing.reviewGrowth > 0 &&
+        !shouldOverride
+      ) {
+        delete updateData.reviewDeltaUsed;
+        delete updateData.salesEstimate;
+      } else {
+        updateData.reviewGrowth = metric.reviewDeltaUsed;
+      }
 
       await db
         .update(extKeywordDailyStats)
