@@ -274,53 +274,127 @@
   // ============================================================
   //  키워드 변환 (영어 → 한국어)
   // ============================================================
+  // ===== 확장 EN_TO_KO 사전 (v7.5 — 200+ 매핑) =====
   const EN_TO_KO = {
-    'tumbler': '텀블러', 'water bottle': '물병', 'towel': '수건',
-    'charger': '충전기', 'cable': '케이블', 'earphone': '이어폰',
+    // 3단어 조합
+    'vacuum cleaner for car': '차량용 청소기', 'handheld vacuum cleaner': '핸디 청소기',
+    'robot vacuum cleaner': '로봇청소기', 'portable vacuum cleaner': '휴대용 청소기',
+    'wireless vacuum cleaner': '무선 청소기', 'stainless steel water': '스테인리스 물병',
+    'led strip light': 'LED 스트립 조명', 'phone screen protector': '핸드폰 보호필름',
+    'car phone mount': '차량용 거치대',
+    // 2단어 조합
+    'vacuum cleaner': '청소기', 'air purifier': '공기청정기',
+    'water bottle': '물병', 'power bank': '보조배터리',
+    'phone case': '케이스', 'phone stand': '거치대',
+    'yoga mat': '요가매트', 'car vacuum': '차량용 청소기',
+    'car charger': '차량충전기', 'car mount': '차량거치대',
+    'dash cam': '블랙박스', 'robot vacuum': '로봇청소기',
+    'handheld vacuum': '핸디청소기', 'mini vacuum': '미니청소기',
+    'smart watch': '스마트워치', 'desk lamp': '탁상램프',
+    'desk fan': '탁상선풍기', 'night light': '수면등',
+    'ring light': '링라이트', 'led light': 'LED조명',
+    'frying pan': '프라이팬', 'cutting board': '도마',
+    'coffee maker': '커피메이커', 'lunch box': '도시락',
+    'food container': '밀폐용기', 'storage container': '수납함',
+    'storage box': '수납함', 'silicone mold': '실리콘몰드',
+    'shower head': '샤워헤드', 'wall sticker': '벽스티커',
+    'wall clock': '벽시계', 'photo frame': '액자',
+    'hair clip': '헤어클립', 'hair band': '머리띠',
+    'jump rope': '줄넘기', 'sleeping bag': '침낭',
+    'portable fan': '휴대용선풍기', 'bed sheet': '침대시트',
+    'pet bed': '반려동물침대', 'resistance band': '저항밴드',
+    // 1단어 (가전/전자)
+    'tumbler': '텀블러', 'thermos': '보온병', 'charger': '충전기',
+    'cable': '케이블', 'earphone': '이어폰', 'headphone': '헤드폰',
     'bluetooth': '블루투스', 'speaker': '스피커', 'mouse': '마우스',
-    'keyboard': '키보드', 'power bank': '보조배터리', 'phone case': '케이스',
-    'phone stand': '거치대', 'backpack': '백팩', 'wallet': '지갑',
-    'necklace': '목걸이', 'ring': '반지', 'bracelet': '팔찌',
-    'earring': '귀걸이', 'sunglasses': '선글라스', 'watch': '시계',
-    'bag': '가방', 'sock': '양말', 'socks': '양말', 'hat': '모자',
-    'lamp': '램프', 'light': '조명', 'led': 'LED', 'cushion': '쿠션',
-    'pillow': '베개', 'blanket': '이불', 'curtain': '커튼', 'rug': '러그',
-    'toy': '장난감', 'puzzle': '퍼즐', 'sticker': '스티커',
-    'pen': '펜', 'notebook': '노트', 'tape': '테이프',
-    'yoga mat': '요가매트', 'tent': '텐트', 'camping': '캠핑',
-    'kitchen': '주방', 'pot': '냄비', 'pan': '프라이팬',
+    'keyboard': '키보드', 'adapter': '어댑터', 'projector': '프로젝터',
+    'camera': '카메라', 'tripod': '삼각대', 'drone': '드론',
+    'microphone': '마이크',
+    // 주방
+    'kitchen': '주방', 'cooking': '요리', 'pot': '냄비', 'pan': '프라이팬',
     'knife': '칼', 'scissors': '가위', 'cup': '컵', 'mug': '머그컵',
-    'plate': '접시', 'bowl': '그릇', 'storage': '수납', 'organizer': '정리함',
-    'cleaning': '청소', 'brush': '솔', 'sponge': '스펀지',
-    'hook': '후크', 'hanger': '행거', 'mirror': '거울',
-    'drone': '드론', 'camera': '카메라', 'tripod': '삼각대',
-    't-shirt': '티셔츠', 'shirt': '셔츠', 'jacket': '자켓',
+    'spoon': '숟가락', 'fork': '포크', 'chopsticks': '젓가락',
+    'plate': '접시', 'bowl': '그릇', 'blender': '블렌더',
+    'juicer': '착즙기', 'kettle': '주전자',
+    // 수납/청소
+    'storage': '수납', 'organizer': '정리함', 'shelf': '선반',
+    'rack': '거치대', 'basket': '바구니',
+    'cleaning': '청소', 'mop': '걸레', 'brush': '솔', 'sponge': '스펀지',
+    'towel': '수건', 'hook': '후크', 'hanger': '행거', 'mirror': '거울',
+    // 침실/인테리어
+    'pillow': '베개', 'cushion': '쿠션', 'blanket': '이불',
+    'curtain': '커튼', 'rug': '러그', 'carpet': '카펫',
+    'lamp': '램프', 'light': '조명', 'led': 'LED', 'vase': '화병',
+    // 패션
+    't-shirt': '티셔츠', 'shirt': '셔츠', 'jacket': '자켓', 'coat': '코트',
     'pants': '바지', 'jeans': '청바지', 'dress': '원피스',
+    'hoodie': '후디', 'sweater': '스웨터',
     'sneakers': '운동화', 'shoes': '신발', 'slippers': '슬리퍼',
+    'sandals': '샌들', 'boots': '부츠',
     'mask': '마스크', 'gloves': '장갑', 'belt': '벨트',
+    'scarf': '스카프', 'hat': '모자', 'cap': '모자',
+    'sunglasses': '선글라스', 'watch': '시계',
+    'backpack': '백팩', 'wallet': '지갑', 'bag': '가방',
+    'sock': '양말', 'socks': '양말',
+    // 액세서리
+    'necklace': '목걸이', 'ring': '반지', 'bracelet': '팔찌', 'earring': '귀걸이',
+    // 문구
+    'pen': '펜', 'notebook': '노트', 'tape': '테이프', 'sticker': '스티커',
+    // 스포츠
+    'dumbbell': '아령', 'tent': '텐트', 'camping': '캠핑', 'fishing': '낚시',
+    'helmet': '헬멧', 'goggles': '고글',
+    // 차량
+    'car': '차량용', 'vehicle': '자동차',
+    // 반려동물
     'pet': '반려동물', 'dog': '강아지', 'cat': '고양이',
+    'leash': '리드줄', 'collar': '목줄',
+    // 장난감
+    'toy': '장난감', 'puzzle': '퍼즐', 'doll': '인형',
+    // 수식어
+    'wireless': '무선', 'portable': '휴대용', 'foldable': '접이식',
+    'mini': '미니', 'electric': '전동', 'automatic': '자동',
+    'rechargeable': '충전식', 'waterproof': '방수',
+    'cordless': '무선', 'silicone': '실리콘', 'stainless': '스테인리스',
+    'magnetic': '자석', 'solar': '태양광',
   };
 
   function extractCoupangKeyword(aliTitle) {
     if (!aliTitle) return '';
     let cleaned = aliTitle.toLowerCase()
       .replace(/[^a-z0-9가-힣\s]/g, ' ')
-      .replace(/\d+\s*(pcs|packs?|sets?|pieces?|lot)\b/gi, '')
-      .replace(/\d+(ml|g|kg|cm|mm|oz|l|inch)\b/gi, '')
+      .replace(/\d+\s*(pcs|packs?|sets?|pieces?|lot|pairs?|sheets?)\b/gi, '')
+      .replace(/\d+(ml|g|kg|cm|mm|oz|l|inch|w|v|mah)\b/gi, '')
       .trim();
     const words = cleaned.split(/\s+/).filter(w => w.length > 1);
     const koWords = [];
     const used = new Set();
+    // 3단어 우선
+    for (let i = 0; i < words.length - 2; i++) {
+      const tw = words[i] + ' ' + words[i + 1] + ' ' + words[i + 2];
+      if (EN_TO_KO[tw]) { koWords.push(EN_TO_KO[tw]); used.add(i); used.add(i + 1); used.add(i + 2); }
+    }
+    // 2단어
     for (let i = 0; i < words.length - 1; i++) {
+      if (used.has(i) || used.has(i + 1)) continue;
       const tw = words[i] + ' ' + words[i + 1];
       if (EN_TO_KO[tw]) { koWords.push(EN_TO_KO[tw]); used.add(i); used.add(i + 1); }
     }
+    // 1단어
     for (let i = 0; i < words.length; i++) {
       if (used.has(i)) continue;
       if (EN_TO_KO[words[i]]) { koWords.push(EN_TO_KO[words[i]]); used.add(i); }
     }
-    if (koWords.length >= 1) return koWords.slice(0, 3).join(' ');
-    const stop = new Set(['the', 'a', 'an', 'for', 'and', 'or', 'with', 'in', 'on', 'to', 'of', 'new', 'hot', 'sale', 'free', 'shipping', 'pcs', 'set', 'piece', 'high', 'quality', 'mini', 'portable', 'style', 'fashion']);
+    const unique = [...new Set(koWords)];
+    if (unique.length >= 1) return unique.slice(0, 4).join(' ');
+    const stop = new Set([
+      'the', 'a', 'an', 'for', 'and', 'or', 'with', 'in', 'on', 'to', 'of',
+      'new', 'hot', 'sale', 'free', 'shipping', 'pcs', 'set', 'piece',
+      'high', 'quality', 'style', 'fashion', 'original', 'brand', 'genuine',
+      'super', 'ultra', 'pro', 'plus', 'max', 'color', 'colors',
+      'black', 'white', 'red', 'blue', 'green', 'pink',
+      'size', 'small', 'medium', 'large', 'men', 'women', 'kids',
+      'home', 'office', 'outdoor', 'indoor', 'travel', 'gift',
+    ]);
     return words.filter(w => !stop.has(w) && w.length > 2).slice(0, 3).join(' ');
   }
 

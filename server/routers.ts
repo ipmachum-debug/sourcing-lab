@@ -24,6 +24,7 @@ import { sourcingCoachRouter } from "./routers/sourcingCoach.router";
 import { keywordMetricsRouter } from "./routers/keywordMetrics.router";
 import { marginRouter } from "./routers/margin.router";
 import { keywordDiscoveryRouter } from "./routers/keywordDiscovery.router";
+import { aliSourcingRouter } from "./routers/aliSourcing.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -43,6 +44,7 @@ export const appRouter = router({
   keywordMetrics: keywordMetricsRouter,
   margin: marginRouter,
   keywordDiscovery: keywordDiscoveryRouter,
+  aliSourcing: aliSourcingRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

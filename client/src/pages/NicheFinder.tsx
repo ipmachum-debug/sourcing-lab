@@ -16,10 +16,11 @@ import {
   Search, Gem, TrendingUp, Sparkles, Loader2, Plus,
   AlertCircle, Zap, ThumbsUp, ThumbsDown, Eye, Trash2,
   RefreshCw, CheckCircle, XCircle, Clock, Star, ArrowRight,
+  Link2, ExternalLink, Package, TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
-type MainTab = "candidates" | "validated" | "recommended";
+type MainTab = "candidates" | "validated" | "recommended" | "sourcing";
 
 function formatNum(n: number | null | undefined) {
   if (n === null || n === undefined || n === 0) return "-";
@@ -65,9 +66,10 @@ export default function NicheFinder() {
   const overview = trpc.keywordDiscovery.overview.useQuery();
   const naverConfig = trpc.keywordDiscovery.checkNaverApiConfig.useQuery();
 
+  const statusForTab = tab === "candidates" ? "pending" : tab === "validated" ? "validated" : tab === "recommended" ? "recommended" : "validated";
   const candidatesQuery = trpc.keywordDiscovery.listCandidates.useQuery({
     search: searchText,
-    status: tab === "candidates" ? "pending" : tab === "validated" ? "validated" : "recommended",
+    status: statusForTab,
     sortBy: "priority",
     sortDir: "desc",
     page,
@@ -239,6 +241,7 @@ export default function NicheFinder() {
             { key: "candidates", label: "후보 (대기)", icon: Clock },
             { key: "validated", label: "검증 완료", icon: CheckCircle },
             { key: "recommended", label: "추천 키워드", icon: Star },
+            { key: "sourcing", label: "알리 소싱", icon: Package },
           ] as const).map(t => (
             <button
               key={t.key}
@@ -524,7 +527,7 @@ export default function NicheFinder() {
 
         {/* 상세 다이얼로그 */}
         <Dialog open={!!detailKeyword} onOpenChange={() => setDetailKeyword(null)}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Gem className="w-5 h-5 text-purple-500" />
@@ -642,6 +645,9 @@ function KeywordDetailView({ item }: { item: any }) {
         </Card>
       )}
 
+      {/* 알리 소싱 연결 */}
+      <AliSourcingSection keywordId={item.id} keyword={item.keyword} />
+
       {/* 메타 정보 */}
       <div className="text-xs text-muted-foreground space-y-1">
         <div>소스: {item.sourceType} | 우선순위: {item.validationPriority}</div>
@@ -650,5 +656,155 @@ function KeywordDetailView({ item }: { item: any }) {
         {item.recommendedExpiresAt && <div>추천 만료: {new Date(item.recommendedExpiresAt).toLocaleString("ko-KR")}</div>}
       </div>
     </div>
+  );
+}
+
+function AliSourcingSection({ keywordId, keyword }: { keywordId: number; keyword: string }) {
+  const linkedProducts = trpc.aliSourcing.getLinkedProducts.useQuery({ keywordId });
+  const searchQueries = trpc.aliSourcing.generateSearchQueries.useQuery({ keywordId, keyword });
+  const cachedResults = trpc.aliSourcing.getCachedResults.useQuery({ keywordId, limit: 10 });
+
+  const linkMutation = trpc.aliSourcing.linkProduct.useMutation({
+    onSuccess: () => {
+      toast.success("알리 상품 연결 완료");
+      linkedProducts.refetch();
+    },
+    onError: err => toast.error(`연결 실패: ${err.message}`),
+  });
+
+  const updateMutation = trpc.aliSourcing.updateMapping.useMutation({
+    onSuccess: () => {
+      linkedProducts.refetch();
+    },
+  });
+
+  const linked = linkedProducts.data || [];
+  const cached = cachedResults.data || [];
+  const queries = searchQueries.data?.queries || [];
+
+  return (
+    <Card>
+      <CardContent className="p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-orange-500" />
+            알리 소싱
+          </div>
+          {queries.length > 0 && (
+            <div className="flex gap-1">
+              {queries.map((q, i) => (
+                <a
+                  key={i}
+                  href={`https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(q)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-700 rounded hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-300"
+                >
+                  {q} <ExternalLink className="w-2.5 h-2.5 inline" />
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 연결된 알리 상품 */}
+        {linked.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">연결된 상품 ({linked.length})</div>
+            {linked.map(m => (
+              <div key={m.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded text-xs">
+                {m.aliImageUrl && (
+                  <img src={m.aliImageUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate font-medium">{m.aliProductTitle}</div>
+                  <div className="flex gap-2 text-muted-foreground mt-0.5">
+                    <span>${Number(m.selectedPriceUsd || 0).toFixed(2)}</span>
+                    <span>{formatNum(m.selectedPriceKrw)}원</span>
+                    <span>주문 {formatNum(m.selectedOrderCount)}</span>
+                    {m.isPrimary && <Badge className="text-[9px] h-4 bg-blue-600">주력</Badge>}
+                  </div>
+                  {(m as any).lastSnapshot && (
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      최근 추적: {new Date((m as any).lastSnapshot.snapshotAt).toLocaleDateString("ko-KR")}
+                      {Number((m as any).lastSnapshot.priceKrw) !== m.selectedPriceKrw && (
+                        <span className={Number((m as any).lastSnapshot.priceKrw) > (m.selectedPriceKrw || 0) ? "text-red-500" : "text-green-500"}>
+                          {" "}({Number((m as any).lastSnapshot.priceKrw) > (m.selectedPriceKrw || 0) ? "↑" : "↓"} {formatNum(Math.abs(Number((m as any).lastSnapshot.priceKrw) - (m.selectedPriceKrw || 0)))}원)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  <a href={m.aliProductUrl} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0">
+                      <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  </a>
+                  {m.mappingStatus === "active" ? (
+                    <Button size="sm" variant="ghost" className="h-7 text-[10px]"
+                      onClick={() => updateMutation.mutate({ mappingId: m.id, status: "paused" })}>
+                      중지
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-7 text-[10px]"
+                      onClick={() => updateMutation.mutate({ mappingId: m.id, status: "active" })}>
+                      활성
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 캐시된 추천 결과 */}
+        {cached.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">추천 상품 (캐시)</div>
+            {cached.slice(0, 5).map(c => (
+              <div key={c.id} className="flex items-center gap-2 p-2 border rounded text-xs">
+                {c.productImageUrl && (
+                  <img src={c.productImageUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">{c.productTitle}</div>
+                  <div className="flex gap-2 text-muted-foreground mt-0.5">
+                    <span>{formatNum(c.priceKrw)}원</span>
+                    <span>주문 {formatNum(c.orderCount)}</span>
+                    <span>매칭 {Number(c.matchScore || 0).toFixed(0)}점</span>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[10px] flex-shrink-0"
+                  disabled={linkMutation.isPending}
+                  onClick={() => linkMutation.mutate({
+                    keywordId,
+                    aliProductUrl: c.productUrl,
+                    aliProductId: c.productId || undefined,
+                    aliProductTitle: c.productTitle,
+                    aliImageUrl: c.productImageUrl || undefined,
+                    priceKrw: c.priceKrw || 0,
+                    orderCount: c.orderCount || 0,
+                    rating: Number(c.rating) || 0,
+                    matchScore: Number(c.matchScore) || 0,
+                  })}
+                >
+                  <Link2 className="w-3 h-3 mr-1" />연결
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {linked.length === 0 && cached.length === 0 && (
+          <div className="text-xs text-muted-foreground text-center py-3">
+            연결된 알리 상품이 없습니다. 위 검색어로 알리에서 검색 후 확장프로그램으로 결과를 저장하세요.
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
