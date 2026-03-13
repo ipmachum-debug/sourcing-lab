@@ -33,6 +33,7 @@ import { trackingsRouter } from "./extension/trackings.router";
 import { salesRouter } from "./extension/sales.router";
 import { watchRouter } from "./extension/watch.router";
 import { discoveryRouter } from "./extension/discovery.router";
+import { marketDataRouter } from "./extension/marketData.router";
 
 export const extensionRouter = mergeRouters(
   snapshotsRouter,
@@ -48,4 +49,5 @@ export const extensionRouter = mergeRouters(
   salesRouter,
   watchRouter,
   discoveryRouter,
+  marketDataRouter,
 );

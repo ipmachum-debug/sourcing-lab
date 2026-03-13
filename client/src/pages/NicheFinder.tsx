@@ -16,6 +16,7 @@ import {
   Search, Gem, TrendingUp, Sparkles, Loader2, Plus,
   AlertCircle, Zap, ThumbsUp, ThumbsDown, Eye, Trash2,
   RefreshCw, CheckCircle, XCircle, Clock, Star, ArrowRight,
+  BarChart3, DollarSign, Truck, Activity,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -537,10 +538,14 @@ export default function NicheFinder() {
               <Tabs defaultValue="info">
                 <TabsList className="w-full">
                   <TabsTrigger value="info" className="flex-1">기본정보</TabsTrigger>
+                  <TabsTrigger value="market" className="flex-1">시장 데이터</TabsTrigger>
                   <TabsTrigger value="ali" className="flex-1">알리 검증</TabsTrigger>
                 </TabsList>
                 <TabsContent value="info">
                   <KeywordDetailView item={detailKeyword} />
+                </TabsContent>
+                <TabsContent value="market">
+                  <KeywordMarketDataView keyword={detailKeyword.keyword} />
                 </TabsContent>
                 <TabsContent value="ali">
                   <AliValidationTab
@@ -668,6 +673,294 @@ function KeywordDetailView({ item }: { item: any }) {
         {item.lastValidatedAt && <div>마지막 검증: {new Date(item.lastValidatedAt).toLocaleString("ko-KR")}</div>}
         {item.recommendedExpiresAt && <div>추천 만료: {new Date(item.recommendedExpiresAt).toLocaleString("ko-KR")}</div>}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  시장 데이터 뷰 (셀러라이프 수준)
+// ============================================================
+function KeywordMarketDataView({ keyword }: { keyword: string }) {
+  const marketData = trpc.extension.getKeywordMarketData.useQuery({ keyword });
+  const volumeHistory = trpc.extension.getSearchVolumeHistory.useQuery({ keyword, months: 12 });
+  const fetchVolumeMutation = trpc.extension.fetchSearchVolume.useMutation({
+    onSuccess: () => {
+      toast.success("검색량 데이터 수집 완료");
+      volumeHistory.refetch();
+      marketData.refetch();
+    },
+    onError: err => toast.error(`수집 실패: ${err.message}`),
+  });
+
+  if (marketData.isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const snap = marketData.data?.snapshot;
+  const vol = marketData.data?.searchVolume;
+  const cpc = marketData.data?.cpc;
+  const volHistory = volumeHistory.data || [];
+
+  return (
+    <div className="space-y-4">
+      {/* 검색량 섹션 */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Activity className="w-4 h-4 text-blue-500" />
+              검색량 트렌드 (네이버)
+            </h3>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fetchVolumeMutation.mutate({ keywords: [keyword] })}
+              disabled={fetchVolumeMutation.isPending}
+            >
+              {fetchVolumeMutation.isPending
+                ? <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                : <RefreshCw className="w-3 h-3 mr-1" />}
+              수집
+            </Button>
+          </div>
+
+          {vol ? (
+            <div className="grid grid-cols-4 gap-2 text-center mb-3">
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-lg font-bold">{formatNum(vol.totalSearch)}</div>
+                <div className="text-[10px] text-muted-foreground">월 검색량</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-lg font-bold">{formatNum(vol.pcSearch)}</div>
+                <div className="text-[10px] text-muted-foreground">PC</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-lg font-bold">{formatNum(vol.mobileSearch)}</div>
+                <div className="text-[10px] text-muted-foreground">모바일</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{String(vol.competitionIndex || "-")}</div>
+                <div className="text-[10px] text-muted-foreground">경쟁도</div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">검색량 데이터가 없습니다. '수집' 버튼을 눌러 네이버 데이터를 가져오세요.</p>
+          )}
+
+          {/* 월별 히스토리 바 차트 */}
+          {volHistory.length > 1 && (
+            <div className="mt-3">
+              <div className="text-xs text-muted-foreground mb-2">월별 검색량 추이</div>
+              <div className="flex items-end gap-1 h-20">
+                {(() => {
+                  const maxVol = Math.max(...volHistory.map((v: any) => Number(v.totalSearch) || 0), 1);
+                  return volHistory.map((v: any, i: number) => {
+                    const total = Number(v.totalSearch) || 0;
+                    const pct = Math.max((total / maxVol) * 100, 4);
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                        <div
+                          className="w-full bg-blue-500/80 rounded-t min-h-[2px]"
+                          style={{ height: `${pct}%` }}
+                          title={`${v.yearMonth}: ${formatNum(total)}`}
+                        />
+                        <span className="text-[8px] text-muted-foreground">{String(v.yearMonth).slice(5)}</span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 가격/리뷰 통계 */}
+      {snap && (
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+              <BarChart3 className="w-4 h-4 text-green-500" />
+              가격 & 리뷰 통계
+            </h3>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.totalProductCount || snap.totalItems)}</div>
+                <div className="text-[10px] text-muted-foreground">총 상품수</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.avgPrice)}원</div>
+                <div className="text-[10px] text-muted-foreground">평균가</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.medianPrice)}원</div>
+                <div className="text-[10px] text-muted-foreground">중간가</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.minPrice)}원</div>
+                <div className="text-[10px] text-muted-foreground">최저가</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.maxPrice)}원</div>
+                <div className="text-[10px] text-muted-foreground">최고가</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{snap.competitionScore}</div>
+                <div className="text-[10px] text-muted-foreground">경쟁점수</div>
+              </div>
+            </div>
+
+            {/* 리뷰 통계 */}
+            <div className="grid grid-cols-4 gap-2 text-center mt-2">
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.totalReviewSum)}</div>
+                <div className="text-[10px] text-muted-foreground">리뷰 합계</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.maxReviewCount)}</div>
+                <div className="text-[10px] text-muted-foreground">최대 리뷰</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.minReviewCount)}</div>
+                <div className="text-[10px] text-muted-foreground">최소 리뷰</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(snap.highReviewCount)}</div>
+                <div className="text-[10px] text-muted-foreground">100+ 리뷰</div>
+              </div>
+            </div>
+
+            {/* 가격 분포 */}
+            {snap.priceDistribution ? (() => {
+              const dist = typeof snap.priceDistribution === "string"
+                ? JSON.parse(snap.priceDistribution)
+                : snap.priceDistribution;
+              if (!Array.isArray(dist) || !dist.length) return null;
+              const maxCount = Math.max(...dist.map((d: any) => d.count || 0), 1);
+              return (
+                <div className="mt-3">
+                  <div className="text-xs text-muted-foreground mb-1">가격 분포</div>
+                  <div className="flex items-end gap-px h-14">
+                    {dist.map((d: any, i: number) => {
+                      const pct = Math.max(((d.count || 0) / maxCount) * 100, 2);
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center">
+                          <div
+                            className="w-full bg-green-500/70 rounded-t min-h-[1px]"
+                            style={{ height: `${pct}%` }}
+                            title={`${d.range || d.label}: ${d.count}개`}
+                          />
+                          <span className="text-[7px] text-muted-foreground truncate w-full text-center">
+                            {String(d.range || d.label || "").replace(/원/g, "").slice(0, 6)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })() : null}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 배송 유형 분포 */}
+      {snap && (Number(snap.rocketCount) > 0 || Number(snap.normalDeliveryCount) > 0) && (
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+              <Truck className="w-4 h-4 text-orange-500" />
+              배송 유형 분포
+            </h3>
+            {(() => {
+              const types = [
+                { label: "로켓배송", count: Number(snap.rocketCount) || 0, color: "bg-blue-500" },
+                { label: "판매자로켓", count: Number(snap.sellerRocketCount) || 0, color: "bg-cyan-500" },
+                { label: "로켓직구", count: Number(snap.globalRocketCount) || 0, color: "bg-purple-500" },
+                { label: "일반배송", count: Number(snap.normalDeliveryCount) || 0, color: "bg-gray-400" },
+                { label: "해외직구", count: Number(snap.overseasDeliveryCount) || 0, color: "bg-yellow-500" },
+              ];
+              const total = types.reduce((s, t) => s + t.count, 0) || 1;
+
+              return (
+                <div className="space-y-2">
+                  {/* 바 차트 */}
+                  <div className="flex h-6 rounded-full overflow-hidden">
+                    {types.filter(t => t.count > 0).map((t, i) => (
+                      <div
+                        key={i}
+                        className={`${t.color} transition-all`}
+                        style={{ width: `${(t.count / total) * 100}%` }}
+                        title={`${t.label}: ${t.count}개 (${((t.count / total) * 100).toFixed(1)}%)`}
+                      />
+                    ))}
+                  </div>
+                  {/* 범례 */}
+                  <div className="flex flex-wrap gap-3 text-xs">
+                    {types.filter(t => t.count > 0).map((t, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <div className={`w-2.5 h-2.5 rounded-full ${t.color}`} />
+                        <span>{t.label}: {t.count}개 ({((t.count / total) * 100).toFixed(0)}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* CPC 광고 데이터 */}
+      {cpc ? (
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+              <DollarSign className="w-4 h-4 text-red-500" />
+              쿠팡 광고 (CPC) 데이터
+            </h3>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(cpc.suggestedBid)}원</div>
+                <div className="text-[10px] text-muted-foreground">추천 입찰가</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(cpc.estimatedImpressions)}</div>
+                <div className="text-[10px] text-muted-foreground">예상 노출</div>
+              </div>
+              <div className="bg-muted/50 rounded p-2">
+                <div className="text-sm font-bold">{formatNum(cpc.estimatedClicks)}</div>
+                <div className="text-[10px] text-muted-foreground">예상 클릭</div>
+              </div>
+            </div>
+            {cpc.categoryName && (
+              <div className="text-xs text-muted-foreground mt-2">카테고리: {String(cpc.categoryName)}</div>
+            )}
+            {cpc.competitionLevel && (
+              <div className="text-xs text-muted-foreground">경쟁 수준: {String(cpc.competitionLevel)}</div>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-3 text-center">
+            <p className="text-xs text-muted-foreground">
+              CPC 데이터 없음 — 쿠팡 애즈에서 키워드 검색 시 자동 수집됩니다
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 마지막 수집 시간 */}
+      {snap?.createdAt && (
+        <div className="text-xs text-muted-foreground text-right">
+          마지막 수집: {String(snap.createdAt)}
+        </div>
+      )}
     </div>
   );
 }
