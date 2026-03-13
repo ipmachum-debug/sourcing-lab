@@ -857,13 +857,32 @@ export async function runDailyBatch(
         e => N(e.totalReviewSum) > 0,
       );
       if (validWeekBase && agg.totalReviewSum > 0) {
-        // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반
+        // ★ v7.6.0: 제품 수 변동 정규화 + 안전장치 (1d와 동일 기준)
         const baseItems = N(validWeekBase.totalItems);
         const avgReviewNow = agg.totalReviewSum / Math.max(1, agg.totalItems);
         const avgReviewWeekBase = N(validWeekBase.totalReviewSum) / Math.max(1, baseItems);
         const growthPerProduct7d = avgReviewNow - avgReviewWeekBase;
         const refCount7d = Math.min(agg.totalItems, baseItems);
-        reviewGrowth7d = Math.max(0, Math.round(growthPerProduct7d * refCount7d));
+        let rawGrowth7d = Math.max(0, Math.round(growthPerProduct7d * refCount7d));
+
+        // ★ 안전장치 1: 상품수 변동 40% 초과 → 0
+        if (baseItems > 0 && Math.abs(agg.totalItems - baseItems) / baseItems > 0.4) {
+          rawGrowth7d = 0;
+        }
+
+        // 경과 일수 계산 (baseline이 정확히 7일 전이 아닐 수 있음)
+        const baseDateMs = new Date(String(validWeekBase.statDate) + "T00:00:00").getTime();
+        const todayMs = new Date(today + "T00:00:00").getTime();
+        const dayGap = Math.max(1, Math.round((todayMs - baseDateMs) / (24 * 60 * 60 * 1000)));
+
+        // ★ 안전장치 2: 상품당 하루 리뷰 증가 상한 30개 (일평균 기준)
+        const dailyAvg7d = Math.round(rawGrowth7d / dayGap);
+        const maxDailyGrowth = agg.totalItems * 30;
+        if (dailyAvg7d > maxDailyGrowth) {
+          rawGrowth7d = 0;
+        }
+
+        reviewGrowth7d = rawGrowth7d;
       }
 
       // 적응형 스케줄링: 변동성 점수 + 다음 수집 시각 계산
