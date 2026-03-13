@@ -4738,46 +4738,60 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
     const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
     const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
 
-    // 다단계 이전 데이터 조회 (어제 → 최근 7일 이내 → 이전 스냅샷)
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    // ★ v7.4.0: 유효한 기준점(baseline) 기반 리뷰 증가 계산
+    // - 리뷰 파싱 실패(totalReviewSum=0 && items>0)인 날은 기준점에서 제외
+    // - 유효한 첫 기준점부터 증가분만 계산
+    // - 중간에 파싱 실패한 날이 있으면 경과일수로 나눠 일평균 증가로 산출
 
-    // 1단계: 어제 daily_stats 조회
-    let [prevStat] = await db.select()
+    // 최근 14일 이내 과거 daily_stats 데이터 조회
+    const recentHistory = await db.select({
+      statDate: extKeywordDailyStats.statDate,
+      totalReviewSum: extKeywordDailyStats.totalReviewSum,
+      productCount: extKeywordDailyStats.productCount,
+      avgPrice: extKeywordDailyStats.avgPrice,
+    })
       .from(extKeywordDailyStats)
       .where(and(
         eq(extKeywordDailyStats.userId, userId),
         eq(extKeywordDailyStats.query, query),
-        eq(extKeywordDailyStats.statDate, yesterdayStr),
+        sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
+        sql`${extKeywordDailyStats.statDate} >= DATE_SUB(${todayStr}, INTERVAL 14 DAY)`,
       ))
-      .limit(1);
+      .orderBy(desc(extKeywordDailyStats.statDate))
+      .limit(14);
 
-    // 2단계: 어제 데이터 없으면 최근 7일 이내 가장 최근 daily_stats 조회
-    if (!prevStat) {
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const weekAgoStr = weekAgo.toISOString().slice(0, 10);
-      const [recentStat] = await db.select()
-        .from(extKeywordDailyStats)
-        .where(and(
-          eq(extKeywordDailyStats.userId, userId),
-          eq(extKeywordDailyStats.query, query),
-          sql`${extKeywordDailyStats.statDate} >= ${weekAgoStr}`,
-          sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
-        ))
-        .orderBy(desc(extKeywordDailyStats.statDate))
-        .limit(1);
-      if (recentStat) prevStat = recentStat;
+    // 리뷰 데이터 유효성 판별: totalReviewSum > 0 이어야 함
+    const isReviewDataValid = (reviewSum: number, itemCount: number): boolean =>
+      reviewSum > 0 || itemCount === 0;
+
+    const todayReviewValid = isReviewDataValid(totalReviewSum, items.length);
+
+    // 유효한 가장 최근 기준점 찾기
+    let baselineEntry: { statDate: string; totalReviewSum: number; avgPrice: number; productCount: number } | null = null;
+    let daysSinceBaseline = 0;
+
+    for (const entry of recentHistory) {
+      const entryReviewSum = N(entry.totalReviewSum);
+      const entryProductCount = N(entry.productCount);
+      if (isReviewDataValid(entryReviewSum, entryProductCount) && String(entry.statDate) !== todayStr) {
+        baselineEntry = {
+          statDate: String(entry.statDate),
+          totalReviewSum: entryReviewSum,
+          avgPrice: N(entry.avgPrice),
+          productCount: entryProductCount,
+        };
+        const baseDate = new Date(baselineEntry.statDate + "T00:00:00");
+        const currentDate = new Date(todayStr + "T00:00:00");
+        daysSinceBaseline = Math.max(1, Math.round(
+          (currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000),
+        ));
+        break;
+      }
     }
 
-    // 3단계: daily_stats도 없으면 이전 스냅샷과 직접 비교
-    let prevSnapshotReviewSum: number | null = null;
-    let prevSnapshotAvgPrice: number | null = null;
-    let prevSnapshotTotalItems: number | null = null;
-    let prevSnapshotCreatedAt: string | null = null;
-    if (!prevStat) {
-      const [prevSnapshot] = await db.select()
+    // 스냅샷 fallback: daily_stats에 유효 기준점 없으면 이전 스냅샷 확인
+    if (!baselineEntry) {
+      const prevSnapshots = await db.select()
         .from(extSearchSnapshots)
         .where(and(
           eq(extSearchSnapshots.userId, userId),
@@ -4785,154 +4799,50 @@ async function autoComputeKeywordDailyStat(userId: number, query: string, db: an
           sql`${extSearchSnapshots.id} < ${latest.id}`,
         ))
         .orderBy(desc(extSearchSnapshots.createdAt))
-        .limit(1);
+        .limit(5);
 
-      if (prevSnapshot) {
-        let prevItems: any[] = [];
-        try { prevItems = prevSnapshot.itemsJson ? JSON.parse(prevSnapshot.itemsJson) : []; } catch { prevItems = []; }
-        prevSnapshotReviewSum = prevItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
-        prevSnapshotAvgPrice = prevSnapshot.avgPrice || 0;
-        prevSnapshotTotalItems = prevSnapshot.totalItems || 0;
-        prevSnapshotCreatedAt = prevSnapshot.createdAt ? String(prevSnapshot.createdAt).slice(0, 10) : null;
+      for (const snap of prevSnapshots) {
+        let snapItems: any[] = [];
+        try { snapItems = snap.itemsJson ? JSON.parse(snap.itemsJson) : []; } catch { snapItems = []; }
+        const snapReviewSum = snapItems.reduce((sum: number, i: any) => sum + (i.reviewCount || 0), 0);
+        if (isReviewDataValid(snapReviewSum, snapItems.length)) {
+          const snapDate = snap.createdAt ? String(snap.createdAt).slice(0, 10) : null;
+          if (snapDate && snapDate !== todayStr) {
+            baselineEntry = {
+              statDate: snapDate,
+              totalReviewSum: snapReviewSum,
+              avgPrice: snap.avgPrice || 0,
+              productCount: snap.totalItems || 0,
+            };
+            const baseDate = new Date(snapDate + "T00:00:00");
+            const currentDate = new Date(todayStr + "T00:00:00");
+            daysSinceBaseline = Math.max(1, Math.round(
+              (currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000),
+            ));
+            break;
+          }
+        }
       }
     }
 
-    // ★ v7.3.3: 기존 growth 복구 소스 (오늘 저장값 또는 최근 7일 중 양수 growth)
-    const [existingTodayStat] = await db.select()
-      .from(extKeywordDailyStats)
-      .where(and(
-        eq(extKeywordDailyStats.userId, userId),
-        eq(extKeywordDailyStats.query, query),
-        eq(extKeywordDailyStats.statDate, todayStr),
-      ))
-      .limit(1);
-    const todayStoredGrowth = existingTodayStat ? N(existingTodayStat.reviewGrowth) || 0 : 0;
-    // 최근 7일 중 가장 최신의 양수 growth를 찾아 fallback으로 사용
-    let recentPositiveGrowth = 0;
-    if (todayStoredGrowth <= 0) {
-      const recentStats = await db.select({
-        reviewGrowth: extKeywordDailyStats.reviewGrowth,
-        statDate: extKeywordDailyStats.statDate,
-      })
-        .from(extKeywordDailyStats)
-        .where(and(
-          eq(extKeywordDailyStats.userId, userId),
-          eq(extKeywordDailyStats.query, query),
-          sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
-          sql`${extKeywordDailyStats.statDate} >= DATE_SUB(${todayStr}, INTERVAL 7 DAY)`,
-        ))
-        .orderBy(desc(extKeywordDailyStats.statDate))
-        .limit(7);
-      for (const rs of recentStats) {
-        const g = N(rs.reviewGrowth);
-        if (g > 0) { recentPositiveGrowth = g; break; }
-      }
-    }
-    const fallbackGrowth = todayStoredGrowth > 0 ? todayStoredGrowth : recentPositiveGrowth;
-
-    // ★ v7.4: 리뷰 증가량 — 동일 상품(productId) 매칭 기반 정밀 계산
-    //   기존: totalReviewSum 단순 차이 → 상품 set 변동 시 오류
-    //   수정: 양쪽 스냅샷에 공통으로 존재하는 상품의 리뷰 차이만 합산
     let reviewGrowth = 0;
     let priceChange = 0;
     let productCountChange = 0;
 
-    // 이전 스냅샷의 상품별 리뷰 맵 구축 (productId → reviewCount)
-    function buildReviewMap(snapshotItems: any[]): Map<string, number> {
-      const m = new Map<string, number>();
-      for (const item of snapshotItems) {
-        const pid = String(item.productId || item.url || '');
-        if (pid) m.set(pid, item.reviewCount || 0);
+    if (todayReviewValid && baselineEntry) {
+      const rawGrowth = totalReviewSum - baselineEntry.totalReviewSum;
+      if (rawGrowth >= 0) {
+        // 경과일수로 나눠 일평균 증가분 산출
+        reviewGrowth = daysSinceBaseline > 1
+          ? Math.round(rawGrowth / daysSinceBaseline)
+          : rawGrowth;
       }
-      return m;
-    }
-
-    // 매칭 상품 기반 리뷰 증가 계산
-    function calcMatchedGrowth(currentItems: any[], prevReviewMap: Map<string, number>): number {
-      if (prevReviewMap.size === 0) return 0;
-      let growth = 0;
-      let matchedCount = 0;
-      for (const item of currentItems) {
-        const pid = String(item.productId || item.url || '');
-        const prevReview = prevReviewMap.get(pid);
-        if (prevReview !== undefined) {
-          matchedCount++;
-          const diff = (item.reviewCount || 0) - prevReview;
-          if (diff > 0) growth += diff;  // 개별 상품의 리뷰 감소는 무시
-        }
-      }
-      // 매칭 상품이 최소 3개 이상이어야 유의미한 결과
-      return matchedCount >= 3 ? growth : 0;
-    }
-
-    // 이전 스냅샷 아이템 가져오기 (prevStat용)
-    async function getPrevSnapshotItems(): Promise<any[]> {
-      // prevStat의 날짜에 해당하는 스냅샷 찾기
-      const prevDate = String(prevStat?.statDate || '');
-      if (!prevDate) return [];
-      const [prevSnap] = await db.select({ itemsJson: extSearchSnapshots.itemsJson })
-        .from(extSearchSnapshots)
-        .where(and(
-          eq(extSearchSnapshots.userId, userId),
-          eq(extSearchSnapshots.query, query),
-          sql`DATE(${extSearchSnapshots.createdAt}) = ${prevDate}`,
-        ))
-        .orderBy(desc(extSearchSnapshots.createdAt))
-        .limit(1);
-      if (!prevSnap?.itemsJson) return [];
-      try { return JSON.parse(prevSnap.itemsJson); } catch { return []; }
-    }
-
-    if (prevStat) {
-      const prevDate = String(prevStat.statDate || '');
-      if (prevDate !== todayStr) {
-        // 매칭 기반 계산 시도
-        const prevItems = await getPrevSnapshotItems();
-        if (prevItems.length > 0) {
-          const prevMap = buildReviewMap(prevItems);
-          const matchedGrowth = calcMatchedGrowth(items, prevMap);
-          // 다날짜 갭이면 일수로 나눠서 일평균 적용
-          const daysDiff = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(prevDate).getTime()) / 86400000));
-          reviewGrowth = daysDiff > 1 ? Math.round(matchedGrowth / daysDiff) : matchedGrowth;
-        } else {
-          // 이전 스냅샷 아이템이 없으면 기존 totalReviewSum 차이 (fallback)
-          const rawGrowth = totalReviewSum - (N(prevStat.totalReviewSum) || 0);
-          reviewGrowth = rawGrowth >= 0 ? Math.min(rawGrowth, totalReviewSum * 0.1) : 0;
-        }
-        if (reviewGrowth <= 0 && fallbackGrowth > 0) reviewGrowth = fallbackGrowth;
-        priceChange = (latest.avgPrice || 0) - (N(prevStat.avgPrice) || 0);
-        productCountChange = (latest.totalItems || 0) - (N(prevStat.productCount) || 0);
-      } else if (fallbackGrowth > 0) {
-        // 같은 날 재계산: 기존 growth 보존
-        reviewGrowth = fallbackGrowth;
-      }
-    } else if (prevSnapshotReviewSum !== null) {
-      if (prevSnapshotCreatedAt && prevSnapshotCreatedAt !== todayStr) {
-        // 이전 스냅샷과 직접 비교 — 매칭 기반
-        const [prevSnap] = await db.select({ itemsJson: extSearchSnapshots.itemsJson })
-          .from(extSearchSnapshots)
-          .where(and(
-            eq(extSearchSnapshots.userId, userId),
-            eq(extSearchSnapshots.query, query),
-            sql`${extSearchSnapshots.id} < ${latest.id}`,
-          ))
-          .orderBy(desc(extSearchSnapshots.createdAt))
-          .limit(1);
-        let prevItems: any[] = [];
-        if (prevSnap?.itemsJson) { try { prevItems = JSON.parse(prevSnap.itemsJson); } catch {} }
-        if (prevItems.length > 0) {
-          const prevMap = buildReviewMap(prevItems);
-          const matchedGrowth = calcMatchedGrowth(items, prevMap);
-          const daysDiff = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(prevSnapshotCreatedAt).getTime()) / 86400000));
-          reviewGrowth = daysDiff > 1 ? Math.round(matchedGrowth / daysDiff) : matchedGrowth;
-        } else {
-          const rawGrowth = totalReviewSum - prevSnapshotReviewSum;
-          reviewGrowth = rawGrowth >= 0 ? Math.min(rawGrowth, totalReviewSum * 0.1) : 0;
-        }
-        if (reviewGrowth <= 0 && fallbackGrowth > 0) reviewGrowth = fallbackGrowth;
-        priceChange = (latest.avgPrice || 0) - (prevSnapshotAvgPrice || 0);
-        productCountChange = (latest.totalItems || 0) - (prevSnapshotTotalItems || 0);
-      }
+      // 음수면 0 유지 (수집 편차)
+      priceChange = (latest.avgPrice || 0) - baselineEntry.avgPrice;
+      productCountChange = (latest.totalItems || 0) - baselineEntry.productCount;
+    } else if (!todayReviewValid) {
+      // 오늘 리뷰 파싱 실패 → 증가 0 (잘못된 데이터로 계산하지 않음)
+      reviewGrowth = 0;
     }
 
     const salesEstimate = reviewGrowth * 20;
