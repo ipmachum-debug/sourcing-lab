@@ -11,7 +11,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.0.0';
+  const VER = '6.1.0';
 
   if (window.__SH_ALI_LOADED__) return;
   window.__SH_ALI_LOADED__ = true;
@@ -123,6 +123,19 @@
 
     .sh-foot { padding: 6px 14px !important; background: #f8fafc !important; border-top: 1px solid #f1f5f9 !important; font-size: 9px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important; }
     .sh-foot a { color: #e74c3c !important; text-decoration: none !important; font-weight: 600 !important; }
+
+    /* 필터바 */
+    .sh-filter-bar {
+      display: flex !important; align-items: center !important; gap: 6px !important;
+      padding: 6px 0 8px !important; flex-wrap: wrap !important;
+    }
+    .sh-filter-bar select {
+      height: 22px !important; font-size: 9px !important; border: 1px solid #e2e8f0 !important;
+      border-radius: 4px !important; padding: 0 4px !important; background: #fff !important;
+      color: #475569 !important; font-weight: 600 !important; cursor: pointer !important;
+      outline: none !important;
+    }
+    .sh-filter-bar .sh-fl { font-size: 9px !important; color: #94a3b8 !important; font-weight: 600 !important; }
 
     @media (max-width: 1200px) { #sh-ali-panel { width: 300px !important; } }
   `;
@@ -463,8 +476,21 @@
     const priceBuckets = makeHistogram(prices, 6);
     const orderBuckets = makeHistogram(ordersArr, 5);
 
-    // TOP5 by orders
-    const top5 = [...items].sort((a, b) => b.orders - a.orders).slice(0, 5);
+    // 정렬·필터 적용
+    const sortSel = document.getElementById('sh-ali-sort');
+    const limitSel = document.getElementById('sh-ali-limit');
+    const sortVal = sortSel ? sortSel.value : 'orders-desc';
+    const limitVal = limitSel ? parseInt(limitSel.value) : 0;
+
+    let sorted = [...items];
+    switch (sortVal) {
+      case 'orders-desc': sorted.sort((a, b) => b.orders - a.orders); break;
+      case 'price-asc': sorted.sort((a, b) => a.price - b.price); break;
+      case 'price-desc': sorted.sort((a, b) => b.price - a.price); break;
+      case 'rating-desc': sorted.sort((a, b) => b.rating - a.rating); break;
+      case 'position': sorted.sort((a, b) => a.position - b.position); break;
+    }
+    const displayItems = limitVal > 0 ? sorted.slice(0, limitVal) : sorted;
 
     body.innerHTML = `
       <!-- 시장 개요 -->
@@ -532,11 +558,27 @@
         </div>
       </div>
 
-      <!-- TOP 5 주문 상품 -->
+      <!-- 상품 목록 (전체) -->
       <div class="sh-sec">
-        <div class="sh-sec-title">🏆 TOP 5 인기상품 (주문수 기준)</div>
-        ${top5.map((item, idx) => {
-          const rcls = ['sh-r1', 'sh-r2', 'sh-r3', 'sh-r3', 'sh-r3'][idx];
+        <div class="sh-sec-title">🛒 상품 목록 (${displayItems.length}/${s.count}개)</div>
+        <div class="sh-filter-bar">
+          <select id="sh-ali-sort">
+            <option value="orders-desc" ${sortVal === 'orders-desc' ? 'selected' : ''}>주문수↓</option>
+            <option value="price-asc" ${sortVal === 'price-asc' ? 'selected' : ''}>가격↑</option>
+            <option value="price-desc" ${sortVal === 'price-desc' ? 'selected' : ''}>가격↓</option>
+            <option value="rating-desc" ${sortVal === 'rating-desc' ? 'selected' : ''}>평점↓</option>
+            <option value="position" ${sortVal === 'position' ? 'selected' : ''}>노출순</option>
+          </select>
+          <span class="sh-fl">상위</span>
+          <select id="sh-ali-limit">
+            <option value="0" ${limitVal === 0 ? 'selected' : ''}>전체</option>
+            <option value="5" ${limitVal === 5 ? 'selected' : ''}>5개</option>
+            <option value="10" ${limitVal === 10 ? 'selected' : ''}>10개</option>
+            <option value="20" ${limitVal === 20 ? 'selected' : ''}>20개</option>
+          </select>
+        </div>
+        ${displayItems.map((item, idx) => {
+          const rcls = idx < 1 ? 'sh-r1' : idx < 2 ? 'sh-r2' : 'sh-r3';
           const isSaved = savedSet.has(item.productId);
           return `
             <div class="sh-top" data-pid="${item.productId}">
@@ -561,6 +603,12 @@
         }).join('')}
       </div>
     `;
+
+    // 정렬·필터 변경 시 재렌더링
+    const sortEl = document.getElementById('sh-ali-sort');
+    const limitEl = document.getElementById('sh-ali-limit');
+    if (sortEl) sortEl.addEventListener('change', () => renderPanel(allItems));
+    if (limitEl) limitEl.addEventListener('change', () => renderPanel(allItems));
   }
 
   // ============================================================
