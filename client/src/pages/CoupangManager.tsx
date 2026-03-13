@@ -361,7 +361,7 @@ export default function CoupangManager() {
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">판매량</span><span className="text-lg font-bold gradient-text">{formatNum(d?.qty || 0)}<span className="text-xs font-normal text-muted-foreground ml-0.5">개</span></span></div>
+                        <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">판매량</span><span className="text-lg font-bold gradient-text">{formatNum(d?.qty || 0)}<span className="text-xs font-normal text-muted-foreground ml-0.5">개</span>{d?.orders > 0 && <span className="text-[10px] font-normal text-muted-foreground ml-1">({d.orders}건)</span>}</span></div>
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">매출</span><span className="text-sm font-semibold text-blue-600">{formatNum(grossSales)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">수수료{isEstimated ? "*" : ""}</span><span className="text-xs text-amber-600">-{formatNum(commission)}</span></div>
                         <div className="flex justify-between items-baseline"><span className="text-xs text-muted-foreground">실정산{isEstimated ? "*" : ""}</span><span className="text-sm font-semibold text-purple-600">{formatNum(payout)}<span className="text-xs font-normal ml-0.5">원</span></span></div>
