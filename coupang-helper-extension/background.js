@@ -775,6 +775,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // ===== v8.0: AI 제품 발견 크롤링 =====
+    case 'START_DISCOVERY_CRAWL': {
+      startDiscoveryCrawl().then(result => {
+        sendResponse(result);
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    case 'GET_DISCOVERY_STATUS': {
+      sendResponse({ ok: true, data: discoveryState });
+      return true;
+    }
+
     // content.js → background: 자동 수집 파싱 완료
     case 'SEARCH_PARSE_SUCCESS': {
       handleAutoCollectSuccess(message).then(() => {
@@ -2247,3 +2262,333 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     pauseAutoCollect();
   }
 });
+
+// ============================================================
+//  v8.0: AI 제품 발견 크롤링 파이프라인
+//  서버 pending jobs 폴링 → 검색 크롤링 → 서버 필터링 → 상세 크롤링 → AI 분석
+// ============================================================
+const discoveryState = {
+  running: false,
+  status: 'IDLE', // IDLE|POLLING|CRAWLING_SEARCH|SUBMITTING_SEARCH|CRAWLING_DETAIL|SUBMITTING_DETAIL|DONE|ERROR
+  currentJob: null,
+  progress: '',
+  error: null,
+};
+
+async function startDiscoveryCrawl() {
+  if (discoveryState.running) {
+    return { ok: false, error: '이미 발견 크롤링 실행 중' };
+  }
+
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    return { ok: false, error: '서버 로그인 필요' };
+  }
+
+  discoveryState.running = true;
+  discoveryState.status = 'POLLING';
+  discoveryState.error = null;
+  discoveryState.progress = '서버에서 대기 작업 확인 중...';
+
+  // 비동기 실행
+  runDiscoveryPipeline().catch(err => {
+    console.error('[Discovery] 파이프라인 에러:', err);
+    discoveryState.status = 'ERROR';
+    discoveryState.error = err.message;
+    discoveryState.running = false;
+  });
+
+  return { ok: true, message: '발견 크롤링 시작됨' };
+}
+
+async function runDiscoveryPipeline() {
+  try {
+    // 1. 서버에서 pending 작업 가져오기
+    const resp = await apiClient.discoveryGetPendingJobs();
+    const jobs = resp?.result?.data || [];
+
+    if (!jobs.length) {
+      discoveryState.status = 'IDLE';
+      discoveryState.running = false;
+      discoveryState.progress = '대기 중인 작업 없음';
+      return;
+    }
+
+    // DNR 헤더 셋업
+    await HybridParser.setupCoupangHeaders().catch(() => {});
+
+    for (const job of jobs) {
+      if (!discoveryState.running) break;
+      await processDiscoveryJob(job);
+    }
+
+    discoveryState.status = 'DONE';
+    discoveryState.running = false;
+    discoveryState.progress = `${jobs.length}개 작업 처리 완료`;
+
+    chrome.notifications.create(`discovery-done-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: '🔍 AI 제품 발견 완료',
+      message: `${jobs.length}개 키워드 분석이 완료되었습니다. 결과를 확인하세요!`,
+      priority: 2,
+    });
+
+  } catch (err) {
+    discoveryState.status = 'ERROR';
+    discoveryState.error = err.message;
+    discoveryState.running = false;
+    throw err;
+  }
+}
+
+async function processDiscoveryJob(job) {
+  const { id: jobId, keyword, maxPages, filteredProductIds, status } = job;
+  discoveryState.currentJob = { jobId, keyword };
+
+  try {
+    // 이미 필터링 완료된 작업 = 상세 크롤링만 필요
+    if (status === 'filtering' && filteredProductIds?.length) {
+      await crawlDetailPages(jobId, keyword, filteredProductIds);
+      return;
+    }
+
+    // === Phase 1: 검색 결과 크롤링 ===
+    discoveryState.status = 'CRAWLING_SEARCH';
+    discoveryState.progress = `"${keyword}" 검색 크롤링 중...`;
+
+    await apiClient.discoveryUpdateJobStatus({ jobId, status: 'crawling_search' });
+
+    // 쿠팡 탭 확보
+    let tabId = null;
+    try { tabId = await ensureCoupangTab(); } catch (_) {}
+
+    const allItems = [];
+    const pages = maxPages || 2;
+
+    for (let page = 1; page <= pages; page++) {
+      discoveryState.progress = `"${keyword}" 검색 페이지 ${page}/${pages} 크롤링 중...`;
+
+      let collectResult;
+      try {
+        collectResult = await HybridParser.collectSearchHTML(keyword, {
+          tabId,
+          page,
+          listSize: 36,
+        });
+      } catch (err) {
+        console.warn(`[Discovery] 페이지 ${page} 수집 실패:`, err.message);
+        continue;
+      }
+
+      const html = collectResult?.html || '';
+      if (!html || html.length < 500) continue;
+
+      // 차단 체크
+      if (/봇|robot|captcha|차단/i.test(html) && html.length < 5000) {
+        console.warn(`[Discovery] "${keyword}" 페이지 ${page} 차단`);
+        break;
+      }
+
+      let result;
+      if (collectResult?.parsedResult?.items?.length) {
+        result = collectResult.parsedResult;
+      } else {
+        result = HybridParser.parseSearchHTML(html, keyword);
+      }
+
+      if (result?.items?.length) {
+        // 랭크 정보 추가
+        const startRank = (page - 1) * 36;
+        result.items.forEach((item, idx) => {
+          item.rank = startRank + idx + 1;
+          item.page = page;
+        });
+        allItems.push(...result.items);
+      }
+
+      // 페이지 사이 딜레이
+      if (page < pages) {
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
+    }
+
+    if (allItems.length === 0) {
+      await apiClient.discoveryUpdateJobStatus({
+        jobId,
+        status: 'failed',
+        errorMessage: '검색 결과를 수집할 수 없습니다',
+      });
+      return;
+    }
+
+    // === Phase 2: 서버에 검색 결과 전송 + 1차 필터링 ===
+    discoveryState.status = 'SUBMITTING_SEARCH';
+    discoveryState.progress = `"${keyword}" 검색 결과 ${allItems.length}개 서버 전송 중...`;
+
+    const nonAd = allItems.filter(i => !i.isAd);
+    const summary = {
+      totalItems: allItems.length,
+      avgPrice: Math.round(nonAd.reduce((s, i) => s + (i.price || 0), 0) / (nonAd.length || 1)),
+      avgRating: +(nonAd.reduce((s, i) => s + (i.rating || 0), 0) / (nonAd.length || 1)).toFixed(1),
+      avgReview: Math.round(nonAd.reduce((s, i) => s + (i.reviewCount || 0), 0) / (nonAd.length || 1)),
+      highReviewRatio: Math.round(nonAd.filter(i => (i.reviewCount || 0) >= 100).length / (nonAd.length || 1) * 100),
+      adCount: allItems.filter(i => i.isAd).length,
+      rocketCount: allItems.filter(i => i.isRocket).length,
+      competitionScore: 0,
+      competitionLevel: 'medium',
+    };
+
+    // 경쟁도 계산
+    const avgReview = summary.avgReview;
+    if (avgReview > 500 || summary.highReviewRatio > 50) {
+      summary.competitionScore = 80;
+      summary.competitionLevel = 'hard';
+    } else if (avgReview > 100 || summary.highReviewRatio > 20) {
+      summary.competitionScore = 50;
+      summary.competitionLevel = 'medium';
+    } else {
+      summary.competitionScore = 20;
+      summary.competitionLevel = 'easy';
+    }
+
+    const filterResp = await apiClient.discoverySubmitSearchResults({
+      jobId,
+      items: allItems.slice(0, 100), // 최대 100개
+      summary,
+    });
+
+    const filteredProducts = filterResp?.result?.data?.filteredProducts || [];
+
+    if (!filteredProducts.length) {
+      console.warn(`[Discovery] "${keyword}" 필터링 결과 0개`);
+      return;
+    }
+
+    // === Phase 3: 상세 페이지 크롤링 ===
+    await crawlDetailPages(jobId, keyword, filteredProducts);
+
+  } catch (err) {
+    console.error(`[Discovery] 작업 ${jobId} 실패:`, err);
+    try {
+      await apiClient.discoveryUpdateJobStatus({
+        jobId,
+        status: 'failed',
+        errorMessage: err.message,
+      });
+    } catch (_) {}
+  }
+}
+
+async function crawlDetailPages(jobId, keyword, filteredProducts) {
+  discoveryState.status = 'CRAWLING_DETAIL';
+
+  // 쿠팡 탭 확보
+  let tabId;
+  try { tabId = await ensureCoupangTab(); } catch (_) {}
+  if (!tabId) {
+    // 새 탭 생성
+    try {
+      const tab = await chrome.tabs.create({
+        url: 'https://www.coupang.com',
+        active: false,
+      });
+      tabId = tab.id;
+      await new Promise(r => setTimeout(r, 3000));
+    } catch (e) {
+      await apiClient.discoveryUpdateJobStatus({
+        jobId, status: 'failed', errorMessage: '쿠팡 탭 생성 실패',
+      });
+      return;
+    }
+  }
+
+  await apiClient.discoveryUpdateJobStatus({ jobId, status: 'crawling_detail' });
+
+  const detailResults = [];
+
+  for (let i = 0; i < filteredProducts.length; i++) {
+    if (!discoveryState.running) break;
+    const product = filteredProducts[i];
+    const productId = product.productId || product.coupangProductId;
+    const detailUrl = product.url || `https://www.coupang.com/vp/products/${productId}`;
+
+    discoveryState.progress = `"${keyword}" 상세 ${i + 1}/${filteredProducts.length} 크롤링 중 (${(product.title || '').substring(0, 25)}...)`;
+
+    try {
+      // 탭에서 상세 페이지 로드
+      await chrome.tabs.update(tabId, { url: detailUrl });
+
+      // 로드 완료 대기
+      await new Promise((resolve) => {
+        const listener = (tid, changeInfo) => {
+          if (tid === tabId && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve();
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 20000);
+      });
+
+      // DOM 안정화 대기
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+
+      // content-detail.js에 파싱 요청
+      const requestId = `discovery-${jobId}-${productId}-${Date.now()}`;
+      const detail = await new Promise((resolve) => {
+        const handler = (msg) => {
+          if (msg.type === 'DETAIL_PARSE_SUCCESS' && msg.requestId === requestId) {
+            chrome.runtime.onMessage.removeListener(handler);
+            resolve(msg.result || null);
+          } else if (msg.type === 'DETAIL_PARSE_FAILED' && msg.requestId === requestId) {
+            chrome.runtime.onMessage.removeListener(handler);
+            resolve(null);
+          }
+        };
+        chrome.runtime.onMessage.addListener(handler);
+        setTimeout(() => { chrome.runtime.onMessage.removeListener(handler); resolve(null); }, 25000);
+
+        chrome.tabs.sendMessage(tabId, {
+          type: 'START_PARSE_DETAIL',
+          requestId,
+          productId: String(productId),
+          keyword,
+          isAutoCollect: true,
+        }).catch(() => resolve(null));
+      });
+
+      if (detail) {
+        detailResults.push({
+          ...detail,
+          productId: String(productId),
+          searchRank: product.rank || 0,
+          filterScore: product.filterScore || 0,
+        });
+        console.log(`[Discovery] ✅ 상세 ${i + 1}/${filteredProducts.length}: ${productId} (confidence: ${detail.confidence || 0})`);
+      } else {
+        console.warn(`[Discovery] ❌ 상세 ${i + 1}/${filteredProducts.length}: ${productId} 파싱 실패`);
+      }
+
+    } catch (err) {
+      console.warn(`[Discovery] 상세 크롤링 오류 ${productId}:`, err.message);
+    }
+
+    // 상품 사이 딜레이 (인간 행동 시뮬레이션)
+    if (i < filteredProducts.length - 1) {
+      await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
+    }
+  }
+
+  // === Phase 4: 상세 결과 서버 전송 → AI 분석 트리거 ===
+  discoveryState.status = 'SUBMITTING_DETAIL';
+  discoveryState.progress = `"${keyword}" 상세 데이터 ${detailResults.length}개 서버 전송 → AI 분석 시작`;
+
+  await apiClient.discoverySubmitDetailResults({
+    jobId,
+    details: detailResults,
+  });
+
+  discoveryState.progress = `"${keyword}" AI 분석 진행 중... (서버에서 처리)`;
+  console.log(`[Discovery] ✅ "${keyword}" 상세 ${detailResults.length}개 전송 완료, AI 분석 시작`);
+}

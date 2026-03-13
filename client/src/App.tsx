@@ -26,6 +26,7 @@ import Manual from "./pages/Manual";
 import SearchDemand from "./pages/SearchDemand";
 import MarginCalculator from "./pages/MarginCalculator";
 import NicheFinder from "./pages/NicheFinder";
+import ProductDiscovery from "./pages/ProductDiscovery";
 
 function Router() {
   return (
@@ -50,6 +51,7 @@ function Router() {
       <Route path="/demand" component={SearchDemand} />
       <Route path="/margin" component={MarginCalculator} />
       <Route path="/niche-finder" component={NicheFinder} />
+      <Route path="/discovery" component={ProductDiscovery} />
       <Route path="/sourcing-helper" component={SourcingHelper} />
       <Route path="/extension" component={ExtensionDashboard} />
       <Route path="/extension-guide" component={ExtensionGuide} />
