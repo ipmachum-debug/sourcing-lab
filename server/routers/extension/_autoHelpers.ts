@@ -4,12 +4,26 @@
  */
 import { getDb } from "../../db";
 import {
-  extSearchSnapshots, extKeywordDailyStats,
+  extSearchSnapshots, extKeywordDailyStats, extKeywordDailyStatus,
   extProductTrackings, extProductDailySnapshots,
 } from "../../../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { N } from "./_helpers";
 
+/**
+ * ★ v7.6.0: 리뷰 증가량 계산 핵심 수정
+ *
+ * 이전 문제:
+ *   baseline을 ext_keyword_daily_stats(자기 자신 테이블)에서 읽음
+ *   → 동일 스냅샷 데이터로 baseline과 today가 같아서 growth=0
+ *   → 통계계산 버튼을 누르면 값이 비정상적으로 변하는 원인
+ *
+ * 수정:
+ *   1) baseline을 ext_keyword_daily_status(배치 계산 테이블)에서 읽음
+ *      — 이 테이블은 runDailyBatch가 독립적으로 계산/저장한 데이터
+ *   2) 상품당 리뷰 증가 상한(30/일) + 상품수 변동 40% 필터 적용
+ *   3) fallback으로 ext_keyword_daily_stats → 이전 스냅샷 순서 탐색
+ */
 export async function autoComputeKeywordDailyStat(userId: number, query: string, db: any) {
   try {
     const today = new Date();
@@ -43,64 +57,85 @@ export async function autoComputeKeywordDailyStat(userId: number, query: string,
     const latest = bestSnapshot;
     const items = bestItems;
     const totalReviewSum = bestTotalReviewSum;
+    const todayProductCount = items.length || (latest.totalItems || 0);
 
     const adCount = items.filter((i: any) => i.isAd).length;
     const rocketCount = items.filter((i: any) => i.isRocket).length;
     const highReviewCount = items.filter((i: any) => (i.reviewCount || 0) >= 100).length;
     const adRatio = items.length ? Math.round((adCount / items.length) * 100) : 0;
 
-    // ★ v7.4.0: 유효한 기준점(baseline) 기반 리뷰 증가 계산
-    // - 리뷰 파싱 실패(totalReviewSum=0 && items>0)인 날은 기준점에서 제외
-    // - 유효한 첫 기준점부터 증가분만 계산
-    // - 중간에 파싱 실패한 날이 있으면 경과일수로 나눠 일평균 증가로 산출
-
-    // 최근 14일 이내 과거 daily_stats 데이터 조회
-    const recentHistory = await db.select({
-      statDate: extKeywordDailyStats.statDate,
-      totalReviewSum: extKeywordDailyStats.totalReviewSum,
-      productCount: extKeywordDailyStats.productCount,
-      avgPrice: extKeywordDailyStats.avgPrice,
-    })
-      .from(extKeywordDailyStats)
-      .where(and(
-        eq(extKeywordDailyStats.userId, userId),
-        eq(extKeywordDailyStats.query, query),
-        sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
-        sql`${extKeywordDailyStats.statDate} >= DATE_SUB(${todayStr}, INTERVAL 14 DAY)`,
-      ))
-      .orderBy(desc(extKeywordDailyStats.statDate))
-      .limit(14);
-
-    // 리뷰 데이터 유효성 판별: totalReviewSum > 0 이어야 함
+    // ★ v7.6.0: baseline 탐색 — ext_keyword_daily_status → ext_keyword_daily_stats → 스냅샷 순 fallback
     const isReviewDataValid = (reviewSum: number, itemCount: number): boolean =>
       reviewSum > 0 || itemCount === 0;
 
-    const todayReviewValid = isReviewDataValid(totalReviewSum, items.length);
+    const todayReviewValid = isReviewDataValid(totalReviewSum, todayProductCount);
 
-    // 유효한 가장 최근 기준점 찾기
     let baselineEntry: { statDate: string; totalReviewSum: number; avgPrice: number; productCount: number } | null = null;
     let daysSinceBaseline = 0;
 
-    for (const entry of recentHistory) {
-      const entryReviewSum = N(entry.totalReviewSum);
-      const entryProductCount = N(entry.productCount);
-      if (isReviewDataValid(entryReviewSum, entryProductCount) && String(entry.statDate) !== todayStr) {
-        baselineEntry = {
-          statDate: String(entry.statDate),
-          totalReviewSum: entryReviewSum,
-          avgPrice: N(entry.avgPrice),
-          productCount: entryProductCount,
-        };
-        const baseDate = new Date(baselineEntry.statDate + "T00:00:00");
-        const currentDate = new Date(todayStr + "T00:00:00");
-        daysSinceBaseline = Math.max(1, Math.round(
-          (currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000),
-        ));
+    const calcDaysSince = (baseDateStr: string): number => {
+      const baseDate = new Date(baseDateStr + "T00:00:00");
+      const currentDate = new Date(todayStr + "T00:00:00");
+      return Math.max(1, Math.round((currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000)));
+    };
+
+    // (1) 우선: ext_keyword_daily_status (배치 계산 테이블) — 독립 데이터 소스
+    const statusHistory = await db.select({
+      statDate: extKeywordDailyStatus.statDate,
+      totalReviewSum: extKeywordDailyStatus.totalReviewSum,
+      totalItems: extKeywordDailyStatus.totalItems,
+      avgPrice: extKeywordDailyStatus.avgPrice,
+    })
+      .from(extKeywordDailyStatus)
+      .where(and(
+        eq(extKeywordDailyStatus.userId, userId),
+        eq(extKeywordDailyStatus.keyword, query),
+        sql`${extKeywordDailyStatus.statDate} < ${todayStr}`,
+        sql`${extKeywordDailyStatus.statDate} >= DATE_SUB(${todayStr}, INTERVAL 14 DAY)`,
+      ))
+      .orderBy(desc(extKeywordDailyStatus.statDate))
+      .limit(14);
+
+    for (const entry of statusHistory) {
+      const rs = N(entry.totalReviewSum);
+      const pc = N(entry.totalItems);
+      if (isReviewDataValid(rs, pc) && String(entry.statDate) !== todayStr) {
+        baselineEntry = { statDate: String(entry.statDate), totalReviewSum: rs, avgPrice: N(entry.avgPrice), productCount: pc };
+        daysSinceBaseline = calcDaysSince(baselineEntry.statDate);
         break;
       }
     }
 
-    // 스냅샷 fallback: daily_stats에 유효 기준점 없으면 이전 스냅샷 확인
+    // (2) fallback: ext_keyword_daily_stats (자기 테이블)
+    if (!baselineEntry) {
+      const statsHistory = await db.select({
+        statDate: extKeywordDailyStats.statDate,
+        totalReviewSum: extKeywordDailyStats.totalReviewSum,
+        productCount: extKeywordDailyStats.productCount,
+        avgPrice: extKeywordDailyStats.avgPrice,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          eq(extKeywordDailyStats.query, query),
+          sql`${extKeywordDailyStats.statDate} < ${todayStr}`,
+          sql`${extKeywordDailyStats.statDate} >= DATE_SUB(${todayStr}, INTERVAL 14 DAY)`,
+        ))
+        .orderBy(desc(extKeywordDailyStats.statDate))
+        .limit(14);
+
+      for (const entry of statsHistory) {
+        const rs = N(entry.totalReviewSum);
+        const pc = N(entry.productCount);
+        if (isReviewDataValid(rs, pc) && String(entry.statDate) !== todayStr) {
+          baselineEntry = { statDate: String(entry.statDate), totalReviewSum: rs, avgPrice: N(entry.avgPrice), productCount: pc };
+          daysSinceBaseline = calcDaysSince(baselineEntry.statDate);
+          break;
+        }
+      }
+    }
+
+    // (3) fallback: 이전 스냅샷
     if (!baselineEntry) {
       const prevSnapshots = await db.select()
         .from(extSearchSnapshots)
@@ -125,11 +160,7 @@ export async function autoComputeKeywordDailyStat(userId: number, query: string,
               avgPrice: snap.avgPrice || 0,
               productCount: snap.totalItems || 0,
             };
-            const baseDate = new Date(snapDate + "T00:00:00");
-            const currentDate = new Date(todayStr + "T00:00:00");
-            daysSinceBaseline = Math.max(1, Math.round(
-              (currentDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000),
-            ));
+            daysSinceBaseline = calcDaysSince(snapDate);
             break;
           }
         }
@@ -140,21 +171,32 @@ export async function autoComputeKeywordDailyStat(userId: number, query: string,
     let priceChange = 0;
     let productCountChange = 0;
 
-    if (todayReviewValid && baselineEntry) {
-      // ★ v7.5.0: 제품 수 변동 정규화 — 제품당 평균 리뷰 기반 성장 계산
-      // 크롤링 시 제품 수가 달라지면 totalReviewSum도 변동하므로
-      // 제품당 평균 리뷰로 정규화 후 보수적(min) 제품 수에 곱해 성장 산출
-      const avgReviewToday = totalReviewSum / Math.max(1, items.length);
+    if (todayReviewValid && baselineEntry && baselineEntry.productCount > 0) {
+      // ★ v7.6.0: 제품 수 변동 정규화 + 안전장치
+      const avgReviewToday = totalReviewSum / Math.max(1, todayProductCount);
       const avgReviewBaseline = baselineEntry.totalReviewSum / Math.max(1, baselineEntry.productCount);
       const growthPerProduct = avgReviewToday - avgReviewBaseline;
-      const referenceCount = Math.min(items.length, baselineEntry.productCount);
+      const referenceCount = Math.min(todayProductCount, baselineEntry.productCount);
       const normalizedGrowth = Math.round(growthPerProduct * referenceCount);
 
-      if (normalizedGrowth >= 0) {
-        // 경과일수로 나눠 일평균 증가분 산출
-        reviewGrowth = daysSinceBaseline > 1
+      if (normalizedGrowth > 0) {
+        let dailyGrowth = daysSinceBaseline > 1
           ? Math.round(normalizedGrowth / daysSinceBaseline)
           : normalizedGrowth;
+
+        // ★ 안전장치 1: 상품수 변동 40% 초과 시 신뢰도 낮음 → 0
+        const prevPc = baselineEntry.productCount;
+        if (prevPc > 0 && Math.abs(todayProductCount - prevPc) / prevPc > 0.4) {
+          dailyGrowth = 0;
+        }
+
+        // ★ 안전장치 2: 상품당 하루 리뷰 증가 상한 30개
+        const maxDailyGrowth = todayProductCount * 30;
+        if (dailyGrowth > maxDailyGrowth) {
+          dailyGrowth = 0;
+        }
+
+        reviewGrowth = dailyGrowth;
       }
       // 음수면 0 유지 (수집 편차)
       priceChange = (latest.avgPrice || 0) - baselineEntry.avgPrice;
@@ -194,7 +236,6 @@ export async function autoComputeKeywordDailyStat(userId: number, query: string,
     }
 
     // ★ v7.2.7 수정: 키워드 점수 — 정규화된 지표 합산 (100점 만점)
-    // 각 지표를 0~1 범위로 정규화 후 가중합산
     const avgReviewPerProduct = items.length > 0 ? totalReviewSum / items.length : 0;
     const competitionFactor = Math.max(0, 100 - (latest.competitionScore || 0)) / 100;
     
