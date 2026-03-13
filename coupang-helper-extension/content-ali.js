@@ -11,7 +11,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '6.2.0';
+  const VER = '6.3.0';
 
   if (window.__SH_ALI_LOADED__) return;
   window.__SH_ALI_LOADED__ = true;
@@ -888,11 +888,12 @@
   }
 
   // ============================================================
-  //  스캔 — v6.2: 봇 탐지 방지를 위해 최소한의 DOM 접근
-  //  페이지 완전 로딩 후 1회 스캔, 실패 시 1회 재시도
-  //  MutationObserver/visibilitychange 제거
+  //  스캔 — v6.3: 조건 충족형 1회 파싱
+  //  타이머 중심 → 상품 컨테이너 존재 확인 후 1회만 파싱
+  //  MutationObserver/setInterval/visibilitychange 없음
   // ============================================================
   let lastSig = '';
+  let scanned = false; // 현재 URL에서 파싱 완료 여부
 
   function doScan(force = false) {
     const items = parseAliProducts();
@@ -907,6 +908,7 @@
     if (isNew) {
       lastSig = sig;
       allItems = items;
+      scanned = true;
       console.log(`%c[SH-Ali] ✅ ${items.length}개 파싱 완료`, 'color:#16a34a;font-weight:bold;');
     }
 
@@ -919,39 +921,72 @@
     return items.length > 0;
   }
 
-  // URL 변경 감지 (SPA) — 3초마다 체크, 변경 시 2초 딜레이 후 1회 스캔
+  // ============================================================
+  //  상품 컨테이너 존재 감지 — 조건 충족 시 1회만 파싱
+  //  querySelectorAll 대신 가벼운 querySelector 1개로 확인
+  // ============================================================
+  const CONTAINER_SELECTORS = [
+    '[class*="SearchProductFeed"]',
+    '.search--gallery--list',
+    '[class*="search-item-card"]',
+    'div[data-pl="true"]',
+    'a[href*="/item/"]',
+  ];
+
+  function hasProductContainer() {
+    for (const sel of CONTAINER_SELECTORS) {
+      if (document.querySelector(sel)) return true;
+    }
+    return false;
+  }
+
+  // 컨테이너 대기 → 발견 시 1회 파싱 (최대 15초, 체크 간격 2초)
+  function waitForContainerAndScan() {
+    scanned = false;
+    let attempts = 0;
+    const maxAttempts = 8; // 2초 × 8 = 최대 16초 대기
+
+    function check() {
+      attempts++;
+      if (scanned) return; // 이미 파싱 완료
+
+      if (hasProductContainer()) {
+        // 컨테이너 발견 → 렌더링 안정화 대기 후 1회 파싱
+        console.log(`%c[SH-Ali] 📦 상품 컨테이너 감지 (${attempts}번째 체크)`, 'color:#e74c3c;');
+        setTimeout(() => {
+          if (!scanned) doScan(true);
+        }, 800);
+        return;
+      }
+
+      if (attempts < maxAttempts) {
+        setTimeout(check, 2000);
+      } else {
+        console.log(`%c[SH-Ali] ⏰ 상품 컨테이너 미감지 (${maxAttempts}회 초과) — ↻ 버튼으로 수동 스캔`, 'color:#94a3b8;');
+        if (!panel) { createPanel(); panel.style.display = ''; }
+        renderPanel([]);
+      }
+    }
+
+    check();
+  }
+
+  // URL 변경 감지 (SPA) — 5초 간격으로 체크, 변경 시 컨테이너 대기 재시작
   let lastUrl = location.href;
   function urlCheck() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       lastSig = '';
       allItems = [];
-      setTimeout(() => {
-        if (!doScan(true)) {
-          // 실패 시 3초 후 1회 재시도
-          setTimeout(() => doScan(true), 3000);
-        }
-      }, 2000);
+      waitForContainerAndScan();
     }
   }
+  setInterval(urlCheck, 5000);
 
-  window.addEventListener('popstate', () => setTimeout(urlCheck, 500));
-  setInterval(urlCheck, 3000);
-
-  // ★ 초기 실행: 페이지 완전 로딩을 기다린 후 스캔
-  //   봇 탐지 회피를 위해 즉시 DOM 접근하지 않고 지연 실행
-  function initialScan() {
-    setTimeout(() => {
-      if (!doScan()) {
-        // 첫 시도 실패 시 3초 후 1회만 재시도
-        setTimeout(() => doScan(true), 3000);
-      }
-    }, 1500);
-  }
-
+  // ★ 초기 실행: 페이지 로드 완료 후 컨테이너 대기 시작
   if (document.readyState === 'complete') {
-    initialScan();
+    waitForContainerAndScan();
   } else {
-    window.addEventListener('load', initialScan, { once: true });
+    window.addEventListener('load', () => waitForContainerAndScan(), { once: true });
   }
 })();
