@@ -18,6 +18,8 @@ import {
   RefreshCw, CheckCircle, XCircle, Clock, Star, ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import AliValidationTab from "@/components/AliValidationTab";
 
 type MainTab = "candidates" | "validated" | "recommended";
 
@@ -524,14 +526,31 @@ export default function NicheFinder() {
 
         {/* 상세 다이얼로그 */}
         <Dialog open={!!detailKeyword} onOpenChange={() => setDetailKeyword(null)}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Gem className="w-5 h-5 text-purple-500" />
                 {detailKeyword?.keyword}
               </DialogTitle>
             </DialogHeader>
-            {detailKeyword && <KeywordDetailView item={detailKeyword} />}
+            {detailKeyword && (
+              <Tabs defaultValue="info">
+                <TabsList className="w-full">
+                  <TabsTrigger value="info" className="flex-1">기본정보</TabsTrigger>
+                  <TabsTrigger value="ali" className="flex-1">알리 검증</TabsTrigger>
+                </TabsList>
+                <TabsContent value="info">
+                  <KeywordDetailView item={detailKeyword} />
+                </TabsContent>
+                <TabsContent value="ali">
+                  <AliValidationTab
+                    keywordId={detailKeyword.id}
+                    keyword={detailKeyword.keyword}
+                    canonicalKeyword={detailKeyword.canonicalKeyword}
+                  />
+                </TabsContent>
+              </Tabs>
+            )}
           </DialogContent>
         </Dialog>
       </div>
