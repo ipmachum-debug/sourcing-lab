@@ -19,6 +19,7 @@ import {
   selectBatchKeywords, computeDailyAggregation, runDailyBatch,
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
+  syncWatchKeywordsToMaster,
 } from "../batchCollector";
 import { TRPCError } from "@trpc/server";
 
@@ -3974,7 +3975,12 @@ export const extensionRouter = router({
     }).optional())
     .mutation(async ({ ctx, input }) => {
       const opts = input || {};
-      return await runDailyBatch(ctx.user!.id, opts.limit, opts.offset, opts.keywords);
+      const result = await runDailyBatch(ctx.user!.id, opts.limit, opts.offset, opts.keywords);
+      // 배치 완료 후 니치파인더 데이터 동기화
+      await syncWatchKeywordsToMaster(ctx.user!.id).catch(err =>
+        console.error("[runDailyBatchCollection] 니치파인더 동기화 오류:", err.message)
+      );
+      return result;
     }),
 
   // ===== 배치 수집 대상 키워드 조회 =====
@@ -4292,8 +4298,11 @@ export const extensionRouter = router({
         console.warn('[autoCollectComplete] 키워드 동기화 오류:', e);
       }
 
-      console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}`);
-      return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount };
+      // 4. ext_watch_keywords → keyword_master 동기화 (니치파인더 데이터 연동)
+      const nicheSync = await syncWatchKeywordsToMaster(userId);
+
+      console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}, nicheSynced=${nicheSync.synced}, nicheMetrics=${nicheSync.metricsCreated}`);
+      return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount, nicheSynced: nicheSync.synced, nicheMetricsCreated: nicheSync.metricsCreated };
     }),
 
   // ===== 100개 단위 라운드 일괄 통계 계산 (웹 UI용) =====
@@ -4320,7 +4329,10 @@ export const extensionRouter = router({
       for (const q of chunk) {
         try { await autoComputeKeywordDailyStat(userId, q, db); computed++; } catch { errors++; }
       }
-      if (!hasMore) { await runDailyBatch(userId).catch(() => {}); }
+      if (!hasMore) {
+        await runDailyBatch(userId).catch(() => {});
+        await syncWatchKeywordsToMaster(userId).catch(() => {});
+      }
 
       const now = new Date(); now.setHours(now.getHours() + 9);
       return {

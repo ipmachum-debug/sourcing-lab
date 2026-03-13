@@ -21,6 +21,7 @@ import { getDb } from "./db";
 import {
   extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
   extSearchSnapshots, extKeywordDailyStats,
+  keywordMaster, keywordDailyMetrics,
 } from "../drizzle/schema";
 import { eq, and, desc, sql, gte, lt, asc, ne, isNull, lte, or } from "drizzle-orm";
 
@@ -851,6 +852,187 @@ export async function runDailyBatch(
   }
 
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
+}
+
+// ============================================================
+//  ext_watch_keywords → keyword_master 동기화
+// ============================================================
+
+/**
+ * 배치 수집 완료 후 ext_watch_keywords의 키워드를
+ * keyword_master 테이블에 동기화하여 니치파인더에서 볼 수 있게 함.
+ *
+ * 1. keywordMasterId가 NULL인 ext_watch_keywords 조회
+ * 2. keyword_master에 없으면 INSERT (sourceType: "extension")
+ * 3. ext_watch_keywords.keywordMasterId 업데이트
+ * 4. 쿠팡 데이터(ext_keyword_daily_status)를 keyword_daily_metrics에 반영
+ */
+export async function syncWatchKeywordsToMaster(userId: number): Promise<{
+  synced: number;
+  metricsCreated: number;
+  errors: number;
+}> {
+  const db = await getDb();
+  if (!db) return { synced: 0, metricsCreated: 0, errors: 0 };
+
+  const now = nowKST();
+  const today = now.toISOString().slice(0, 10);
+
+  // keywordMasterId가 없는 감시 키워드 조회
+  const unlinked = await db.select()
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+      isNull(extWatchKeywords.keywordMasterId),
+    ));
+
+  let synced = 0, metricsCreated = 0, errors = 0;
+
+  for (const wk of unlinked) {
+    try {
+      const normalized = normalizeKeyword(wk.keyword);
+      if (!normalized) continue;
+
+      // keyword_master에서 이미 존재하는지 확인
+      const [existing] = await db.select({ id: keywordMaster.id })
+        .from(keywordMaster)
+        .where(and(
+          eq(keywordMaster.userId, userId),
+          eq(keywordMaster.normalizedKeyword, normalized),
+        ))
+        .limit(1);
+
+      let masterId: number;
+
+      if (existing) {
+        masterId = existing.id;
+      } else {
+        // keyword_master에 새로 등록
+        const [inserted] = await db.insert(keywordMaster).values({
+          userId,
+          keyword: wk.keyword,
+          normalizedKeyword: normalized,
+          sourceType: "extension",
+          validationStatus: "pending",
+          validationPriority: 50,
+        }).$returningId();
+        masterId = inserted.id;
+      }
+
+      // ext_watch_keywords에 연결
+      await db.update(extWatchKeywords)
+        .set({ keywordMasterId: masterId })
+        .where(eq(extWatchKeywords.id, wk.id));
+
+      synced++;
+
+      // 쿠팡 데이터가 있으면 keyword_daily_metrics에도 반영
+      const [dailyStatus] = await db.select()
+        .from(extKeywordDailyStatus)
+        .where(and(
+          eq(extKeywordDailyStatus.userId, userId),
+          eq(extKeywordDailyStatus.keyword, wk.keyword),
+        ))
+        .orderBy(desc(extKeywordDailyStatus.statDate))
+        .limit(1);
+
+      if (dailyStatus) {
+        const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
+          .from(keywordDailyMetrics)
+          .where(and(
+            eq(keywordDailyMetrics.userId, userId),
+            eq(keywordDailyMetrics.keywordId, masterId),
+            eq(keywordDailyMetrics.metricDate, today),
+          ))
+          .limit(1);
+
+        const metricData = {
+          coupangProductCount: N(dailyStatus.totalItems),
+          coupangAvgPrice: N(dailyStatus.avgPrice),
+          coupangTop10ReviewSum: N(dailyStatus.totalReviewSum),
+          coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
+        };
+
+        if (existingMetric) {
+          await db.update(keywordDailyMetrics)
+            .set(metricData)
+            .where(eq(keywordDailyMetrics.id, existingMetric.id));
+        } else {
+          await db.insert(keywordDailyMetrics).values({
+            userId,
+            keywordId: masterId,
+            metricDate: today,
+            ...metricData,
+          });
+        }
+        metricsCreated++;
+      }
+    } catch (err: any) {
+      console.error(`[syncWatchToMaster] 에러 (${wk.keyword}):`, err.message);
+      errors++;
+    }
+  }
+
+  // 이미 keywordMasterId가 있는 감시 키워드도 쿠팡 데이터 갱신
+  const linked = await db.select()
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+      sql`${extWatchKeywords.keywordMasterId} IS NOT NULL`,
+    ));
+
+  for (const wk of linked) {
+    try {
+      const [dailyStatus] = await db.select()
+        .from(extKeywordDailyStatus)
+        .where(and(
+          eq(extKeywordDailyStatus.userId, userId),
+          eq(extKeywordDailyStatus.keyword, wk.keyword),
+        ))
+        .orderBy(desc(extKeywordDailyStatus.statDate))
+        .limit(1);
+
+      if (!dailyStatus || !wk.keywordMasterId) continue;
+
+      const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
+        .from(keywordDailyMetrics)
+        .where(and(
+          eq(keywordDailyMetrics.userId, userId),
+          eq(keywordDailyMetrics.keywordId, wk.keywordMasterId),
+          eq(keywordDailyMetrics.metricDate, today),
+        ))
+        .limit(1);
+
+      const metricData = {
+        coupangProductCount: N(dailyStatus.totalItems),
+        coupangAvgPrice: N(dailyStatus.avgPrice),
+        coupangTop10ReviewSum: N(dailyStatus.totalReviewSum),
+        coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
+      };
+
+      if (existingMetric) {
+        await db.update(keywordDailyMetrics)
+          .set(metricData)
+          .where(eq(keywordDailyMetrics.id, existingMetric.id));
+      } else {
+        await db.insert(keywordDailyMetrics).values({
+          userId,
+          keywordId: wk.keywordMasterId,
+          metricDate: today,
+          ...metricData,
+        });
+      }
+      metricsCreated++;
+    } catch (err: any) {
+      console.error(`[syncWatchToMaster] 쿠팡 데이터 갱신 에러 (${wk.keyword}):`, err.message);
+      errors++;
+    }
+  }
+
+  console.log(`[syncWatchToMaster] 완료: synced=${synced}, metrics=${metricsCreated}, errors=${errors}`);
+  return { synced, metricsCreated, errors };
 }
 
 // ============================================================
