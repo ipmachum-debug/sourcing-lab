@@ -1,12 +1,12 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v7.0.0
-   "마켓 대시보드 패널" — 시장 분석 + TOP3 + 미니 차트
+   Coupang Sourcing Helper — Content Script v8.4.0
+   "시장 인사이트 대시보드" — 경쟁분석 + 배송유형 + 분포차트
 
    원칙:
    1) 검색 시 자동 플로팅 패널 (오른쪽)
-   2) 시장 개요: 상품수·평균가·리뷰·경쟁도·그래프
-   3) TOP 3 상품만 간결 표시
-   4) 쿠팡 DOM 최소 건드림
+   2) 시장 개요: 상품수·평균가·평점·리뷰·경쟁도·배송유형
+   3) 배송 5종 분석 + 가격/리뷰 분포 히스토그램
+   4) TOP3는 사이드패널에서 제공 (중복 제거)
 
    v7.0.0 하이브리드 아키텍처:
    - V2 React DOM 자동감지 (#product-list > li[class^="ProductUnit_productUnit"])
@@ -49,7 +49,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '7.0.0';
+  const VER = '8.4.0';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -138,160 +138,146 @@
       position: fixed !important;
       top: 60px !important;
       right: 10px !important;
-      width: 340px !important;
+      width: 360px !important;
       max-height: calc(100vh - 80px) !important;
       z-index: 2147483640 !important;
       font-family: -apple-system, 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
       font-size: 12px !important;
       color: #1e293b !important;
-      background: #fff !important;
-      border-radius: 14px !important;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.06) !important;
+      background: rgba(255,255,255,0.92) !important;
+      backdrop-filter: blur(20px) !important;
+      -webkit-backdrop-filter: blur(20px) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 12px 48px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.06) !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
-      border: 1px solid rgba(0,0,0,0.06) !important;
+      border: 1px solid rgba(99,102,241,0.08) !important;
       user-select: none !important;
-      transition: opacity 0.2s !important;
+      transition: opacity 0.2s, box-shadow 0.3s !important;
     }
+    #sh-panel:hover { box-shadow: 0 16px 56px rgba(99,102,241,0.18), 0 2px 8px rgba(0,0,0,0.08) !important; }
     #sh-panel.sh-min {
       width: 44px !important; max-height: 44px !important;
       border-radius: 22px !important; cursor: pointer !important;
+      backdrop-filter: blur(12px) !important;
     }
-    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body { display: none !important; }
-    #sh-panel.sh-drag { opacity: 0.8 !important; cursor: grabbing !important; }
+    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-foot { display: none !important; }
+    #sh-panel.sh-drag { opacity: 0.85 !important; cursor: grabbing !important; }
 
     /* 헤더 */
     .sh-hd {
-      background: linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%) !important;
+      background: linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%) !important;
       color: #fff !important;
       padding: 10px 14px !important;
       display: flex !important; align-items: center !important; justify-content: space-between !important;
       cursor: grab !important; flex-shrink: 0 !important;
-      border-radius: 14px 14px 0 0 !important;
+      border-radius: 16px 16px 0 0 !important;
     }
     #sh-panel.sh-min .sh-hd { border-radius: 22px !important; padding: 10px !important; justify-content: center !important; }
     .sh-hd .logo { font-size: 15px !important; font-weight: 800 !important; }
     .sh-hc { display: flex !important; align-items: center !important; gap: 6px !important; flex:1 !important; }
-    .sh-hc .ver { font-size: 8px !important; opacity: .6 !important; background: rgba(255,255,255,.12) !important; padding: 1px 5px !important; border-radius: 3px !important; }
-    .sh-hc .qr { font-size: 11px !important; background: rgba(255,255,255,.18) !important; padding: 2px 8px !important; border-radius: 5px !important; max-width: 120px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; font-weight: 600 !important; }
-    .sh-hc .cnt { font-size: 10px !important; background: rgba(255,255,255,.22) !important; padding: 2px 6px !important; border-radius: 5px !important; font-weight: 700 !important; }
+    .sh-hc .ver { font-size: 8px !important; opacity: .7 !important; background: rgba(255,255,255,.15) !important; padding: 1px 5px !important; border-radius: 3px !important; }
+    .sh-hc .qr { font-size: 11px !important; background: rgba(255,255,255,.2) !important; padding: 2px 8px !important; border-radius: 6px !important; max-width: 130px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; font-weight: 600 !important; }
+    .sh-hc .cnt { font-size: 10px !important; background: rgba(255,255,255,.25) !important; padding: 2px 6px !important; border-radius: 5px !important; font-weight: 700 !important; }
     .sh-hbtns { display: flex !important; gap: 3px !important; }
-    .sh-hb { width: 22px !important; height: 22px !important; display: flex !important; align-items: center !important; justify-content: center !important; border: none !important; background: rgba(255,255,255,.12) !important; color: #fff !important; border-radius: 5px !important; cursor: pointer !important; font-size: 12px !important; padding: 0 !important; }
-    .sh-hb:hover { background: rgba(255,255,255,.28) !important; }
+    .sh-hb { width: 22px !important; height: 22px !important; display: flex !important; align-items: center !important; justify-content: center !important; border: none !important; background: rgba(255,255,255,.15) !important; color: #fff !important; border-radius: 6px !important; cursor: pointer !important; font-size: 12px !important; padding: 0 !important; transition: background .15s !important; }
+    .sh-hb:hover { background: rgba(255,255,255,.32) !important; }
 
     /* 바디 */
     .sh-body { overflow-y: auto !important; flex: 1 !important; }
     .sh-body::-webkit-scrollbar { width: 3px !important; }
-    .sh-body::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 3px !important; }
+    .sh-body::-webkit-scrollbar-thumb { background: #c7d2fe !important; border-radius: 3px !important; }
 
     /* 섹션 */
-    .sh-sec { padding: 12px 14px !important; border-bottom: 1px solid #f1f5f9 !important; }
-    .sh-sec-title { font-size: 10px !important; font-weight: 700 !important; color: #94a3b8 !important; text-transform: uppercase !important; letter-spacing: .5px !important; margin-bottom: 8px !important; }
-
-    /* 시장 통계 그리드 */
-    .sh-stats { display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; gap: 8px !important; }
-    .sh-st {
-      background: #f8fafc !important; border-radius: 8px !important; padding: 8px 10px !important;
-      display: flex !important; flex-direction: column !important; align-items: center !important;
-      border: 1px solid #f1f5f9 !important;
+    .sh-sec { padding: 14px !important; border-bottom: 1px solid rgba(99,102,241,0.06) !important; }
+    .sh-sec:last-child { border-bottom: none !important; }
+    .sh-sec-title {
+      font-size: 10px !important; font-weight: 700 !important; color: #6366f1 !important;
+      letter-spacing: .3px !important; margin-bottom: 10px !important;
+      display: flex !important; align-items: center !important; gap: 5px !important;
     }
-    .sh-st-v { font-size: 15px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
+
+    /* 핵심 통계 2x2 그리드 */
+    .sh-stats { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+    .sh-st {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+      border-radius: 10px !important; padding: 10px 12px !important;
+      display: flex !important; flex-direction: column !important; align-items: center !important;
+      border: 1px solid rgba(99,102,241,0.06) !important;
+      transition: transform 0.15s, box-shadow 0.15s !important;
+    }
+    .sh-st:hover { transform: translateY(-1px) !important; box-shadow: 0 4px 12px rgba(99,102,241,0.08) !important; }
+    .sh-st-v { font-size: 16px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
     .sh-st-v.accent { color: #6366f1 !important; }
     .sh-st-v.red { color: #dc2626 !important; }
     .sh-st-v.green { color: #16a34a !important; }
     .sh-st-v.amber { color: #d97706 !important; }
-    .sh-st-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 2px !important; }
+    .sh-st-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 3px !important; }
 
-    /* 경쟁도 바 */
-    .sh-comp-bar { height: 6px !important; border-radius: 3px !important; background: #f1f5f9 !important; margin-top: 6px !important; overflow: hidden !important; }
-    .sh-comp-fill { height: 100% !important; border-radius: 3px !important; transition: width .3s !important; }
-    .sh-comp-lbl { display: flex !important; justify-content: space-between !important; margin-top: 3px !important; font-size: 9px !important; color: #94a3b8 !important; }
-    .sh-comp-easy { background: #16a34a !important; }
-    .sh-comp-mid { background: #f59e0b !important; }
-    .sh-comp-hard { background: #dc2626 !important; }
+    /* 세부 통계 행 */
+    .sh-detail-row {
+      display: flex !important; justify-content: space-between !important; align-items: center !important;
+      padding: 5px 0 !important; border-bottom: 1px solid rgba(0,0,0,0.03) !important;
+    }
+    .sh-detail-row:last-child { border-bottom: none !important; }
+    .sh-detail-lbl { font-size: 10px !important; color: #64748b !important; }
+    .sh-detail-val { font-size: 10px !important; font-weight: 700 !important; color: #1e293b !important; }
 
-    /* 미니 차트 (가격 분포, 리뷰 분포) */
-    .sh-charts { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; margin-top: 10px !important; }
+    /* 경쟁도 게이지 */
+    .sh-gauge-wrap { position: relative !important; margin-top: 6px !important; }
+    .sh-gauge-bar {
+      height: 8px !important; border-radius: 4px !important;
+      background: linear-gradient(90deg, #22c55e 0%, #eab308 40%, #f97316 70%, #ef4444 100%) !important;
+      overflow: hidden !important; position: relative !important;
+    }
+    .sh-gauge-track { position: absolute !important; top: 0 !important; right: 0 !important; height: 100% !important; background: #e2e8f0 !important; transition: width .5s ease !important; }
+    .sh-gauge-marker {
+      position: absolute !important; top: -3px !important; width: 4px !important; height: 14px !important;
+      background: #1e293b !important; border-radius: 2px !important; transition: left .5s ease !important;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    }
+    .sh-gauge-labels { display: flex !important; justify-content: space-between !important; margin-top: 4px !important; font-size: 8px !important; color: #94a3b8 !important; }
+
+    /* 배송 분포 (수평 바) */
+    .sh-delivery-bars { display: flex !important; flex-direction: column !important; gap: 4px !important; }
+    .sh-dbar-row { display: flex !important; align-items: center !important; gap: 6px !important; }
+    .sh-dbar-lbl { font-size: 9px !important; color: #64748b !important; width: 62px !important; text-align: right !important; flex-shrink: 0 !important; }
+    .sh-dbar-track { flex: 1 !important; height: 14px !important; background: #f1f5f9 !important; border-radius: 7px !important; overflow: hidden !important; position: relative !important; }
+    .sh-dbar-fill { height: 100% !important; border-radius: 7px !important; transition: width .4s ease !important; min-width: 1px !important; }
+    .sh-dbar-pct { font-size: 9px !important; font-weight: 700 !important; color: #475569 !important; width: 32px !important; text-align: right !important; flex-shrink: 0 !important; }
+
+    /* 미니 차트 */
+    .sh-charts { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
     .sh-chart {
-      background: #f8fafc !important; border-radius: 8px !important; padding: 8px !important;
-      border: 1px solid #f1f5f9 !important;
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+      border-radius: 10px !important; padding: 10px !important;
+      border: 1px solid rgba(99,102,241,0.06) !important;
     }
-    .sh-chart-title { font-size: 9px !important; font-weight: 600 !important; color: #94a3b8 !important; margin-bottom: 6px !important; }
-    .sh-bars { display: flex !important; align-items: flex-end !important; gap: 2px !important; height: 40px !important; }
+    .sh-chart-title { font-size: 9px !important; font-weight: 600 !important; color: #64748b !important; margin-bottom: 6px !important; }
+    .sh-bars { display: flex !important; align-items: flex-end !important; gap: 3px !important; height: 44px !important; }
     .sh-bar {
-      flex: 1 !important; background: #c7d2fe !important; border-radius: 2px 2px 0 0 !important;
-      min-height: 2px !important; transition: height .3s !important; position: relative !important;
+      flex: 1 !important; background: #c7d2fe !important; border-radius: 3px 3px 0 0 !important;
+      min-height: 2px !important; transition: height .3s, background .15s !important; position: relative !important;
+      cursor: default !important;
     }
-    .sh-bar:hover { background: #6366f1 !important; }
-    .sh-bar-lbl { position: absolute !important; bottom: -13px !important; left: 50% !important; transform: translateX(-50%) !important; font-size: 7px !important; color: #94a3b8 !important; white-space: nowrap !important; }
+    .sh-bar:hover { background: #818cf8 !important; }
+    .sh-bar-lbl { position: absolute !important; bottom: -14px !important; left: 50% !important; transform: translateX(-50%) !important; font-size: 7px !important; color: #94a3b8 !important; white-space: nowrap !important; }
     .sh-bar-active { background: #6366f1 !important; }
-
-    /* TOP3 상품 */
-    .sh-top {
-      display: flex !important; gap: 8px !important; padding: 8px 0 !important;
-      border-bottom: 1px solid #f1f5f9 !important; align-items: flex-start !important;
-      cursor: pointer !important; transition: background .15s !important;
-    }
-    .sh-top:last-child { border-bottom: none !important; }
-    .sh-top:hover { background: #f8fafc !important; border-radius: 6px !important; }
-    .sh-top-rank {
-      width: 20px !important; height: 20px !important; border-radius: 5px !important;
-      display: flex !important; align-items: center !important; justify-content: center !important;
-      font-size: 10px !important; font-weight: 800 !important; flex-shrink: 0 !important;
-    }
-    .sh-r1 { background: #fef3c7 !important; color: #92400e !important; }
-    .sh-r2 { background: #e0e7ff !important; color: #3730a3 !important; }
-    .sh-r3 { background: #f1f5f9 !important; color: #64748b !important; }
-    .sh-top-img {
-      width: 40px !important; height: 40px !important; border-radius: 6px !important;
-      object-fit: cover !important; flex-shrink: 0 !important; background: #f1f5f9 !important;
-    }
-    .sh-top-info { flex: 1 !important; min-width: 0 !important; }
-    .sh-top-name {
-      font-size: 11px !important; font-weight: 600 !important; color: #1e293b !important;
-      white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
-      margin-bottom: 3px !important; line-height: 1.3 !important;
-    }
-    .sh-top-meta {
-      display: flex !important; align-items: center !important; gap: 5px !important; flex-wrap: wrap !important;
-    }
-    .sh-top-price { font-size: 11px !important; font-weight: 700 !important; color: #dc2626 !important; }
-    .sh-top-rev { font-size: 9px !important; color: #64748b !important; }
-    .sh-top-grade {
-      font-size: 9px !important; font-weight: 800 !important; padding: 1px 5px !important;
-      border-radius: 3px !important; color: #fff !important;
-    }
-    .sh-gs { background: #16a34a !important; }
-    .sh-ga { background: #3b82f6 !important; }
-    .sh-gb { background: #f59e0b !important; }
-    .sh-gc { background: #9ca3af !important; }
-    .sh-gd { background: #dc2626 !important; }
-
-    .sh-top-btns { display: flex !important; gap: 3px !important; margin-top: 4px !important; }
-    .sh-tb {
-      height: 20px !important; padding: 0 7px !important; border: none !important;
-      border-radius: 4px !important; font-size: 9px !important; font-weight: 700 !important;
-      cursor: pointer !important; color: #fff !important; display: inline-flex !important;
-      align-items: center !important;
-    }
-    .sh-tb:hover { opacity: .85 !important; }
-    .sh-tb-1688 { background: #ea580c !important; }
-    .sh-tb-ali { background: #dc2626 !important; }
-    .sh-tb-save { background: #6366f1 !important; }
-    .sh-tb-saved { background: #16a34a !important; }
 
     /* 하이라이트 */
     .sh-hl { outline: 3px solid #6366f1 !important; outline-offset: -2px !important; transition: outline .15s !important; }
 
     /* 풋터 */
     .sh-foot {
-      padding: 6px 14px !important; background: #f8fafc !important; border-top: 1px solid #f1f5f9 !important;
+      padding: 6px 14px !important;
+      background: linear-gradient(135deg, rgba(99,102,241,0.04) 0%, rgba(139,92,246,0.04) 100%) !important;
+      border-top: 1px solid rgba(99,102,241,0.06) !important;
       font-size: 9px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
     }
     .sh-foot a { color: #6366f1 !important; text-decoration: none !important; font-weight: 600 !important; }
 
-    @media (max-width: 1200px) { #sh-panel { width: 300px !important; } }
+    @media (max-width: 1200px) { #sh-panel { width: 320px !important; } }
   `;
   document.head.appendChild(css);
 
@@ -1856,7 +1842,105 @@
   }
 
   // ============================================================
-  //  패널 렌더링 — 시장 개요 + 차트 + TOP3
+  //  배송 유형 분석 (5종)
+  // ============================================================
+  function analyzeDelivery(items) {
+    const types = {
+      rocket:  { label: '로켓배송', color: '#6366f1', count: 0 },
+      seller:  { label: '판매자로켓', color: '#8b5cf6', count: 0 },
+      global:  { label: '로켓직구', color: '#06b6d4', count: 0 },
+      fresh:   { label: '로켓프레시', color: '#22c55e', count: 0 },
+      normal:  { label: '일반배송', color: '#94a3b8', count: 0 },
+    };
+    for (const item of items) {
+      const dt = item.deliveryType || 'unknown';
+      if (dt === 'rocketDelivery') types.rocket.count++;
+      else if (dt === 'sellerRocketDelivery') types.seller.count++;
+      else if (dt === 'globalRocketDelivery') types.global.count++;
+      else if (dt === 'rocketFreshDelivery') types.fresh.count++;
+      else types.normal.count++;
+    }
+    return Object.values(types).filter(t => t.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }
+
+  // ============================================================
+  //  v8.4: 검색량 데이터 (background → server → Naver API)
+  // ============================================================
+  let cachedMarketData = {};  // keyword → { searchVolume, fetchedAt }
+  const COUPANG_RATIO = 0.33; // 네이버 → 쿠팡 트래픽 비율
+
+  async function fetchMarketData(keyword) {
+    if (!keyword) return null;
+    const cached = cachedMarketData[keyword];
+    // 10분 캐시
+    if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
+      if (resp?.ok && resp.data) {
+        cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
+        return resp.data;
+      }
+    } catch (e) {
+      console.log('[SH] 마켓 데이터 조회 실패:', e.message);
+    }
+    return null;
+  }
+
+  function renderSearchVolume(marketData) {
+    const el = document.getElementById('sh-sv-section');
+    if (!el) return;
+    if (!marketData?.searchVolume) {
+      el.innerHTML = `
+        <div class="sh-sec-title">🔍 검색량</div>
+        <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
+          로그인 후 조회 가능
+        </div>`;
+      return;
+    }
+    const sv = marketData.searchVolume;
+    const totalNaver = sv.totalSearch || 0;
+    const coupangEst = Math.round(totalNaver * COUPANG_RATIO);
+    const compIdx = sv.competitionIndex || '-';
+
+    // 경쟁 강도 비율 (상품수 / 추정 검색량)
+    const snapshot = marketData.snapshot;
+    const totalProducts = snapshot?.totalProductCount || 0;
+    const compRatio = coupangEst > 0 ? (totalProducts / coupangEst).toFixed(1) : '-';
+
+    el.innerHTML = `
+      <div class="sh-sec-title">🔍 검색량 (월간)</div>
+      <div class="sh-stats">
+        <div class="sh-st">
+          <span class="sh-st-v accent">${coupangEst ? coupangEst.toLocaleString() : '-'}</span>
+          <span class="sh-st-l">쿠팡 추정</span>
+        </div>
+        <div class="sh-st">
+          <span class="sh-st-v" style="font-size:14px !important;">${totalNaver ? totalNaver.toLocaleString() : '-'}</span>
+          <span class="sh-st-l">네이버 검색량</span>
+        </div>
+      </div>
+      <div style="margin-top:8px !important; padding:6px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
+        <div class="sh-detail-row">
+          <span class="sh-detail-lbl">PC / 모바일</span>
+          <span class="sh-detail-val">${(sv.pcSearch || 0).toLocaleString()} / ${(sv.mobileSearch || 0).toLocaleString()}</span>
+        </div>
+        <div class="sh-detail-row">
+          <span class="sh-detail-lbl">경쟁 비율</span>
+          <span class="sh-detail-val" style="color:${compRatio !== '-' && parseFloat(compRatio) > 50 ? '#dc2626' : parseFloat(compRatio) > 20 ? '#d97706' : '#16a34a'} !important;">${compRatio !== '-' ? compRatio + ' : 1' : '-'}</span>
+        </div>
+        <div class="sh-detail-row">
+          <span class="sh-detail-lbl">네이버 경쟁</span>
+          <span class="sh-detail-val">${compIdx}</span>
+        </div>
+      </div>
+      <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:right !important;">
+        쿠팡 추정 = 네이버 × ${COUPANG_RATIO} | ${sv.yearMonth || ''}
+      </div>`;
+  }
+
+  // ============================================================
+  //  패널 렌더링 — v8.4 시장 인사이트 대시보드
   // ============================================================
   function renderPanel(items) {
     if (!panel) createPanel();
@@ -1872,35 +1956,32 @@
       return;
     }
 
-    // ★ 통계 계산 (전체 items 기준) ★
+    // ★ 통계 계산 ★
     const prices = items.map(i => i.price).filter(p => p > 0);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
     const ratings = items.map(i => i.rating).filter(r => r > 0);
     const avgPrice = prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
     const minPrice = prices.length ? Math.min(...prices) : 0;
     const maxPrice = prices.length ? Math.max(...prices) : 0;
-    const avgReview = reviews.length ? Math.round(reviews.reduce((a, b) => a + b, 0) / reviews.length) : 0;
+    const medianPrice = prices.length ? prices.sort((a, b) => a - b)[Math.floor(prices.length / 2)] : 0;
     const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : '-';
+    const totalReviews = reviews.reduce((a, b) => a + b, 0);
+    const maxReview = reviews.length ? Math.max(...reviews) : 0;
     const adCnt = items.filter(i => i.isAd).length;
-    const rocketCnt = items.filter(i => i.isRocket).length;
     const reviewOver100 = items.filter(i => i.reviewCount >= 100).length;
     const reviewOver100Pct = items.length ? Math.round(reviewOver100 / items.length * 100) : 0;
     const comp = calcCompetition(items);
+
+    // 배송 분석
+    const deliveryData = analyzeDelivery(items);
+    const deliveryTotal = items.length;
 
     // 차트 데이터
     const priceBuckets = makeHistogram(prices, 6);
     const revBuckets = makeHistogram(reviews, 5);
 
-    // TOP3 — 광고 제외한 실제 순위 상품
-    const organicItems = items.filter(i => !i.isAd);
-    const rankedItems = organicItems.filter(i => i.rankNum > 0).sort((a, b) => a.rankNum - b.rankNum);
-    let top3 = rankedItems.length >= 3
-      ? rankedItems.slice(0, 3)
-      : [...rankedItems, ...organicItems.filter(i => !i.rankNum)].slice(0, 3);
-    if (top3.length === 0) top3 = items.slice(0, 3);
-
     body.innerHTML = `
-      <!-- 시장 개요 -->
+      <!-- 핵심 통계 (2x2) -->
       <div class="sh-sec">
         <div class="sh-sec-title">📊 시장 개요 (${items.length}개 분석)</div>
         <div class="sh-stats">
@@ -1909,42 +1990,91 @@
             <span class="sh-st-l">상품수</span>
           </div>
           <div class="sh-st">
-            <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '원' : '-'}</span>
-            <span class="sh-st-l">평균가 (${prices.length}개)</span>
+            <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '<small style="font-size:10px !important;font-weight:600 !important;">원</small>' : '-'}</span>
+            <span class="sh-st-l">평균가</span>
           </div>
           <div class="sh-st">
-            <span class="sh-st-v">${avgRating}</span>
-            <span class="sh-st-l">평균평점 (${ratings.length}개)</span>
+            <span class="sh-st-v">${avgRating !== '-' ? '★ ' + avgRating : '-'}</span>
+            <span class="sh-st-l">평균평점</span>
           </div>
           <div class="sh-st">
-            <span class="sh-st-v amber">${avgReview.toLocaleString()}</span>
-            <span class="sh-st-l">평균리뷰 (${reviews.length}개)</span>
-          </div>
-          <div class="sh-st">
-            <span class="sh-st-v">${adCnt}</span>
-            <span class="sh-st-l">광고</span>
-          </div>
-          <div class="sh-st">
-            <span class="sh-st-v">${rocketCnt}</span>
-            <span class="sh-st-l">로켓</span>
+            <span class="sh-st-v amber">${totalReviews.toLocaleString()}</span>
+            <span class="sh-st-l">총 리뷰수</span>
           </div>
         </div>
 
-        <!-- 경쟁도 -->
-        <div style="margin-top:10px !important;">
-          <div style="display:flex !important;justify-content:space-between !important;align-items:center !important;">
-            <span style="font-size:10px !important;font-weight:600 !important;color:#64748b !important;">경쟁 강도</span>
-            <span style="font-size:10px !important;font-weight:700 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label} (${comp.sc}점)</span>
+        <!-- 세부 통계 -->
+        <div style="margin-top:10px !important; padding:8px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">가격 범위</span>
+            <span class="sh-detail-val">${minPrice ? minPrice.toLocaleString() : '0'} ~ ${maxPrice ? maxPrice.toLocaleString() : '0'}원</span>
           </div>
-          <div class="sh-comp-bar"><div class="sh-comp-fill ${comp.cls}" style="width:${comp.sc}% !important;"></div></div>
-          <div style="font-size:8px !important;color:#94a3b8 !important;margin-top:4px !important;">
-            리뷰 100+ 상품: ${reviewOver100}개 (${reviewOver100Pct}%)
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">중간가</span>
+            <span class="sh-detail-val">${medianPrice ? medianPrice.toLocaleString() + '원' : '-'}</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">최다 리뷰</span>
+            <span class="sh-detail-val">${maxReview ? maxReview.toLocaleString() + '개' : '-'}</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">리뷰 100+</span>
+            <span class="sh-detail-val" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100}개 (${reviewOver100Pct}%)</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">광고 비율</span>
+            <span class="sh-detail-val">${adCnt}개 (${items.length ? Math.round(adCnt / items.length * 100) : 0}%)</span>
           </div>
         </div>
       </div>
 
+      <!-- 검색량 (비동기 로딩) -->
+      <div class="sh-sec" id="sh-sv-section">
+        <div class="sh-sec-title">🔍 검색량</div>
+        <div style="text-align:center !important;padding:6px !important;color:#c7d2fe !important;font-size:10px !important;">
+          조회 중...
+        </div>
+      </div>
+
+      <!-- 경쟁도 게이지 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">
+          ⚔️ 경쟁 강도
+          <span style="margin-left:auto !important;font-size:11px !important;font-weight:800 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label}</span>
+        </div>
+        <div class="sh-gauge-wrap">
+          <div class="sh-gauge-bar">
+            <div class="sh-gauge-track" style="width:${100 - comp.sc}% !important;"></div>
+            <div class="sh-gauge-marker" style="left:calc(${comp.sc}% - 2px) !important;"></div>
+          </div>
+          <div class="sh-gauge-labels">
+            <span>진입 용이</span>
+            <span style="font-weight:700 !important;color:#475569 !important;">${comp.sc}점</span>
+            <span>경쟁 치열</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 배송 분포 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">🚀 배송 유형</div>
+        <div class="sh-delivery-bars">
+          ${deliveryData.map(d => {
+            const pct = Math.round(d.count / deliveryTotal * 100);
+            return `
+              <div class="sh-dbar-row">
+                <span class="sh-dbar-lbl">${d.label}</span>
+                <div class="sh-dbar-track">
+                  <div class="sh-dbar-fill" style="width:${pct}% !important;background:${d.color} !important;"></div>
+                </div>
+                <span class="sh-dbar-pct">${pct}%</span>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+
       <!-- 가격 & 리뷰 분포 차트 -->
-      <div class="sh-sec" style="padding-top:8px !important;">
+      <div class="sh-sec">
         <div class="sh-charts">
           <div class="sh-chart">
             <div class="sh-chart-title">💰 가격 분포</div>
@@ -1964,40 +2094,12 @@
           </div>
         </div>
       </div>
-
-      <!-- TOP 3 상품 (광고 제외, 실제 순위) -->
-      <div class="sh-sec">
-        <div class="sh-sec-title">🏆 TOP 3 상품 (광고 제외)</div>
-        ${top3.map((item, idx) => {
-          const sc = calcScore(item);
-          const g = getGrade(sc);
-          const rcls = ['sh-r1','sh-r2','sh-r3'][idx];
-          const isSaved = savedSet.has(item.productId);
-          const dispRank = item.rankNum || (idx + 1);
-          return `
-            <div class="sh-top" data-pid="${item.productId}">
-              <div class="sh-top-rank ${rcls}">${dispRank}</div>
-              ${item.imageUrl ? `<img class="sh-top-img" src="${item.imageUrl}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
-              <div class="sh-top-info">
-                <div class="sh-top-name">${esc(item.title)}</div>
-                <div class="sh-top-meta">
-                  <span class="sh-top-grade ${g.c}">${g.l}${sc}</span>
-                  ${item.price ? `<span class="sh-top-price">${item.price.toLocaleString()}원</span>` : ''}
-                  ${item.rating > 0 ? `<span class="sh-top-rev">★${item.rating}</span>` : ''}
-                  ${item.reviewCount > 0 ? `<span class="sh-top-rev">리뷰 ${item.reviewCount.toLocaleString()}</span>` : ''}
-                  ${item.isRocket ? '<span class="sh-top-rev" style="color:#6366f1 !important;">🚀</span>' : ''}
-                </div>
-                <div class="sh-top-btns">
-                  <button class="sh-tb sh-tb-1688" data-pid="${item.productId}">1688</button>
-                  <button class="sh-tb sh-tb-ali" data-pid="${item.productId}">Ali</button>
-                  <button class="sh-tb ${isSaved ? 'sh-tb-saved' : 'sh-tb-save'}" data-pid="${item.productId}" data-act="save">${isSaved ? '✓' : '저장'}</button>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
     `;
+
+    // 검색량 비동기 로딩
+    if (q) {
+      fetchMarketData(q).then(data => renderSearchVolume(data));
+    }
   }
 
   // ============================================================

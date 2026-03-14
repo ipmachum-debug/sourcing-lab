@@ -727,6 +727,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // ===== v8.4: 검색량 조회 (content.js 플로팅 패널용) =====
+    case 'GET_KEYWORD_MARKET_DATA': {
+      (async () => {
+        try {
+          const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+          if (!serverLoggedIn || !message.keyword) {
+            sendResponse({ ok: false, error: 'Not logged in or no keyword' });
+            return;
+          }
+          // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출)
+          await apiClient.fetchSearchVolume({ keywords: [message.keyword] }).catch(() => {});
+          // 2) 통합 마켓 데이터 조회
+          const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+          sendResponse({ ok: true, data: resp?.result?.data });
+        } catch (e) {
+          console.error('[SH] 마켓 데이터 조회 실패:', e.message);
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     case 'HYBRID_KEYWORD_DAILY_STATUS': {
       apiClient.getKeywordDailyStatusHistory(message.opts || {}).then((resp) => {
         sendResponse({ ok: true, data: resp?.result?.data });
