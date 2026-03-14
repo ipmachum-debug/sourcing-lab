@@ -220,6 +220,95 @@ export const demandRouter = router({
       return { success: true, count: input.queries.length };
     }),
 
+  // ===== 시장 개요 (최신 스냅샷 기반) =====
+  // 크롤링 데이터에서 시장 개요를 가져옴. 일일 1회 기준, 품질이 나쁘면 이전 데이터 유지.
+  getLatestMarketOverview: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(255),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      // 최근 7일간 스냅샷을 최신순으로 가져옴 (품질 비교용)
+      const recentSnaps = await db.select()
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, userId),
+          eq(extSearchSnapshots.query, input.query),
+        ))
+        .orderBy(desc(extSearchSnapshots.createdAt))
+        .limit(10);
+
+      if (!recentSnaps.length) return null;
+
+      // 품질 판단 함수: 상품수 5개 이상, 평균가 > 0
+      const isGoodQuality = (snap: any) => {
+        const items = N(snap.totalItems);
+        const price = N(snap.avgPrice);
+        return items >= 5 && price > 0;
+      };
+
+      // 최신 데이터부터 품질 좋은 스냅샷 선택
+      const bestSnap = recentSnaps.find(isGoodQuality) || recentSnaps[0];
+
+      // 오늘 날짜 (KST)
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const todayStr = now.toISOString().slice(0, 10);
+      const snapDate = bestSnap.createdAt
+        ? new Date(bestSnap.createdAt).toISOString().slice(0, 10)
+        : todayStr;
+
+      // itemsJson에서 추가 통계 계산
+      let medianPrice = N(bestSnap.medianPrice);
+      let maxReview = N(bestSnap.maxReviewCount);
+      let rocketCount = N(bestSnap.rocketCount);
+      let totalReviewSum = N(bestSnap.totalReviewSum);
+
+      if (!medianPrice && bestSnap.itemsJson) {
+        try {
+          const items: any[] = JSON.parse(bestSnap.itemsJson);
+          const prices = items.map(i => Number(i.price) || 0).filter(p => p > 0).sort((a, b) => a - b);
+          if (prices.length > 0) medianPrice = prices[Math.floor(prices.length / 2)];
+          if (!maxReview) {
+            const reviews = items.map(i => Number(i.reviewCount) || 0);
+            maxReview = Math.max(0, ...reviews);
+          }
+          if (!totalReviewSum) {
+            totalReviewSum = items.reduce((s, i) => s + (Number(i.reviewCount) || 0), 0);
+          }
+        } catch {}
+      }
+
+      const totalItems = N(bestSnap.totalItems);
+      const highReviewCount = N(bestSnap.highReviewCount);
+      const adCount = N(bestSnap.adCount);
+
+      return {
+        snapshotDate: snapDate,
+        isToday: snapDate === todayStr,
+        totalItems,
+        avgPrice: N(bestSnap.avgPrice),
+        avgRating: Number(bestSnap.avgRating || 0),
+        totalReviewSum,
+        minPrice: N(bestSnap.minPrice),
+        maxPrice: N(bestSnap.maxPrice),
+        medianPrice,
+        maxReviewCount: maxReview,
+        highReviewCount,
+        highReviewRatio: totalItems > 0 ? Math.round((highReviewCount / totalItems) * 100) : 0,
+        adCount,
+        adRatio: totalItems > 0 ? Math.round((adCount / totalItems) * 100) : 0,
+        rocketCount,
+        rocketRatio: totalItems > 0 ? Math.round((rocketCount / totalItems) * 100) : 0,
+        competitionScore: N(bestSnap.competitionScore),
+        competitionLevel: bestSnap.competitionLevel,
+      };
+    }),
+
   // ===== AI 인사이트 — 축적 데이터 기반 분석 =====
 
   // AI 인사이트: 놓친 기회 + 파생상품 제안 + 종합 분석
