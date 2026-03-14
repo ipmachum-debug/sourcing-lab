@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.1.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.1.0 — AI 자동 키워드 발견 → 유저 검토 → 확장 자동 크롤링 → 상세 분석",
+  "version": "8.4.4",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.4.4 — AI 자동 키워드 발견 + 시장 데이터 + 검색량 추정 + 경쟁강도 분석",
   "permissions": [
     "storage",
     "tabs",

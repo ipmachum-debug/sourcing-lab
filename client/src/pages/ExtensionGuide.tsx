@@ -13,7 +13,7 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.1.0";
+const EXTENSION_VERSION = "8.4.4";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "179KB";
 
@@ -834,9 +834,24 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v8.1.0",
+                    version: "v8.4.4",
                     date: "2026-03-14",
                     badge: "Latest",
+                    changes: [
+                      "🔍 검색량 추정 엔진 v1: Simple(네이버×0.33) → Hybrid(네이버 50% + 리뷰역산 35% + 자동완성 15%) 자동 전환",
+                      "📊 Hybrid 전환 프로그레스: 축적일/델타/정합 3개 조건별 미니 바 표시",
+                      "🌐 네이버 API 공백 키워드 자동 처리: '현금 파우치' → '현금파우치' 변환 후 호출",
+                      "🏷️ 네이버 미등록 키워드 구분: [네이버 미등록] 배지로 검색량 추정 불가 안내",
+                      "⚡ directVolume: DB timing 이슈 우회 — 네이버 API 결과를 응답에 직접 포함",
+                      "🎯 경쟁강도 사이드패널 동기화: 구간별 고정점수 → 연속 스케일(log/선형) 통일",
+                      "📈 히스토그램 개선: 바 위 카운트 숫자 표시 + 바 영역 높이 확장",
+                      "🔧 Per-Product Matched Delta 엔진: 상품별 리뷰 증가량만 추적 (구성 변동 노이즈 제거)",
+                      "📉 MA7/MA30 재계산: per-product delta 기반, interpolated 제외한 정확한 이동평균",
+                    ],
+                  },
+                  {
+                    version: "v8.1.0",
+                    date: "2026-03-14",
                     changes: [
                       "🔮 AI 제품 발견 시스템: 자동 키워드 발굴 → 검토 승인 → 확장 자동 크롤링 → AI 분석 → 추천/추적",
                       "💎 니치 파인더 + 시장 데이터 탭: 검색량 트렌드, 가격/리뷰 통계, 가격분포 히스토그램, 배송유형 분석",
