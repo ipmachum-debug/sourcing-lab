@@ -255,7 +255,7 @@
       border: 1px solid rgba(99,102,241,0.06) !important;
     }
     .sh-chart-title { font-size: 9px !important; font-weight: 600 !important; color: #64748b !important; margin-bottom: 6px !important; }
-    .sh-bars { display: flex !important; align-items: flex-end !important; gap: 3px !important; height: 44px !important; }
+    .sh-bars { display: flex !important; align-items: flex-end !important; gap: 3px !important; height: 52px !important; padding-top: 12px !important; }
     .sh-bar {
       flex: 1 !important; background: #c7d2fe !important; border-radius: 3px 3px 0 0 !important;
       min-height: 2px !important; transition: height .3s, background .15s !important; position: relative !important;
@@ -1750,7 +1750,8 @@
     return buckets.map((b, i) => {
       const h = Math.max(2, Math.round((b.count / maxC) * 36));
       const active = b.count === maxC ? ' sh-bar-active' : '';
-      return `<div class="sh-bar${active}" style="height:${h}px !important;" title="${b.label}~: ${b.count}개"><span class="sh-bar-lbl">${b.label}</span></div>`;
+      const countLabel = b.count > 0 ? `<span style="position:absolute !important;top:-11px !important;left:50% !important;transform:translateX(-50%) !important;font-size:7px !important;color:#6366f1 !important;font-weight:600 !important;">${b.count}</span>` : '';
+      return `<div class="sh-bar${active}" style="height:${h}px !important;" title="${b.label}~: ${b.count}개">${countLabel}<span class="sh-bar-lbl">${b.label}</span></div>`;
     }).join('');
   }
 
@@ -1758,28 +1759,31 @@
   //  경쟁도 계산 (전체 36개 기준)
   // ============================================================
   function calcCompetition(items) {
-    // ★ 전체 상품수 기준으로 계산 (price/review/rating 이 0인 것도 포함)
+    // ★ 사이드패널과 동일한 로직 (연속 스케일)
     const totalItems = items.length;
-    const prices = items.map(i => i.price).filter(p => p > 0);
     const reviews = items.map(i => i.reviewCount).filter(r => r > 0);
     const ratings = items.map(i => i.rating).filter(r => r > 0);
 
     const avgRev = reviews.length ? reviews.reduce((a, b) => a + b, 0) / reviews.length : 0;
     const highRev = items.filter(i => i.reviewCount >= 100).length;
-    const highRatio = totalItems ? highRev / totalItems : 0;
+    const highRatio = totalItems ? (highRev / totalItems) * 100 : 0; // %
     const adRatio = totalItems ? items.filter(i => i.isAd).length / totalItems : 0;
     const avgRat = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
 
-    let sc = 0;
-    if (avgRev > 1000) sc += 35; else if (avgRev > 500) sc += 25; else if (avgRev > 100) sc += 15; else if (avgRev > 30) sc += 8;
-    if (highRatio > .6) sc += 25; else if (highRatio > .4) sc += 15; else if (highRatio > .2) sc += 8;
-    if (avgRat >= 4.5) sc += 15; else if (avgRat >= 4.0) sc += 8;
-    if (adRatio > .3) sc += 20; else if (adRatio > .15) sc += 10;
-    sc = Math.min(100, sc);
+    // 축 1: 평균 리뷰 수 (0–35점) — log 스케일
+    const reviewAxis = avgRev > 0 ? Math.min(35, (Math.log10(avgRev) / 4) * 35) : 0;
+    // 축 2: 고리뷰 비율 (0–25점) — 선형
+    const highReviewAxis = Math.min(25, (highRatio / 80) * 25);
+    // 축 3: 평균 평점 (0–20점) — 4.0~5.0 선형
+    const ratingAxis = avgRat >= 4.0 ? Math.min(20, ((avgRat - 4.0) / 1.0) * 20) : 0;
+    // 축 4: 광고 비율 (0–20점) — 선형
+    const adAxis = Math.min(20, (adRatio / 0.4) * 20);
 
-    const level = sc >= 70 ? 'hard' : sc >= 40 ? 'mid' : 'easy';
-    const label = sc >= 70 ? '경쟁 치열' : sc >= 40 ? '보통' : '진입 용이';
-    const cls = sc >= 70 ? 'sh-comp-hard' : sc >= 40 ? 'sh-comp-mid' : 'sh-comp-easy';
+    const sc = Math.round(Math.min(100, reviewAxis + highReviewAxis + ratingAxis + adAxis));
+
+    const level = sc >= 65 ? 'hard' : sc >= 35 ? 'mid' : 'easy';
+    const label = sc >= 65 ? '경쟁 치열' : sc >= 35 ? '보통' : '진입 용이';
+    const cls = sc >= 65 ? 'sh-comp-hard' : sc >= 35 ? 'sh-comp-mid' : 'sh-comp-easy';
     return { sc, level, label, cls };
   }
 
@@ -2000,17 +2004,24 @@
       const deltaPct = Math.min(100, Math.round(progress.deltas.current / progress.deltas.required * 100));
       const matchPct = Math.min(100, Math.round((progress.matchRate.current / progress.matchRate.required) * 100));
       const overallPct = Math.round((daysPct + deltaPct + matchPct) / 3);
+
+      const bar = (label, pct, cur, req, unit) => `
+        <div style="display:flex !important;align-items:center !important;gap:4px !important;margin-bottom:2px !important;">
+          <span style="font-size:7px !important;color:#64748b !important;width:32px !important;text-align:right !important;">${label}</span>
+          <div style="flex:1 !important;height:3px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
+            <div style="width:${pct}% !important;height:100% !important;background:${pct >= 100 ? '#22c55e' : 'linear-gradient(90deg,#6366f1,#8b5cf6)'} !important;border-radius:2px !important;"></div>
+          </div>
+          <span style="font-size:7px !important;color:#94a3b8 !important;width:38px !important;">${cur}/${req}${unit}</span>
+        </div>`;
+
       maturityHtml = `
         <div style="margin-top:6px !important;padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
           <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:4px !important;">
             Hybrid 전환까지 ${overallPct}%
           </div>
-          <div style="display:flex !important;gap:4px !important;align-items:center !important;">
-            <div style="flex:1 !important;height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-              <div style="width:${overallPct}% !important;height:100% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;border-radius:2px !important;transition:width .5s !important;"></div>
-            </div>
-            <span style="font-size:7px !important;color:#94a3b8 !important;white-space:nowrap !important;">${progress.days.current}/${progress.days.required}일</span>
-          </div>
+          ${bar('축적일', daysPct, progress.days.current, progress.days.required, '일')}
+          ${bar('델타', deltaPct, progress.deltas.current, progress.deltas.required, '개')}
+          ${bar('정합', matchPct, Math.round(progress.matchRate.current * 100), Math.round(progress.matchRate.required * 100), '%')}
         </div>`;
     }
 
