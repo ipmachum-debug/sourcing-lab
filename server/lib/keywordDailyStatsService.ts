@@ -1,27 +1,32 @@
 /**
  * ============================================================
- * Keyword Daily Stats Service (v7.7.5)
+ * Keyword Daily Stats Service (v8.3.1)
  * ============================================================
  *
  * ext_keyword_daily_stats의 단일 계산 경로 (Single Source of Truth).
  *
- * 모든 배치/라우터/헬퍼는 이 서비스만 호출한다.
- * 내부 흐름:
- *   1. 최근 45일 raw 조회
- *   2. P70 baseProductCount 계산
- *   3. 상품수 정규화
- *   4. normalizeReviewSeries() 실행 (앵커 간 선형 보간)
- *   5. provisional/finalized 상태 결정
- *   6. salesEstimateDaily 계산
- *   7. MA7/MA30 계산 (주 지표)
- *   8. spike 탐지 (today / ma7 비율)
- *   9. ext_keyword_daily_stats upsert
+ * ★ v8.3.1 핵심 변경: Per-Product Matched Delta 엔진
  *
- * ★ v7.7.0:
- *   - MA7/MA30 기반 demandScore/keywordScore
- *   - per-product delta 우선 사용 (itemsJson 비교)
- *   - provisional/finalized 명확 구분
- *   - 음수 delta = 데이터 품질 문제 → fallback 평균 사용
+ * 문제: 기존 normalizeReviewSeries()의 sum-diff 방식은
+ *       상품 구성 변동(20-45% 일일 교체)에 의해 20-40배 왜곡됨
+ *       예) 실제 +30리뷰/일 → sum-diff: +1188 (40배 과대)
+ *
+ * 해결: 동일 상품(productId)의 리뷰 변화만 추적
+ *       → 상품 교체 노이즈 완전 제거
+ *       → match rate로 비매칭 상품 보정 (scaledDelta)
+ *
+ * 내부 흐름:
+ *   1. 최근 45일 raw 조회 + 스냅샷 items_json 파싱
+ *   2. 날짜별 best 스냅샷 선택 (reviewSum 최대)
+ *   3. ★ Per-product matched delta 계산 (인접 스냅샷 비교)
+ *   4. P70 baseProductCount 계산
+ *   5. normalizeReviewSeries() 실행 (데이터 상태/기준점 판정용만)
+ *   6. ★ Per-product delta로 reviewGrowth/salesEstimate 교체
+ *      - 스냅샷 있는 날: scaledDelta 직접 사용
+ *      - 스냅샷 없는 날: 신뢰 delta 평균으로 보간
+ *   7. MA7/MA30 재계산 (per-product delta 기반)
+ *   8. spike 탐지 / 점수 계산
+ *   9. ext_keyword_daily_stats UPSERT
  */
 import {
   extKeywordDailyStats,
@@ -385,6 +390,64 @@ export async function rebuildKeywordDailyStatsForKeyword(
   }
 
   // ================================================================
+  //  ★ v8.3.1: Per-Product Matched Delta 엔진 (완전 재설계)
+  //  
+  //  핵심 원리: 동일 상품의 리뷰 증가량만 추적
+  //  - 상품 구성 변동 노이즈 완전 제거
+  //  - 개별 상품 리뷰 감소(삭제)는 0으로 처리
+  //  - match rate 30% 미만이면 fallback (이전 평균) 사용
+  //  - 스냅샷 없는 날짜는 인접 스냅샷 평균값 분배
+  // ================================================================
+  const sortedDates = [...bestSnapByDate.keys()].sort();
+  const perProductDailyDelta = new Map<string, { 
+    matchedDelta: number; matchRate: number; scaledDelta: number; dayGap: number; reliable: boolean 
+  }>();
+
+  for (let i = 1; i < sortedDates.length; i++) {
+    const prevDate = sortedDates[i - 1];
+    const currDate = sortedDates[i];
+    const prevSnap = bestSnapByDate.get(prevDate)!;
+    const currSnap = bestSnapByDate.get(currDate)!;
+
+    if (!prevSnap.items.length || !currSnap.items.length) continue;
+
+    const prevMap = new Map<string, number>();
+    for (const item of prevSnap.items) {
+      if (item.productId) prevMap.set(String(item.productId), item.reviewCount || 0);
+    }
+
+    let matched = 0;
+    let matchedDelta = 0;
+    for (const item of currSnap.items) {
+      const pid = String(item.productId);
+      if (prevMap.has(pid)) {
+        matched++;
+        // 개별 상품 리뷰 감소는 0 처리 (리뷰 삭제 무시)
+        matchedDelta += Math.max(0, (item.reviewCount || 0) - prevMap.get(pid)!);
+      }
+    }
+
+    const matchRate = matched / Math.max(currSnap.items.length, 1);
+    const dayGap = Math.max(1, Math.round(
+      (new Date(currDate).getTime() - new Date(prevDate).getTime()) / 86400000,
+    ));
+    
+    // match rate 30% 이상이면 신뢰할 수 있는 delta
+    const reliable = matchRate >= 0.3 && matched >= 3;
+    const scaledDelta = reliable
+      ? Math.round((matchedDelta / Math.max(matchRate, 0.5)) / dayGap)
+      : 0;
+
+    perProductDailyDelta.set(currDate, { matchedDelta, matchRate, scaledDelta, dayGap, reliable });
+  }
+
+  // ★ v8.3.1: 신뢰할 수 있는 delta들의 평균 (fallback용)
+  const reliableDeltas = [...perProductDailyDelta.values()].filter(d => d.reliable && d.scaledDelta > 0);
+  const avgReliableDelta = reliableDeltas.length > 0
+    ? Math.round(reliableDeltas.reduce((s, d) => s + d.scaledDelta, 0) / reliableDeltas.length)
+    : 0;
+
+  // ================================================================
   //  3단계: RawDailyData 시계열 구성
   // ================================================================
   const rawSeries: RawDailyData[] = [];
@@ -480,34 +543,97 @@ export async function rebuildKeywordDailyStatsForKeyword(
   );
 
   // ================================================================
-  //  6단계: 오늘 메트릭 추출
+  //  6단계: ★ v8.3.1 Per-Product Matched Delta = 유일한 진실 (Single Source of Truth)
+  //
+  //  normalizeReviewSeries는 데이터 상태/기준점 판정에만 사용.
+  //  모든 reviewGrowth/salesEstimate는 per-product delta에서 산출.
+  //
+  //  처리 규칙:
+  //  (A) 스냅샷 O + per-product delta 신뢰 → scaledDelta 사용, dataStatus 'raw_valid'
+  //  (B) 스냅샷 O + per-product delta 비신뢰(match<30%) → avgReliableDelta fallback
+  //  (C) 스냅샷 X (보간 날짜) → avgReliableDelta 사용, dataStatus 'interpolated'
+  //  (D) baseline/missing → 0
   // ================================================================
   const todayMetric = normalizedMetrics.find(m => m.metricDate === todayStr);
 
-  // ★ per-product delta가 있으면 오늘 값에 반영
-  let todayReviewGrowth = todayMetric?.reviewDeltaUsed ?? 0;
-  let todaySalesEstimate = todayMetric?.salesEstimateDaily ?? 0;
+  for (const metric of normalizedMetrics) {
+    // (D) baseline/missing는 항상 0
+    if (metric.dataStatus === "baseline" || metric.dataStatus === "missing") {
+      metric.reviewDeltaUsed = 0;
+      metric.salesEstimateDaily = 0;
+      continue;
+    }
 
-  // ★ per-product delta: finalized + raw_valid인 경우에만 보수적 비교 적용
-  if (
-    perProductDeltaResult &&
-    perProductDeltaResult.delta >= 0 &&
-    perProductDeltaResult.matchedCount >= 5 &&
-    todayMetric?.isFinalized &&
-    todayMetric?.dataStatus === "raw_valid"
-  ) {
-    // per-product delta가 신뢰할 만하면 우선 사용
-    const ppDelta = perProductDeltaResult.delta;
-    // 단, 비현실적 값은 cap 적용
-    const perProductCap = Math.max(50 * effectiveBase, 200);
-    const cappedDelta = Math.min(ppDelta, perProductCap, 5000);
+    const ppd = perProductDailyDelta.get(metric.metricDate);
+    const hasSnapshot = bestSnapByDate.has(metric.metricDate);
 
-    // normalizeReviewSeries 결과보다 per-product이 더 작으면 교체 (보수적)
-    if (todayReviewGrowth > 0 && cappedDelta < todayReviewGrowth) {
-      todayReviewGrowth = cappedDelta;
-      todaySalesEstimate = Math.round(cappedDelta * factor);
+    if (ppd && ppd.reliable) {
+      // (A) 스냅샷 있고 per-product delta 신뢰할 수 있음
+      metric.reviewDeltaUsed = ppd.scaledDelta;
+      metric.salesEstimateDaily = Math.round(ppd.scaledDelta * factor);
+      // ★ 핵심: normalizeReviewSeries가 sum-diff 음수로 "interpolated"를 준 경우에도
+      //   per-product delta가 실제 스냅샷 데이터 기반이므로 "raw_valid"로 교정
+      if (hasSnapshot) {
+        metric.dataStatus = "raw_valid";
+        metric.isFinalized = true;
+        metric.isProvisional = false;
+        metric.provisionalReason = null;
+      }
+    } else if (hasSnapshot && !ppd) {
+      // 첫 번째 스냅샷 날짜 (baseline 직후): delta 계산 대상 아님
+      // avgReliableDelta를 사용
+      metric.reviewDeltaUsed = avgReliableDelta;
+      metric.salesEstimateDaily = Math.round(avgReliableDelta * factor);
+    } else if (ppd && !ppd.reliable) {
+      // (B) 스냅샷 있지만 match rate 낮음 → fallback
+      metric.reviewDeltaUsed = avgReliableDelta;
+      metric.salesEstimateDaily = Math.round(avgReliableDelta * factor);
+      metric.dataStatus = "anomaly";
+      metric.provisionalReason = "low_match_rate";
+    } else {
+      // (C) 스냅샷 없는 보간 날짜 → avgReliableDelta 사용
+      metric.reviewDeltaUsed = avgReliableDelta;
+      metric.salesEstimateDaily = Math.round(avgReliableDelta * factor);
+      metric.dataStatus = "interpolated";
+      metric.isFinalized = true;
+      metric.isProvisional = false;
+      metric.provisionalReason = "per_product_avg_fill";
     }
   }
+
+  // ================================================================
+  //  6.5단계: ★ v8.3.1 MA7/MA30 재계산 (per-product delta 기반)
+  //  모든 날짜의 salesEstimateDaily가 per-product delta 기반이므로
+  //  raw_valid + anomaly만 포함 (interpolated 제외 = 더 정확한 MA)
+  // ================================================================
+  const baselineIdx = normalizedMetrics.findIndex(m => m.dataStatus === "baseline");
+  for (let i = 0; i < normalizedMetrics.length; i++) {
+    if (i <= Math.max(0, baselineIdx)) {
+      normalizedMetrics[i].salesEstimateMa7 = null;
+      normalizedMetrics[i].salesEstimateMa30 = null;
+      continue;
+    }
+    // MA에 포함할 데이터: 스냅샷 기반 실제 데이터 (per-product delta 적용된)
+    const isRealData = (r: NormalizedMetric) =>
+      r.dataStatus === "raw_valid" || r.dataStatus === "anomaly";
+
+    const startIdx7 = Math.max(baselineIdx + 1, i - 6);
+    const w7 = normalizedMetrics.slice(startIdx7, i + 1)
+      .filter(x => isRealData(x))
+      .map(x => x.salesEstimateDaily);
+    normalizedMetrics[i].salesEstimateMa7 =
+      w7.length >= 1 ? Math.round(w7.reduce((a, b) => a + b, 0) / w7.length) : null;
+
+    const startIdx30 = Math.max(baselineIdx + 1, i - 29);
+    const w30 = normalizedMetrics.slice(startIdx30, i + 1)
+      .filter(x => isRealData(x))
+      .map(x => x.salesEstimateDaily);
+    normalizedMetrics[i].salesEstimateMa30 =
+      w30.length >= 1 ? Math.round(w30.reduce((a, b) => a + b, 0) / w30.length) : null;
+  }
+
+  let todayReviewGrowth = todayMetric?.reviewDeltaUsed ?? 0;
+  let todaySalesEstimate = todayMetric?.salesEstimateDaily ?? 0;
 
   const todayMa7 = todayMetric?.salesEstimateMa7 ?? 0;
   const todayMa30 = todayMetric?.salesEstimateMa30 ?? 0;
@@ -667,56 +793,56 @@ export async function rebuildKeywordDailyStatsForKeyword(
   // ================================================================
   //  10단계: 과거 데이터 재보정
   // ================================================================
-  // ★ 오늘이 finalized이면 이전 구간도 재보정
-  if (todayMetric && todayMetric.isFinalized) {
-    for (const metric of normalizedMetrics) {
-      if (metric.metricDate === todayStr) continue;
-      const existing = existingByDate.get(metric.metricDate);
-      if (!existing) continue;
+  // ★ v8.3.1: per-product delta 기반 정확한 값으로 모든 과거 데이터 업데이트
+  for (const metric of normalizedMetrics) {
+    if (metric.metricDate === todayStr) continue;
+    const existing = existingByDate.get(metric.metricDate);
+    if (!existing) continue;
 
-      const updateData: any = {
-        normalizedReviewSum: metric.normalizedReviewSum,
-        reviewDeltaObserved: metric.reviewDeltaObserved,
-        reviewDeltaUsed: metric.reviewDeltaUsed,
-        salesEstimate: metric.salesEstimateDaily,
-        salesEstimateMa7: metric.salesEstimateMa7 ?? 0,
-        salesEstimateMa30: metric.salesEstimateMa30 ?? 0,
-        baseProductCount: effectiveBase,
-        coverageRatio: metric.coverageRatio.toFixed(4),
-        dataStatus: metric.dataStatus,
-        isProvisional: metric.isProvisional,
-        isFinalized: metric.isFinalized,
-        provisionalReason: metric.provisionalReason,
-      };
+    const updateData: any = {
+      normalizedReviewSum: metric.normalizedReviewSum,
+      reviewDeltaObserved: metric.reviewDeltaObserved,
+      reviewDeltaUsed: metric.reviewDeltaUsed,
+      reviewGrowth: metric.reviewDeltaUsed,
+      salesEstimate: metric.salesEstimateDaily,
+      salesEstimateMa7: metric.salesEstimateMa7 ?? 0,
+      salesEstimateMa30: metric.salesEstimateMa30 ?? 0,
+      baseProductCount: effectiveBase,
+      coverageRatio: metric.coverageRatio.toFixed(4),
+      dataStatus: metric.dataStatus,
+      isProvisional: metric.isProvisional,
+      isFinalized: metric.isFinalized,
+      provisionalReason: metric.provisionalReason,
+    };
 
-      // ★ 양수 reviewGrowth 보호 (과거 데이터도)
-      // ★ v7.7.2: finalized 메트릭은 재계산 값이 정확하므로 보호 우회
-      // ★ v7.7.3: "missing" (before_first_real_crawl) 메트릭도 보호 우회
-      //   — 옛날 코드가 쓴 잘못된 양수값을 0으로 정정해야 함
-      const shouldOverride =
-        metric.isFinalized ||
-        metric.dataStatus === "missing" ||
-        metric.dataStatus === "baseline";
-      if (
-        metric.reviewDeltaUsed <= 0 &&
-        existing.reviewGrowth > 0 &&
-        !shouldOverride
-      ) {
-        delete updateData.reviewDeltaUsed;
-        delete updateData.salesEstimate;
-      } else {
-        updateData.reviewGrowth = metric.reviewDeltaUsed;
-      }
-
-      await db
-        .update(extKeywordDailyStats)
-        .set(updateData)
-        .where(eq(extKeywordDailyStats.id, existing.id));
+    // ★ v8.3.1: 스냅샷 정보 복구 (totalReviewSum, productCount, avgPrice)
+    const bestSnap = bestSnapByDate.get(metric.metricDate);
+    if (bestSnap && bestSnap.reviewSum > 0) {
+      updateData.totalReviewSum = bestSnap.reviewSum;
+      if (bestSnap.productCount > 0) updateData.productCount = bestSnap.productCount;
+      if (bestSnap.avgPrice > 0) updateData.avgPrice = bestSnap.avgPrice;
     }
+
+    // ★ v8.3.1: per-product delta가 있는 날은 경쟁도도 스냅샷에서 복구
+    const ppd = perProductDailyDelta.get(metric.metricDate);
+    if (ppd) {
+      updateData.demandScore = computeDemandScore(
+        metric.salesEstimateMa7 ?? metric.salesEstimateDaily,
+        metric.reviewDeltaUsed,
+        bestSnap?.items ?? [],
+        bestSnap?.reviewSum ?? 0,
+        bestSnap?.items?.filter((i: any) => i.isRocket)?.length ?? 0,
+      );
+    }
+
+    await db
+      .update(extKeywordDailyStats)
+      .set(updateData)
+      .where(eq(extKeywordDailyStats.id, existing.id));
   }
 
   console.log(
-    `[rebuildStats] "${query}" rGrowth:${todayReviewGrowth} sales:${todaySalesEstimate} ma7:${todayMa7} ma30:${todayMa30} spike:${todaySpikeLevel} demand:${demandScore} kwScore:${keywordScore} finalized:${todayMetric?.isFinalized ?? false}`,
+    `[rebuildStats] "${query}" rGrowth:${todayReviewGrowth} sales:${todaySalesEstimate} ma7:${todayMa7} ma30:${todayMa30} spike:${todaySpikeLevel} demand:${demandScore} kwScore:${keywordScore} finalized:${todayMetric?.isFinalized ?? false} ppdAvg:${avgReliableDelta} ppdCount:${reliableDeltas.length}`,
   );
 
   return {

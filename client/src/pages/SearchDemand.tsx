@@ -61,7 +61,7 @@ export default function SearchDemand() {
     if (rebuildRunning) return;
     setRebuildRunning(true);
     try {
-      toast.info("정규화 재계산 시작 (v8.2 엔진)...");
+      toast.info("정규화 재계산 시작 (v8.3.1 per-product delta 엔진)...");
       const r = await rebuildDailyStats.mutateAsync({ days: Math.max(demandDays, 90) });
       toast.success(`재계산 완료: ${r.rebuilt}건 (${r.keywords}개 키워드)`);
       keywordStatsList.refetch();
@@ -602,15 +602,16 @@ export default function SearchDemand() {
             {/* 점수 설명 카드 */}
             <Card className="bg-gray-50">
               <CardContent className="pt-3 pb-3">
-                <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준 (v8.2)</div>
+                <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준 (v8.3.1 Per-Product Delta)</div>
                 <div className="space-y-1.5 text-[10px] text-gray-500">
+                  <div><span className="font-medium text-green-600">리뷰증가</span>: ★ 동일 상품(productId)의 리뷰 변화만 추적 → 상품 교체 노이즈 완전 제거</div>
+                  <div><span className="font-medium text-green-600">판매추정</span>: 리뷰증가 × 20 → MA7(7일 이동평균) 기반 안정화</div>
                   <div><span className="font-medium text-orange-600">수요점수</span>: 판매추정 로그스케일(80%) + 리뷰활력·시장규모·로켓비율(20%)</div>
-                  <div><span className="font-medium text-purple-600">종합점수</span>: 성장성(30%) + 시장규모(25%) + 진입용이성(25%) + 수요(20%) 연속가중평균</div>
-                  <div><span className="font-medium text-green-600">판매추정</span>: MA7 우선 → 기본(리뷰증가 × 전환율) fallback</div>
-                  <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수 log(35%) + 고리뷰비율(25%) + 평점(20%) + 광고비율(20%) 연속함수</div>
-                  <div><span className="font-medium text-blue-600">MA7</span>=7일평균(안정) · <span className="font-medium text-amber-600">임시추정</span>=데이터 확정 대기 · <span className="font-medium text-gray-500">일간추정</span>=MA7 편차 3x↑ · <span className="font-medium text-gray-500">기본추정</span>=MA 없음</div>
+                  <div><span className="font-medium text-purple-600">종합점수</span>: 성장성(30%) + 시장규모(25%) + 진입용이성(25%) + 수요(20%)</div>
+                  <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수 log(35%) + 고리뷰비율(25%) + 평점(20%) + 광고비율(20%)</div>
+                  <div><span className="font-medium text-blue-600">MA7</span>=7일평균(안정) · <span className="font-medium text-amber-600">보간</span>=스냅샷 없는 날(평균값) · <span className="font-medium text-gray-500">이상치</span>=매칭률 30%미만</div>
                   <div><span className="font-medium text-red-500">급등뱃지</span>: today/MA7 비율 — 상승(1.8x) · 급등(2.5x) · 폭발적(4x)</div>
-                  <div className="border-t border-gray-200 pt-1 mt-1"><span className="font-medium text-gray-600">📊 MA 기준</span>: MA7/MA30은 <b>최근 90일</b> 윈도우에서 계산됩니다. 차트 조회 기간과 무관합니다.</div>
+                  <div className="border-t border-gray-200 pt-1 mt-1"><span className="font-medium text-gray-600">📊 Per-Product Delta</span>: 인접 스냅샷의 <b>동일 상품</b> 리뷰를 비교합니다. 상품 교체(일 20-45%)에 의한 왜곡을 제거합니다.</div>
                 </div>
               </CardContent>
             </Card>
