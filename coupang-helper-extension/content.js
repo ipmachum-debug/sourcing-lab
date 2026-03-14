@@ -1871,7 +1871,7 @@
   const COUPANG_RATIO = 0.33; // 네이버 → 쿠팡 트래픽 비율
 
   async function fetchMarketData(keyword) {
-    if (!keyword) return null;
+    if (!keyword) return { _error: 'no_keyword' };
     const cached = cachedMarketData[keyword];
     // 10분 캐시
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
@@ -1881,21 +1881,57 @@
         cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
         return resp.data;
       }
+      // 서버 응답은 왔지만 데이터 없음 (로그인 안됨 등)
+      return { _error: resp?.error || 'no_data' };
     } catch (e) {
       console.log('[SH] 마켓 데이터 조회 실패:', e.message);
+      return { _error: e.message };
     }
-    return null;
   }
 
   function renderSearchVolume(marketData) {
     const el = document.getElementById('sh-sv-section');
     if (!el) return;
 
-    if (!marketData?.searchVolume && !marketData?.searchVolumeEstimate) {
+    // 에러 상태 처리
+    if (!marketData || marketData._error) {
+      const errMsg = marketData?._error || '';
+      const isLogin = errMsg.includes('Not logged in') || errMsg.includes('login');
       el.innerHTML = `
         <div class="sh-sec-title">🔍 검색량</div>
         <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
-          로그인 후 조회 가능
+          ${isLogin ? '서버 로그인 후 조회 가능' : '네이버 검색량 수집 중...'}
+        </div>`;
+      return;
+    }
+
+    // 네이버 데이터도 없고 추정 데이터도 없는 경우
+    const hasNaver = marketData.searchVolume && Number(marketData.searchVolume.totalSearch || 0) > 0;
+    const hasEstimate = marketData.searchVolumeEstimate && marketData.searchVolumeEstimate.estimatedMonthlySearch > 0;
+    if (!hasNaver && !hasEstimate) {
+      // 추정 엔진은 있지만 입력 데이터가 0인 경우
+      const est = marketData.searchVolumeEstimate;
+      const progress = est?.maturityProgress;
+      el.innerHTML = `
+        <div class="sh-sec-title">🔍 검색량
+          <span style="background:#94a3b8 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">수집 중</span>
+        </div>
+        <div style="text-align:center !important;padding:8px 6px !important;color:#64748b !important;font-size:10px !important;">
+          네이버 검색량 데이터 수집 대기 중
+        </div>
+        ${progress ? `
+        <div style="padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
+          <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:3px !important;">
+            데이터 축적: ${progress.days.current}일 / ${progress.days.required}일
+          </div>
+          <div style="display:flex !important;gap:4px !important;align-items:center !important;">
+            <div style="flex:1 !important;height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
+              <div style="width:${Math.min(100, Math.round(progress.days.current / progress.days.required * 100))}% !important;height:100% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;border-radius:2px !important;"></div>
+            </div>
+          </div>
+        </div>` : ''}
+        <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+          데이터가 축적되면 자동으로 검색량이 표시됩니다
         </div>`;
       return;
     }
