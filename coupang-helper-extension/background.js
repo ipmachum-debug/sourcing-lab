@@ -731,19 +731,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'GET_KEYWORD_MARKET_DATA': {
       (async () => {
         try {
-          const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
-          if (!serverLoggedIn || !message.keyword) {
-            sendResponse({ ok: false, error: 'Not logged in or no keyword' });
+          if (!message.keyword) {
+            sendResponse({ ok: false, error: 'no_keyword' });
             return;
           }
+          // serverLoggedIn 체크 대신 실제 API 호출로 인증 확인
+          // (확장 프로그램 업데이트 시 storage 초기화 문제 방지)
           // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출)
-          await apiClient.fetchSearchVolume({ keywords: [message.keyword] }).catch(() => {});
+          const fetchResult = await apiClient.fetchSearchVolume({ keywords: [message.keyword] }).catch(e => {
+            console.log('[SH] Naver 검색량 fetch 실패:', e.message);
+            return null;
+          });
+          // fetchSearchVolume 실패가 UNAUTHORIZED면 로그인 필요
+          if (fetchResult?.error?.data?.code === 'UNAUTHORIZED') {
+            sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+            return;
+          }
           // 2) 통합 마켓 데이터 조회
           const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
           sendResponse({ ok: true, data: resp?.result?.data });
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
-          sendResponse({ ok: false, error: e.message });
+          // TRPC UNAUTHORIZED 에러 감지
+          const errMsg = e.message || '';
+          if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
+            sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+          } else {
+            sendResponse({ ok: false, error: errMsg });
+          }
         }
       })();
       return true;

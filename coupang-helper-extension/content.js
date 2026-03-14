@@ -1895,13 +1895,31 @@
 
     // 에러 상태 처리
     if (!marketData || marketData._error) {
-      const errMsg = marketData?._error || '';
-      const isLogin = errMsg.includes('Not logged in') || errMsg.includes('login');
-      el.innerHTML = `
-        <div class="sh-sec-title">🔍 검색량</div>
-        <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
-          ${isLogin ? '서버 로그인 후 조회 가능' : '네이버 검색량 수집 중...'}
-        </div>`;
+      const errMsg = (marketData?._error || '').toString();
+      const isUnauth = errMsg === 'UNAUTHORIZED' || errMsg.includes('401');
+      if (isUnauth) {
+        el.innerHTML = `
+          <div class="sh-sec-title">🔍 검색량</div>
+          <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
+            서버 로그인 후 조회 가능
+          </div>`;
+      } else {
+        el.innerHTML = `
+          <div class="sh-sec-title">🔍 검색량
+            <span style="background:#f59e0b !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">수집 중</span>
+          </div>
+          <div style="text-align:center !important;padding:8px 6px !important;color:#64748b !important;font-size:10px !important;">
+            네이버 검색량 데이터 수집 중...
+          </div>
+          <div style="padding:4px 8px !important;">
+            <div style="height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
+              <div style="width:15% !important;height:100% !important;background:linear-gradient(90deg,#f59e0b,#f97316) !important;border-radius:2px !important;"></div>
+            </div>
+          </div>
+          <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+            데이터가 축적되면 자동으로 표시됩니다
+          </div>`;
+      }
       return;
     }
 
