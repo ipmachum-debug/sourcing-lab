@@ -1890,7 +1890,8 @@
   function renderSearchVolume(marketData) {
     const el = document.getElementById('sh-sv-section');
     if (!el) return;
-    if (!marketData?.searchVolume) {
+
+    if (!marketData?.searchVolume && !marketData?.searchVolumeEstimate) {
       el.innerHTML = `
         <div class="sh-sec-title">🔍 검색량</div>
         <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
@@ -1898,18 +1899,53 @@
         </div>`;
       return;
     }
-    const sv = marketData.searchVolume;
+
+    const sv = marketData.searchVolume || {};
+    const est = marketData.searchVolumeEstimate;
     const totalNaver = sv.totalSearch || 0;
-    const coupangEst = Math.round(totalNaver * COUPANG_RATIO);
     const compIdx = sv.competitionIndex || '-';
 
-    // 경쟁 강도 비율 (상품수 / 추정 검색량)
+    // 추정 모델 결과 사용 (있으면), 없으면 단순 계산
+    const coupangEst = est ? est.estimatedMonthlySearch : Math.round(totalNaver * COUPANG_RATIO);
+    const model = est?.model || 'simple';
+    const maturity = est?.maturity || 'immature';
+    const confidence = est?.confidence || 0;
+    const progress = est?.maturityProgress;
+
+    // 모델 뱃지
+    const isHybrid = model === 'hybrid';
+    const modelBadge = isHybrid
+      ? '<span style="background:#6366f1 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">HYBRID v1</span>'
+      : '<span style="background:#94a3b8 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">SIMPLE</span>';
+
+    // 경쟁 비율 (상품수 / 추정 검색량)
     const snapshot = marketData.snapshot;
     const totalProducts = snapshot?.totalProductCount || 0;
     const compRatio = coupangEst > 0 ? (totalProducts / coupangEst).toFixed(1) : '-';
 
+    // 성숙도 프로그레스
+    let maturityHtml = '';
+    if (!isHybrid && progress) {
+      const daysPct = Math.min(100, Math.round(progress.days.current / progress.days.required * 100));
+      const deltaPct = Math.min(100, Math.round(progress.deltas.current / progress.deltas.required * 100));
+      const matchPct = Math.min(100, Math.round((progress.matchRate.current / progress.matchRate.required) * 100));
+      const overallPct = Math.round((daysPct + deltaPct + matchPct) / 3);
+      maturityHtml = `
+        <div style="margin-top:6px !important;padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
+          <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:4px !important;">
+            Hybrid 전환까지 ${overallPct}%
+          </div>
+          <div style="display:flex !important;gap:4px !important;align-items:center !important;">
+            <div style="flex:1 !important;height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
+              <div style="width:${overallPct}% !important;height:100% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;border-radius:2px !important;transition:width .5s !important;"></div>
+            </div>
+            <span style="font-size:7px !important;color:#94a3b8 !important;white-space:nowrap !important;">${progress.days.current}/${progress.days.required}일</span>
+          </div>
+        </div>`;
+    }
+
     el.innerHTML = `
-      <div class="sh-sec-title">🔍 검색량 (월간)</div>
+      <div class="sh-sec-title">🔍 검색량 (월간) ${modelBadge}</div>
       <div class="sh-stats">
         <div class="sh-st">
           <span class="sh-st-v accent">${coupangEst ? coupangEst.toLocaleString() : '-'}</span>
@@ -1933,9 +1969,15 @@
           <span class="sh-detail-lbl">네이버 경쟁</span>
           <span class="sh-detail-val">${compIdx}</span>
         </div>
+        ${isHybrid ? `
+        <div class="sh-detail-row">
+          <span class="sh-detail-lbl">신뢰도</span>
+          <span class="sh-detail-val" style="color:#6366f1 !important;">${Math.round(confidence * 100)}%</span>
+        </div>` : ''}
       </div>
+      ${maturityHtml}
       <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:right !important;">
-        쿠팡 추정 = 네이버 × ${COUPANG_RATIO} | ${sv.yearMonth || ''}
+        ${isHybrid ? '네이버 50% + 리뷰역산 35% + 보정 15%' : '네이버 × ' + COUPANG_RATIO} | ${sv.yearMonth || ''}
       </div>`;
   }
 

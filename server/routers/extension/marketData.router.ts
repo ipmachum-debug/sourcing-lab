@@ -13,11 +13,13 @@ import {
   keywordSearchVolumeHistory,
   keywordCpcCache,
   extSearchSnapshots,
+  extKeywordDailyStats,
 } from "../../../drizzle/schema";
-import { eq, and, desc, sql, asc } from "drizzle-orm";
+import { eq, and, desc, sql, asc, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { N } from "./_helpers";
 import { getNaverKeywords } from "../../lib/naverAds";
+import { estimateSearchVolume } from "../../lib/searchVolumeEstimator";
 
 export const marketDataRouter = router({
   // ============================================================
@@ -241,10 +243,69 @@ export const marketDataRouter = router({
         .orderBy(desc(keywordCpcCache.collectedAt))
         .limit(1);
 
+      // ★ v8.4: 검색량 추정 (자동 전환 Simple → Hybrid)
+      let searchVolumeEstimate = null;
+      try {
+        // 최근 90일 일별 통계에서 리뷰 delta 데이터 수집
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const dateStr = ninetyDaysAgo.toISOString().slice(0, 10);
+
+        const dailyStats = await db
+          .select({
+            statDate: extKeywordDailyStats.statDate,
+            reviewDeltaUsed: extKeywordDailyStats.reviewDeltaUsed,
+            coverageRatio: extKeywordDailyStats.coverageRatio,
+            dataStatus: extKeywordDailyStats.dataStatus,
+            isProvisional: extKeywordDailyStats.isProvisional,
+          })
+          .from(extKeywordDailyStats)
+          .where(
+            and(
+              eq(extKeywordDailyStats.userId, ctx.user!.id),
+              eq(extKeywordDailyStats.query, input.keyword),
+              gte(extKeywordDailyStats.statDate, dateStr),
+            ),
+          )
+          .orderBy(asc(extKeywordDailyStats.statDate));
+
+        // 신뢰 delta 필터링 (raw_valid 데이터만)
+        const reliableDeltas = dailyStats.filter(
+          d =>
+            d.dataStatus === "raw_valid" &&
+            !d.isProvisional &&
+            Number(d.reviewDeltaUsed ?? 0) >= 0,
+        );
+
+        const avgMatchRate =
+          reliableDeltas.length > 0
+            ? reliableDeltas.reduce((s, d) => s + Number(d.coverageRatio ?? 0), 0) /
+              reliableDeltas.length
+            : 0;
+
+        const avgDailyReviewGrowth =
+          reliableDeltas.length > 0
+            ? reliableDeltas.reduce((s, d) => s + Number(d.reviewDeltaUsed ?? 0), 0) /
+              reliableDeltas.length
+            : 0;
+
+        searchVolumeEstimate = estimateSearchVolume({
+          naverTotalSearch: volume ? Number(volume.totalSearch ?? 0) : 0,
+          avgDailyReviewGrowth,
+          avgMatchRate,
+          dataDays: dailyStats.length,
+          reliableDeltaCount: reliableDeltas.length,
+          autoCompleteCount: 0, // Phase 2: 자동완성 크롤링 추가 시 연결
+        });
+      } catch (e) {
+        console.error("[getKeywordMarketData] 검색량 추정 실패:", e);
+      }
+
       return {
         snapshot: snapshot || null,
         searchVolume: volume || null,
         cpc: cpc || null,
+        searchVolumeEstimate,
       };
     }),
 
