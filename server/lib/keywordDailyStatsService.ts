@@ -302,29 +302,14 @@ export async function rebuildKeywordDailyStatsForKeyword(
 
   // ★ v7.7.2: 실제 크롤링(ext_search_snapshots) 날짜 조회
   // — 스냅샷이 존재하는 날짜만 valid anchor로 인정
-  const snapshotDateRows = await db
-    .select({ createdAt: extSearchSnapshots.createdAt })
-    .from(extSearchSnapshots)
-    .where(
-      and(
-        eq(extSearchSnapshots.userId, userId),
-        eq(extSearchSnapshots.query, query),
-        sql`${extSearchSnapshots.createdAt} >= DATE_SUB(${todayStr}, INTERVAL ${windowDays} DAY)`,
-      ),
-    );
-
-  const realCrawlDates = new Set<string>();
-  for (const row of snapshotDateRows) {
-    const d = new Date(row.createdAt);
-    d.setHours(d.getHours() + 9); // KST
-    realCrawlDates.add(d.toISOString().slice(0, 10));
-  }
-
-  // ★ per-product delta용: 최근 스냅샷 2개 조회 (itemsJson 비교)
-  const recentSnapsForDelta = await db
+  // ★ v8.2.1: total_review_sum=0인 스냅샷도 items_json에서 리뷰합 복구
+  const allSnapshots = await db
     .select({
       id: extSearchSnapshots.id,
       createdAt: extSearchSnapshots.createdAt,
+      totalReviewSum: extSearchSnapshots.totalReviewSum,
+      totalItems: extSearchSnapshots.totalItems,
+      avgPrice: extSearchSnapshots.avgPrice,
       itemsJson: extSearchSnapshots.itemsJson,
     })
     .from(extSearchSnapshots)
@@ -332,10 +317,46 @@ export async function rebuildKeywordDailyStatsForKeyword(
       and(
         eq(extSearchSnapshots.userId, userId),
         eq(extSearchSnapshots.query, query),
+        sql`${extSearchSnapshots.createdAt} >= DATE_SUB(${todayStr}, INTERVAL ${windowDays} DAY)`,
       ),
     )
-    .orderBy(desc(extSearchSnapshots.createdAt))
-    .limit(10);
+    .orderBy(desc(extSearchSnapshots.createdAt));
+
+  const realCrawlDates = new Set<string>();
+  // ★ v8.2.1: 날짜별 최적 스냅샷 (items_json에서 리뷰합 계산)
+  const bestSnapByDate = new Map<string, { reviewSum: number; productCount: number; avgPrice: number; items: any[] }>();
+
+  for (const snap of allSnapshots) {
+    const d = new Date(snap.createdAt);
+    d.setHours(d.getHours() + 9); // KST
+    const dateStr = d.toISOString().slice(0, 10);
+    realCrawlDates.add(dateStr);
+
+    // items_json에서 실제 리뷰합 계산 (total_review_sum이 0이어도 복구)
+    let snapItems: any[] = [];
+    try {
+      snapItems = snap.itemsJson ? JSON.parse(snap.itemsJson) : [];
+    } catch {
+      snapItems = [];
+    }
+    const computedSum = snapItems.reduce(
+      (sum: number, i: any) => sum + (i.reviewCount || 0), 0,
+    );
+    const reviewSum = computedSum > 0 ? computedSum : N(snap.totalReviewSum);
+
+    const existing = bestSnapByDate.get(dateStr);
+    if (!existing || reviewSum > existing.reviewSum) {
+      bestSnapByDate.set(dateStr, {
+        reviewSum,
+        productCount: snapItems.length || N(snap.totalItems),
+        avgPrice: N(snap.avgPrice),
+        items: snapItems,
+      });
+    }
+  }
+
+  // ★ per-product delta용: 최근 스냅샷 2개 (allSnapshots에서 재사용)
+  const recentSnapsForDelta = allSnapshots.slice(0, 10);
 
   // per-product delta 시도
   let perProductDeltaResult: ReturnType<typeof computePerProductDelta> = null;
@@ -387,15 +408,27 @@ export async function rebuildKeywordDailyStatsForKeyword(
       reviewGrowth: N(row.reviewGrowth),
       salesEstimate: N(row.salesEstimate),
     });
+
+    // ★ v8.2.1: totalReviewSum이 0이면 items_json에서 복구한 값 사용
+    let reviewSum = N(row.totalReviewSum);
+    let productCount = N(row.productCount);
+    let avgPrice = N(row.avgPrice);
+    const bestSnap = bestSnapByDate.get(date);
+    if (bestSnap && bestSnap.reviewSum > 0 && (reviewSum === 0 || bestSnap.reviewSum > reviewSum)) {
+      reviewSum = bestSnap.reviewSum;
+      if (bestSnap.productCount > 0) productCount = bestSnap.productCount;
+      if (bestSnap.avgPrice > 0) avgPrice = bestSnap.avgPrice;
+    }
+
     rawSeries.push({
       statDate: date,
-      productCount: N(row.productCount),
-      reviewSum: N(row.totalReviewSum),
-      avgPrice: N(row.avgPrice),
+      productCount,
+      reviewSum,
+      avgPrice,
       // ★ v7.7.2: 실제 크롤링(스냅샷)이 있는 날만 valid anchor로 인정
       isValidSnapshot:
-        N(row.productCount) > 0 &&
-        N(row.totalReviewSum) > 0 &&
+        productCount > 0 &&
+        reviewSum > 0 &&
         realCrawlDates.has(date),
     });
   }

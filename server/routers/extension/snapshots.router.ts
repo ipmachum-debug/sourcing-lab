@@ -58,6 +58,14 @@ export const snapshotsRouter = router({
         ))
         .orderBy(desc(extSearchSnapshots.createdAt));
 
+      // ★ v8.2.1: totalReviewSum이 0이면 items에서 자동 계산
+      let computedReviewSum = input.totalReviewSum;
+      if (computedReviewSum === 0 && input.items && input.items.length > 0) {
+        computedReviewSum = input.items.reduce(
+          (sum: number, i: any) => sum + (i.reviewCount || 0), 0,
+        );
+      }
+
       const snapData = {
         totalItems: input.totalItems,
         avgPrice: input.avgPrice,
@@ -73,7 +81,7 @@ export const snapshotsRouter = router({
         minPrice: input.minPrice,
         maxPrice: input.maxPrice,
         medianPrice: input.medianPrice,
-        totalReviewSum: input.totalReviewSum,
+        totalReviewSum: computedReviewSum,
         maxReviewCount: input.maxReviewCount,
         minReviewCount: input.minReviewCount,
         avgRatingAll: input.avgRating.toFixed(2),
