@@ -1966,17 +1966,24 @@
       const deltaPct = Math.min(100, Math.round(progress.deltas.current / progress.deltas.required * 100));
       const matchPct = Math.min(100, Math.round((progress.matchRate.current / progress.matchRate.required) * 100));
       const overallPct = Math.round((daysPct + deltaPct + matchPct) / 3);
+
+      const bar = (label, pct, cur, req, unit) => `
+        <div style="display:flex !important;align-items:center !important;gap:4px !important;margin-bottom:2px !important;">
+          <span style="font-size:7px !important;color:#64748b !important;width:32px !important;text-align:right !important;">${label}</span>
+          <div style="flex:1 !important;height:3px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
+            <div style="width:${pct}% !important;height:100% !important;background:${pct >= 100 ? '#22c55e' : 'linear-gradient(90deg,#6366f1,#8b5cf6)'} !important;border-radius:2px !important;"></div>
+          </div>
+          <span style="font-size:7px !important;color:#94a3b8 !important;width:38px !important;">${cur}/${req}${unit}</span>
+        </div>`;
+
       maturityHtml = `
         <div style="margin-top:6px !important;padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
           <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:4px !important;">
             Hybrid 전환까지 ${overallPct}%
           </div>
-          <div style="display:flex !important;gap:4px !important;align-items:center !important;">
-            <div style="flex:1 !important;height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-              <div style="width:${overallPct}% !important;height:100% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;border-radius:2px !important;transition:width .5s !important;"></div>
-            </div>
-            <span style="font-size:7px !important;color:#94a3b8 !important;white-space:nowrap !important;">${progress.days.current}/${progress.days.required}일</span>
-          </div>
+          ${bar('축적일', daysPct, progress.days.current, progress.days.required, '일')}
+          ${bar('델타', deltaPct, progress.deltas.current, progress.deltas.required, '개')}
+          ${bar('정합', matchPct, Math.round(progress.matchRate.current * 100), Math.round(progress.matchRate.required * 100), '%')}
         </div>`;
     }
 
