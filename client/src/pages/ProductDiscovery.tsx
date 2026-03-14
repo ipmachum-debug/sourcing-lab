@@ -15,7 +15,7 @@ import {
   Search, Loader2, Zap, ThumbsUp, ThumbsDown, Eye, Trash2,
   RefreshCw, CheckCircle, XCircle, Clock, Star, ArrowRight,
   TrendingUp, AlertTriangle, Lightbulb, Target, Package,
-  ShieldAlert, Sparkles, BarChart3,
+  ShieldAlert, Sparkles, BarChart3, ExternalLink, Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
@@ -126,6 +126,14 @@ export default function ProductDiscovery() {
       toast.success("작업이 삭제되었습니다");
       setSelectedJob(null);
       jobs.refetch(); overview.refetch();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const reanalyze = trpc.extension.reanalyzeJob.useMutation({
+    onSuccess: () => {
+      toast.success("재분석을 시작합니다...");
+      jobs.refetch(); jobDetail.refetch(); overview.refetch();
     },
     onError: e => toast.error(e.message),
   });
@@ -319,24 +327,76 @@ export default function ProductDiscovery() {
                       className={`cursor-pointer hover:bg-muted/50 transition-colors ${selectedJob === j.id ? "ring-2 ring-primary" : ""}`}
                       onClick={() => setSelectedJob(selectedJob === j.id ? null : j.id)}
                     >
-                      <CardContent className="p-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {statusLabel(j.status)}
-                          <span className="font-medium">{j.keyword}</span>
-                          {j.filterCriteria && (
-                            <span className="text-xs text-muted-foreground">
-                              {(j.filterCriteria as any)?.totalItems || 0}개 중 {(j.filterCriteria as any)?.selectedCount || 0}개 선별
-                            </span>
-                          )}
+                      <CardContent className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {statusLabel(j.status)}
+                            <span className="font-medium">{j.keyword}</span>
+                            {j.searchSummaryJson && (
+                              <span className="text-xs text-muted-foreground">
+                                {(j.searchSummaryJson as any)?.totalItems || 0}개 상품 &middot;
+                                {" "}{(j.searchSummaryJson as any)?.competitionLevel === "hard" ? "경쟁 치열" :
+                                  (j.searchSummaryJson as any)?.competitionLevel === "easy" ? "진입 기회" : "보통"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {j.createdAt && <span>{String(j.createdAt).slice(5, 16)}</span>}
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-500"
+                              onClick={e => { e.stopPropagation(); if (confirm(`"${j.keyword}" 작업을 삭제하시겠습니까?`)) deleteJob.mutate({ jobId: j.id }); }}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {j.detailCrawledCount > 0 && <span>상세 {j.detailCrawledCount}개</span>}
-                          {j.createdAt && <span>{String(j.createdAt).slice(5, 16)}</span>}
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-500"
-                            onClick={e => { e.stopPropagation(); if (confirm(`"${j.keyword}" 작업을 삭제하시겠습니까?`)) deleteJob.mutate({ jobId: j.id }); }}>
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
+                        {/* 시장 개요 한줄 요약 */}
+                        {j.status === "completed" && j.searchSummaryJson && (
+                          <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                            <span>평균가 <strong className="text-foreground">{formatNum((j.searchSummaryJson as any)?.avgPrice)}원</strong></span>
+                            <span>평균리뷰 <strong className="text-foreground">{formatNum((j.searchSummaryJson as any)?.avgReview)}</strong></span>
+                            <span>로켓 <strong className="text-foreground">{(j.searchSummaryJson as any)?.rocketCount || 0}개</strong></span>
+                            {j.aiAnalysisJson && (j.aiAnalysisJson as any)?.products?.length > 0 && (
+                              <span className="text-green-600 font-medium">
+                                추천 {(j.aiAnalysisJson as any).products.length}개
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {/* TOP 2 추천 제품 인라인 미리보기 */}
+                        {j.status === "completed" && (j as any).topProducts?.length > 0 && (
+                          <div className="mt-2 space-y-1.5">
+                            {(j as any).topProducts.map((tp: any, idx: number) => (
+                              <div key={tp.id} className={`flex items-center gap-2 p-2 rounded-lg ${idx === 0 ? "bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800" : "bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700"}`}
+                                onClick={e => { e.stopPropagation(); setSelectedJob(j.id); }}>
+                                <div className="flex-shrink-0 flex items-center gap-1">
+                                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${idx === 0 ? "bg-yellow-500 text-white" : "bg-gray-400 text-white"}`}>
+                                    {idx === 0 ? "1st" : "2nd"}
+                                  </span>
+                                  <span className={`text-sm font-bold ${gradeColor(tp.aiGrade || "D")}`}>{tp.aiGrade}</span>
+                                  <span className="text-xs text-muted-foreground">{tp.aiScore}점</span>
+                                  {verdictLabel(tp.aiVerdict)}
+                                </div>
+                                {tp.imageUrl && (
+                                  <img src={tp.imageUrl} alt="" className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium truncate">{tp.productTitle}</p>
+                                  <div className="flex gap-2 text-[11px] text-muted-foreground">
+                                    <span className="font-semibold text-foreground">{formatNum(tp.price)}원</span>
+                                    <span>리뷰 {formatNum(tp.reviewCount)}</span>
+                                    {Number(tp.rating) > 0 && <span>{Number(tp.rating).toFixed(1)}점</span>}
+                                    {tp.isRocket && <span className="text-blue-500">로켓</span>}
+                                    {tp.searchRank > 0 && <span>#{tp.searchRank}</span>}
+                                    {tp.estimatedMonthlySales > 0 && <span className="text-green-600">월{formatNum(tp.estimatedMonthlySales)}개</span>}
+                                  </div>
+                                </div>
+                                {tp.userDecision === "track" && <Badge className="bg-green-600 text-white text-[10px] flex-shrink-0">추적중</Badge>}
+                                {tp.userDecision === "reject" && <Badge variant="outline" className="text-[10px] text-red-400 flex-shrink-0">거절</Badge>}
+                              </div>
+                            ))}
+                            <p className="text-[10px] text-muted-foreground text-right">클릭하여 전체 {(j.aiAnalysisJson as any)?.products?.length || 0}개 제품 보기 →</p>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   ))}
@@ -345,9 +405,22 @@ export default function ProductDiscovery() {
                 {/* 작업 상세 */}
                 {selectedJob && detail && (
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                      <Target className="w-5 h-5" /> "{detail.job.keyword}" 분석 결과
-                    </h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <Target className="w-5 h-5" /> "{detail.job.keyword}" 분석 결과
+                      </h3>
+                      {detail.job.status === "completed" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => reanalyze.mutate({ jobId: selectedJob })}
+                          disabled={reanalyze.isPending}
+                        >
+                          {reanalyze.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                          재분석
+                        </Button>
+                      )}
+                    </div>
                     {detail.job.aiAnalysisJson && <MarketOverviewCard analysis={detail.job.aiAnalysisJson as any} />}
                     {detail.job.errorMessage && (
                       <Card className="border-red-300 bg-red-50 dark:bg-red-900/20">
@@ -356,21 +429,42 @@ export default function ProductDiscovery() {
                         </CardContent>
                       </Card>
                     )}
-                    {detail.products.length > 0 && (
+                    {detail.products.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {detail.products.map((p: any) => (
                           <ProductCard key={p.id} product={p} onSelect={setSelectedProduct} />
                         ))}
                       </div>
-                    )}
-                    {detail.job.status === "pending" && (
+                    ) : detail.job.status === "completed" ? (
+                      <Card className="bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200">
+                        <CardContent className="p-4 text-center">
+                          <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-yellow-500" />
+                          <p className="font-medium">추천 제품이 아직 없습니다</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            "재분석" 버튼을 눌러 검색 결과 데이터로 AI 분석을 실행하세요.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    ) : null}
+                    {(detail.job.status === "pending" || detail.job.status === "crawling_search") && (
                       <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200">
                         <CardContent className="p-4 text-center">
                           <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
-                          <p className="font-medium">확장프로그램 크롤링 대기 중</p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Chrome 확장프로그램이 실행 중이면 자동으로 크롤링이 시작됩니다.
+                          <p className="font-medium">
+                            {detail.job.status === "crawling_search" ? "검색 크롤링 진행 중..." : "확장프로그램 크롤링 대기 중"}
                           </p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            확장프로그램이 1분 내 자동으로 크롤링을 시작합니다.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {detail.job.status === "analyzing" && (
+                      <Card className="bg-purple-50 dark:bg-purple-900/20 border-purple-200">
+                        <CardContent className="p-4 text-center">
+                          <Sparkles className="w-6 h-6 animate-pulse mx-auto mb-2 text-purple-500" />
+                          <p className="font-medium">AI가 분석 중입니다...</p>
+                          <p className="text-sm text-muted-foreground mt-1">잠시 후 새로고침하세요.</p>
                         </CardContent>
                       </Card>
                     )}

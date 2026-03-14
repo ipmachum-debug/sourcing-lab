@@ -94,9 +94,28 @@ async function analyzeProductsWithAI(
   keyword: string,
   searchSummary: any,
   detailResults: any[],
-  searchItems: any[]
+  searchItems: any[],
+  filteredProductIds?: any[]
 ): Promise<any> {
-  const productSummaries = detailResults.map((d: any, i: number) => {
+  // v8.1: 상세 크롤링 결과가 없으면 필터링된 검색 결과로 대체
+  let dataSource = detailResults;
+  let isSearchOnly = false;
+  if (!detailResults || detailResults.length === 0) {
+    isSearchOnly = true;
+    // filteredProductIds가 있으면 우선, 없으면 searchItems에서 상위 제품 사용
+    if (filteredProductIds && filteredProductIds.length > 0) {
+      dataSource = filteredProductIds.map((fp: any) => {
+        // searchItems에서 매칭되는 상세 정보 보강
+        const si = searchItems.find((s: any) => String(s.productId) === String(fp.productId));
+        return { ...fp, ...(si || {}), productId: fp.productId };
+      });
+    } else {
+      // 광고 제외, 상위 8개
+      dataSource = searchItems.filter((s: any) => !s.isAd).slice(0, 8);
+    }
+  }
+
+  const productSummaries = dataSource.map((d: any, i: number) => {
     const searchItem = searchItems.find(
       (s: any) => String(s.productId || s.coupangProductId) === String(d.productId || d.coupangProductId)
     );
@@ -106,22 +125,24 @@ async function analyzeProductsWithAI(
       title: (d.title || d.productTitle || "").slice(0, 120),
       price: d.price || 0,
       originalPrice: d.originalPrice || 0,
-      rating: d.rating || 0,
-      reviewCount: d.reviewCount || 0,
+      rating: d.rating || searchItem?.rating || 0,
+      reviewCount: d.reviewCount || searchItem?.reviewCount || 0,
       sellerName: d.sellerName || "",
-      deliveryType: d.deliveryType || d.delivery || "",
+      deliveryType: d.deliveryType || d.delivery || searchItem?.deliveryType || "",
       categoryPath: d.categoryPath || "",
       optionCount: d.optionCount || (d.optionSummary?.length || 0),
-      searchRank: searchItem?.rank || searchItem?._rank || 0,
+      searchRank: d.rank || searchItem?.rank || searchItem?._rank || 0,
       isRocket: d.isRocket || searchItem?.isRocket || false,
       brandName: d.brandName || "",
       manufacturer: d.manufacturer || "",
+      imageUrl: d.imageUrl || searchItem?.imageUrl || "",
       reviewSamples: (d.reviewSamples || []).slice(0, 3).map((r: any) => ({
         rating: r.rating,
         text: (r.text || "").slice(0, 100),
       })),
       soldOut: d.soldOut || false,
       confidence: d.confidence || 0,
+      dataSource: isSearchOnly ? "search" : "detail",
     };
   });
 
@@ -199,7 +220,7 @@ ${JSON.stringify(productSummaries, null, 2)}
   } catch (err) {
     console.error("[AI Discovery Analysis] LLM failed:", err);
     // Fallback: rule-based analysis
-    return ruleBasedAnalysis(keyword, searchSummary, detailResults, searchItems);
+    return ruleBasedAnalysis(keyword, searchSummary, detailResults, searchItems, filteredProductIds);
   }
 }
 
@@ -207,9 +228,23 @@ function ruleBasedAnalysis(
   keyword: string,
   searchSummary: any,
   detailResults: any[],
-  searchItems: any[]
+  searchItems: any[],
+  filteredProductIds?: any[]
 ): any {
-  const products = detailResults.map((d: any) => {
+  // v8.1: 상세 크롤링 없으면 검색 결과로 분석
+  let dataSource = detailResults;
+  if (!detailResults || detailResults.length === 0) {
+    if (filteredProductIds && filteredProductIds.length > 0) {
+      dataSource = filteredProductIds.map((fp: any) => {
+        const si = searchItems.find((s: any) => String(s.productId) === String(fp.productId));
+        return { ...fp, ...(si || {}), productId: fp.productId };
+      });
+    } else {
+      dataSource = searchItems.filter((s: any) => !s.isAd).slice(0, 8);
+    }
+  }
+
+  const products = dataSource.map((d: any) => {
     const searchItem = searchItems.find(
       (s: any) => String(s.productId || s.coupangProductId) === String(d.productId || d.coupangProductId)
     );
@@ -675,7 +710,34 @@ export const discoveryRouter = router({
         .limit(input.limit)
         .offset(input.offset);
 
-      return jobs;
+      // 각 작업별 추천 상위 2개 제품 포함
+      const jobsWithTopProducts = await Promise.all(
+        jobs.map(async (job) => {
+          if (job.status !== "completed") return { ...job, topProducts: [] };
+          const topProducts = await db.select({
+            id: extDiscoveryProducts.id,
+            productTitle: extDiscoveryProducts.productTitle,
+            price: extDiscoveryProducts.price,
+            reviewCount: extDiscoveryProducts.reviewCount,
+            rating: extDiscoveryProducts.rating,
+            imageUrl: extDiscoveryProducts.imageUrl,
+            aiScore: extDiscoveryProducts.aiScore,
+            aiGrade: extDiscoveryProducts.aiGrade,
+            aiVerdict: extDiscoveryProducts.aiVerdict,
+            isRocket: extDiscoveryProducts.isRocket,
+            searchRank: extDiscoveryProducts.searchRank,
+            estimatedMonthlySales: extDiscoveryProducts.estimatedMonthlySales,
+            userDecision: extDiscoveryProducts.userDecision,
+          })
+            .from(extDiscoveryProducts)
+            .where(eq(extDiscoveryProducts.jobId, job.id))
+            .orderBy(desc(extDiscoveryProducts.aiScore))
+            .limit(2);
+          return { ...job, topProducts };
+        })
+      );
+
+      return jobsWithTopProducts;
     }),
 
   // === 6. 작업 상세 + 추천 제품 조회 ===
@@ -807,7 +869,43 @@ export const discoveryRouter = router({
       return { success: true };
     }),
 
-  // === 10. 작업 삭제 ===
+  // === 10. 재분석 (검색 결과로 AI 분석 다시 실행) ===
+  reanalyzeJob: protectedProcedure
+    .input(z.object({ jobId: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [job] = await db.select()
+        .from(extDiscoveryJobs)
+        .where(and(
+          eq(extDiscoveryJobs.id, input.jobId),
+          eq(extDiscoveryJobs.userId, ctx.user!.id),
+        ))
+        .limit(1);
+
+      if (!job) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // 기존 products 삭제
+      await db.delete(extDiscoveryProducts)
+        .where(eq(extDiscoveryProducts.jobId, input.jobId));
+
+      // status를 analyzing으로 변경
+      await db.update(extDiscoveryJobs).set({
+        status: "analyzing",
+        aiAnalysisJson: null,
+        completedAt: null,
+      }).where(eq(extDiscoveryJobs.id, input.jobId));
+
+      // AI 분석 실행 (비동기)
+      runAIAnalysis(ctx.user!.id, input.jobId, db).catch(err => {
+        console.error("[Discovery] Reanalysis failed:", err);
+      });
+
+      return { success: true, analyzing: true };
+    }),
+
+  // === 11. 작업 삭제 ===
   deleteJob: protectedProcedure
     .input(z.object({ jobId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
@@ -884,11 +982,13 @@ async function runAIAnalysis(userId: number, jobId: number, db: any) {
     const searchSummary = job.searchSummaryJson || {};
 
     // AI 분석 실행
+    const filteredProductIds = (job.filteredProductIds || []) as any[];
     const analysis = await analyzeProductsWithAI(
       job.keyword,
       searchSummary,
       detailResults,
-      searchItems
+      searchItems,
+      filteredProductIds
     );
 
     // 분석 결과를 discovery_products에 저장
@@ -900,10 +1000,13 @@ async function runAIAnalysis(userId: number, jobId: number, db: any) {
       const searchItem = searchItems.find(
         (s: any) => String(s.productId || s.coupangProductId) === String(p.productId)
       );
+      const filteredItem = filteredProductIds.find(
+        (f: any) => String(f.productId) === String(p.productId)
+      );
 
-      if (!detail && !searchItem) continue;
-
-      const src = detail || searchItem || {};
+      // 상세 → 검색 → 필터링 순서로 데이터 찾기
+      const src = detail || searchItem || filteredItem || {};
+      if (!src.productId && !src.coupangProductId && !p.productId) continue;
 
       await db.insert(extDiscoveryProducts).values({
         userId,
@@ -911,8 +1014,8 @@ async function runAIAnalysis(userId: number, jobId: number, db: any) {
         keyword: job.keyword,
         coupangProductId: String(p.productId),
         productTitle: (src.title || src.productTitle || "").slice(0, 1000),
-        productUrl: src.url || src.productUrl || null,
-        imageUrl: src.imageUrl || null,
+        productUrl: src.url || src.productUrl || searchItem?.url || filteredItem?.url || null,
+        imageUrl: src.imageUrl || searchItem?.imageUrl || null,
         price: src.price || 0,
         originalPrice: src.originalPrice || 0,
         rating: String(src.rating || 0),
