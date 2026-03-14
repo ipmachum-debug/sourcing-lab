@@ -738,21 +738,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // serverLoggedIn 체크 대신 실제 API 호출로 인증 확인
           // (확장 프로그램 업데이트 시 storage 초기화 문제 방지)
           // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출)
-          const fetchResult = await apiClient.fetchSearchVolume({ keywords: [message.keyword] }).catch(e => {
-            console.log('[SH] Naver 검색량 fetch 실패:', e.message);
-            return null;
-          });
-          // fetchSearchVolume 실패가 UNAUTHORIZED면 로그인 필요
-          if (fetchResult?.error?.data?.code === 'UNAUTHORIZED') {
-            sendResponse({ ok: false, error: 'UNAUTHORIZED' });
-            return;
+          let naverFetchData = null;
+          try {
+            const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
+            naverFetchData = fetchResp?.result?.data;
+          } catch (e) {
+            const errMsg = e.message || '';
+            if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
+              sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+              return;
+            }
+            console.log('[SH] Naver 검색량 fetch 실패 (계속 진행):', errMsg);
           }
           // 2) 통합 마켓 데이터 조회
           const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
-          const data = resp?.result?.data;
-          console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`, 
-            data ? `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}` 
-                 : `data=undefined, resp=${JSON.stringify(resp).slice(0,200)}`);
+          const data = resp?.result?.data || {};
+          // 3) searchVolume이 null이면 fetchSearchVolume 결과로 보충
+          if (!data.searchVolume && naverFetchData) {
+            // fetchSearchVolume 응답에서 저장된 Naver 데이터 역추출
+            const nTotal = naverFetchData.totalResults || 0;
+            const nSaved = naverFetchData.saved || 0;
+            const ym = naverFetchData.yearMonth || '';
+            if (nSaved > 0) {
+              // DB에 방금 저장했는데 getKeywordMarketData에서 못 읽은 경우 → 재조회
+              try {
+                const retry = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+                const retryData = retry?.result?.data;
+                if (retryData?.searchVolume) {
+                  Object.assign(data, retryData);
+                  console.log('[SH] 마켓 데이터 재조회 성공:', message.keyword, retryData.searchVolume?.totalSearch);
+                }
+              } catch (_) {}
+            }
+          }
+          console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`,
+            `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}`);
           sendResponse({ ok: true, data });
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
