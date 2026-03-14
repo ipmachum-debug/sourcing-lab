@@ -735,13 +735,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'no_keyword' });
             return;
           }
-          // serverLoggedIn 체크 대신 실제 API 호출로 인증 확인
-          // (확장 프로그램 업데이트 시 storage 초기화 문제 방지)
-          // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출)
+          // ★ v8.4.4: 검색량 조회 개선
+          // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출 + directVolume 반환)
           let naverFetchData = null;
+          let naverNotFound = false;
           try {
             const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
             naverFetchData = fetchResp?.result?.data;
+            naverNotFound = naverFetchData?.naverNotFound === true;
           } catch (e) {
             const errMsg = e.message || '';
             if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
@@ -753,26 +754,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // 2) 통합 마켓 데이터 조회
           const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
           const data = resp?.result?.data || {};
-          // 3) searchVolume이 null이면 fetchSearchVolume 결과로 보충
-          if (!data.searchVolume && naverFetchData) {
-            // fetchSearchVolume 응답에서 저장된 Naver 데이터 역추출
-            const nTotal = naverFetchData.totalResults || 0;
-            const nSaved = naverFetchData.saved || 0;
-            const ym = naverFetchData.yearMonth || '';
-            if (nSaved > 0) {
-              // DB에 방금 저장했는데 getKeywordMarketData에서 못 읽은 경우 → 재조회
-              try {
-                const retry = await apiClient.getKeywordMarketData({ keyword: message.keyword });
-                const retryData = retry?.result?.data;
-                if (retryData?.searchVolume) {
-                  Object.assign(data, retryData);
-                  console.log('[SH] 마켓 데이터 재조회 성공:', message.keyword, retryData.searchVolume?.totalSearch);
-                }
-              } catch (_) {}
+
+          // ★ v8.4.4: searchVolume이 null이면 directVolume으로 보충
+          if (!data.searchVolume && naverFetchData?.directVolume) {
+            data.searchVolume = naverFetchData.directVolume;
+            // 추정치도 재계산 (naverTotalSearch가 0이었기 때문)
+            if (data.searchVolumeEstimate && data.searchVolumeEstimate.estimatedMonthlySearch === 0) {
+              const tv = naverFetchData.directVolume.totalSearch || 0;
+              data.searchVolumeEstimate.estimatedMonthlySearch = Math.round(tv * 0.33);
+              data.searchVolumeEstimate.components = {
+                ...(data.searchVolumeEstimate.components || {}),
+                naverEstimate: Math.round(tv * 0.33),
+              };
             }
           }
+          // ★ v8.4.4: searchVolume이 여전히 없고 Naver에 해당 키워드가 아예 없는 경우
+          if (!data.searchVolume && naverNotFound) {
+            data._naverNotFound = true;
+          }
+          // ★ v8.4.4: searchVolume이 없고 fetch 결과에 saved > 0이면 재조회 (DB timing 이슈)
+          if (!data.searchVolume && !naverNotFound && naverFetchData?.saved > 0) {
+            try {
+              const retry = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+              const retryData = retry?.result?.data;
+              if (retryData?.searchVolume) {
+                Object.assign(data, retryData);
+                console.log('[SH] 마켓 데이터 재조회 성공:', message.keyword, retryData.searchVolume?.totalSearch);
+              }
+            } catch (_) {}
+          }
           console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`,
-            `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}`);
+            `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}, naverNotFound=${naverNotFound}`);
           sendResponse({ ok: true, data });
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);

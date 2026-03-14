@@ -1928,6 +1928,21 @@
     const hasNaver = marketData.searchVolume && Number(marketData.searchVolume.totalSearch || 0) > 0;
     const hasEstimate = marketData.searchVolumeEstimate && marketData.searchVolumeEstimate.estimatedMonthlySearch > 0;
     if (!hasNaver && !hasEstimate) {
+      // ★ v8.4.4: 네이버에 아예 등록되지 않은 키워드 구분
+      const isNaverNotFound = marketData._naverNotFound === true;
+      if (isNaverNotFound) {
+        el.innerHTML = `
+          <div class="sh-sec-title">🔍 검색량
+            <span style="background:#64748b !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">네이버 미등록</span>
+          </div>
+          <div style="text-align:center !important;padding:8px 6px !important;color:#94a3b8 !important;font-size:10px !important;">
+            네이버에 등록되지 않은 키워드입니다
+          </div>
+          <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+            검색량 추정이 불가능합니다. 유사 키워드를 시도해 보세요.
+          </div>`;
+        return;
+      }
       // 추정 엔진은 있지만 입력 데이터가 0인 경우
       const est = marketData.searchVolumeEstimate;
       const progress = est?.maturityProgress;

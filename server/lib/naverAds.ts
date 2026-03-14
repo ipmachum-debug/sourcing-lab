@@ -57,12 +57,26 @@ export interface NaverKeywordResult {
 export async function getNaverKeywords(
   hintKeywords: string[],
 ): Promise<NaverKeywordResult[]> {
+  // ★ v8.4.4: 공백 제거 + 원본 키워드 매핑
+  // 네이버 API는 공백 포함 키워드를 400으로 거부함
+  const cleanedKeywords = hintKeywords.map(kw => kw.replace(/\s+/g, "").trim()).filter(Boolean);
+  // 원본→정제 매핑 (나중에 결과에 원본 키워드 복원용)
+  const originalMap = new Map<string, string>(); // cleaned → original
+  for (let i = 0; i < hintKeywords.length; i++) {
+    const cleaned = hintKeywords[i].replace(/\s+/g, "").trim();
+    if (cleaned) originalMap.set(cleaned.toLowerCase(), hintKeywords[i]);
+  }
+
+  if (cleanedKeywords.length === 0) {
+    return [];
+  }
+
   const method = "GET";
   const uri = "/keywordstool";
   const headers = getHeaders(method, uri);
 
   const params = new URLSearchParams({
-    hintKeywords: hintKeywords.join(","),
+    hintKeywords: cleanedKeywords.join(","),
     showDetail: "1",
   });
 
@@ -72,6 +86,11 @@ export async function getNaverKeywords(
   });
 
   if (!res.ok) {
+    // ★ v8.4.4: 400 에러는 키워드가 네이버에 없는 경우 → 빈 배열 반환 (throw 대신)
+    if (res.status === 400) {
+      console.log(`[naverAds] 네이버 API 400: 키워드 미등록 — ${cleanedKeywords.join(", ")}`);
+      return [];
+    }
     const text = await res.text();
     throw new Error(`네이버 API 오류: ${res.status} ${text}`);
   }

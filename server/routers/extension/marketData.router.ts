@@ -33,10 +33,13 @@ export const marketDataRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      // 네이버 API 호출
+      // ★ v8.4.4: 원본 키워드 보존 (공백 포함 가능)
+      const originalKeywords = input.keywords;
+
+      // 네이버 API 호출 (naverAds.ts에서 공백 자동 제거 + 400 에러 처리)
       let naverResults;
       try {
-        naverResults = await getNaverKeywords(input.keywords);
+        naverResults = await getNaverKeywords(originalKeywords);
       } catch (err: any) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -44,22 +47,29 @@ export const marketDataRouter = router({
         });
       }
 
+      // ★ v8.4.4: 네이버 API가 빈 결과를 반환해도 에러가 아님 (키워드 미등록)
+      // naverNotFound 플래그로 확장 프로그램에 알림
+      const naverNotFound = naverResults.length === 0;
+
       // 현재 월 YYYY-MM
       const now = new Date();
       now.setHours(now.getHours() + 9);
       const yearMonth = now.toISOString().slice(0, 7);
 
       let saved = 0;
+
+      // ★ v8.4.4: 원본 키워드에 해당하는 결과를 정확히 매칭하기 위한 맵
+      // 원본 키워드(공백 제거 후 소문자) → 원본 키워드 (DB 저장 시 원본 키워드로 저장)
+      const keywordLookup = new Map<string, string>();
+      for (const kw of originalKeywords) {
+        keywordLookup.set(kw.replace(/\s+/g, "").toLowerCase(), kw);
+      }
+
       for (const r of naverResults) {
         const totalSearch = (r.monthlyPcQcCnt || 0) + (r.monthlyMobileQcCnt || 0);
         if (totalSearch === 0) continue;
 
-        // UPSERT: 같은 user + keyword + source + yearMonth이면 업데이트
-        await db.insert(keywordSearchVolumeHistory).values({
-          userId: ctx.user!.id,
-          keyword: r.relKeyword,
-          source: "naver",
-          yearMonth,
+        const upsertValues = {
           pcSearch: r.monthlyPcQcCnt || 0,
           mobileSearch: r.monthlyMobileQcCnt || 0,
           totalSearch,
@@ -67,21 +77,57 @@ export const marketDataRouter = router({
           avgCpc: String(
             (r.monthlyAvgPcClkCnt || 0) + (r.monthlyAvgMobileClkCnt || 0)
           ),
-        }).onDuplicateKeyUpdate({
-          set: {
-            pcSearch: r.monthlyPcQcCnt || 0,
-            mobileSearch: r.monthlyMobileQcCnt || 0,
-            totalSearch,
-            competitionIndex: r.compIdx || "낮음",
-            avgCpc: String(
-              (r.monthlyAvgPcClkCnt || 0) + (r.monthlyAvgMobileClkCnt || 0)
-            ),
-          },
-        });
+        };
+
+        // UPSERT: relKeyword로 저장 (네이버 반환 키워드)
+        await db.insert(keywordSearchVolumeHistory).values({
+          userId: ctx.user!.id,
+          keyword: r.relKeyword,
+          source: "naver",
+          yearMonth,
+          ...upsertValues,
+        }).onDuplicateKeyUpdate({ set: upsertValues });
         saved++;
+
+        // ★ v8.4.4: 원본 키워드에 공백이 있었다면 원본 키워드로도 저장
+        // (예: "현금 파우치" → DB에 "현금 파우치"로도 저장, 네이버 반환은 "현금파우치")
+        const relClean = r.relKeyword.replace(/\s+/g, "").toLowerCase();
+        const originalKw = keywordLookup.get(relClean);
+        if (originalKw && originalKw !== r.relKeyword) {
+          await db.insert(keywordSearchVolumeHistory).values({
+            userId: ctx.user!.id,
+            keyword: originalKw,
+            source: "naver",
+            yearMonth,
+            ...upsertValues,
+          }).onDuplicateKeyUpdate({ set: upsertValues });
+        }
       }
 
-      return { success: true, saved, yearMonth, totalResults: naverResults.length };
+      return {
+        success: true,
+        saved,
+        yearMonth,
+        totalResults: naverResults.length,
+        naverNotFound,
+        // ★ v8.4.4: 원본 키워드의 검색량을 직접 전달 (DB timing 이슈 우회)
+        directVolume: naverResults.length > 0 ? (() => {
+          const inputClean = originalKeywords[0]?.replace(/\s+/g, "").toLowerCase();
+          const matched = naverResults.find(r =>
+            r.relKeyword.replace(/\s+/g, "").toLowerCase() === inputClean,
+          );
+          if (matched) {
+            return {
+              keyword: originalKeywords[0],
+              pcSearch: matched.monthlyPcQcCnt || 0,
+              mobileSearch: matched.monthlyMobileQcCnt || 0,
+              totalSearch: (matched.monthlyPcQcCnt || 0) + (matched.monthlyMobileQcCnt || 0),
+              competitionIndex: matched.compIdx || "낮음",
+            };
+          }
+          return null;
+        })() : null,
+      };
     }),
 
   // ============================================================
@@ -222,7 +268,7 @@ export const marketDataRouter = router({
         .limit(1);
 
       // 검색량 최신 데이터
-      const [volume] = await db.select()
+      let [volume] = await db.select()
         .from(keywordSearchVolumeHistory)
         .where(and(
           eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
@@ -231,6 +277,22 @@ export const marketDataRouter = router({
         ))
         .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
         .limit(1);
+
+      // ★ v8.4.4: 원본 키워드로 못 찾으면 공백 제거 버전으로 재시도
+      if (!volume) {
+        const cleaned = input.keyword.replace(/\s+/g, "");
+        if (cleaned !== input.keyword) {
+          [volume] = await db.select()
+            .from(keywordSearchVolumeHistory)
+            .where(and(
+              eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+              eq(keywordSearchVolumeHistory.keyword, cleaned),
+              eq(keywordSearchVolumeHistory.source, "naver"),
+            ))
+            .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
+            .limit(1);
+        }
+      }
 
       // CPC 최신 데이터 (만료되지 않은)
       const [cpc] = await db.select()
