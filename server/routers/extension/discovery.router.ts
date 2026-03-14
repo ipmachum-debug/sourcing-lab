@@ -234,7 +234,9 @@ JSON 응답:
       responseFormat: { type: "json_object" },
       maxTokens: 8192,
     });
-    return JSON.parse(result.choices[0]?.message?.content || "{}");
+    const raw = result.choices[0]?.message?.content;
+    const text = typeof raw === "string" ? raw : "";
+    return JSON.parse(text || "{}");
   } catch {
     return ruleBasedAnalysis(keyword, searchSummary, detailResults, searchItems);
   }

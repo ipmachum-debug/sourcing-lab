@@ -462,7 +462,14 @@ export default function SearchDemand() {
                       // ★ v7.7.3: baseline/missing 제외한 차트 데이터
                       const chartData = (keywordDailyStats.data as any[]).filter(
                         (d: any) => d.dataStatus !== "baseline" && d.dataStatus !== "missing"
-                      );
+                      ).map((d: any) => ({
+                        ...d,
+                        // ★ v8.2.0: 보간 데이터는 별도 필드로 분리 (차트에서 시각 구분)
+                        reviewGrowthReal: d.dataStatus === "raw_valid" ? d.reviewGrowth : undefined,
+                        reviewGrowthInterp: d.dataStatus !== "raw_valid" ? d.reviewGrowth : undefined,
+                        salesMa7Real: d.dataStatus === "raw_valid" ? d.salesEstimateMa7 : undefined,
+                        salesMa7Interp: d.dataStatus !== "raw_valid" ? d.salesEstimateMa7 : undefined,
+                      }));
                       if (chartData.length < 2) return (
                         <div className="py-8 text-center text-gray-400">
                           <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -482,9 +489,10 @@ export default function SearchDemand() {
                               <YAxis tick={{ fontSize: 9 }} />
                               <Tooltip contentStyle={{ fontSize: 11 }} />
                               <Legend wrapperStyle={{ fontSize: 10 }} />
-                              <Bar dataKey="reviewGrowth" fill="#86efac" name="리뷰 증가" radius={[3, 3, 0, 0]} />
-                              <Area type="monotone" dataKey="salesEstimateMa7" fill="#dbeafe" stroke="#2563eb" strokeWidth={2} name="판매추정(MA7)" fillOpacity={0.4} />
-                              <Line type="monotone" dataKey="salesEstimateMa30" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" name="MA30" dot={false} />
+                              <Bar dataKey="reviewGrowthReal" fill="#86efac" name="리뷰 증가" radius={[3, 3, 0, 0]} stackId="rg" />
+                              <Bar dataKey="reviewGrowthInterp" fill="#86efac" name="리뷰 증가(보간)" radius={[3, 3, 0, 0]} stackId="rg" fillOpacity={0.25} />
+                              <Area type="monotone" dataKey="salesEstimateMa7" fill="#dbeafe" stroke="#2563eb" strokeWidth={2} name="판매추정(MA7)" fillOpacity={0.4} connectNulls />
+                              <Line type="monotone" dataKey="salesEstimateMa30" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" name="MA30" dot={false} connectNulls />
                             </ComposedChart>
                           </ResponsiveContainer>
                         </div>
@@ -563,12 +571,12 @@ export default function SearchDemand() {
                                 d.dataStatus === "anomaly" ? "⚠ 이상" :
                                 isBaseline ? "◆ 기준" : "-";
                               return (
-                                <tr key={i} className={`border-b border-gray-50 hover:bg-gray-50 ${d.dataStatus === "provisional" ? "bg-amber-50/30" : ""} ${isBaseline ? "bg-purple-50/30" : ""}`}>
+                                <tr key={i} className={`border-b border-gray-50 hover:bg-gray-50 ${d.dataStatus === "interpolated" ? "bg-blue-50/20 opacity-60" : ""} ${d.dataStatus === "provisional" ? "bg-amber-50/30 opacity-70" : ""} ${isBaseline ? "bg-purple-50/30" : ""}`}>
                                   <td className="p-1.5 text-gray-500">{d.statDate?.slice(5)}</td>
                                   <td className="p-1.5 text-center">{d.productCount}</td>
                                   <td className="p-1.5 text-center">{formatPrice(d.avgPrice)}</td>
-                                  <td className="p-1.5 text-center font-medium text-green-600">{isBaseline ? "-" : d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
-                                  <td className="p-1.5 text-center font-medium text-blue-600">{isBaseline ? "-" : d.salesEstimate || 0}</td>
+                                  <td className={`p-1.5 text-center font-medium ${d.dataStatus === "raw_valid" ? "text-green-600" : "text-green-400 italic"}`}>{isBaseline ? "-" : d.reviewGrowth > 0 ? `+${d.reviewGrowth}` : "0"}</td>
+                                  <td className={`p-1.5 text-center font-medium ${d.dataStatus === "raw_valid" ? "text-blue-600" : "text-blue-400 italic"}`}>{isBaseline ? "-" : d.salesEstimate || 0}</td>
                                   <td className="p-1.5 text-center font-bold text-indigo-600">{d.salesEstimateMa7 || "-"}</td>
                                   <td className={`p-1.5 text-center font-medium ${statusColor}`}>{statusLabel}</td>
                                 </tr>
@@ -594,12 +602,12 @@ export default function SearchDemand() {
             {/* 점수 설명 카드 */}
             <Card className="bg-gray-50">
               <CardContent className="pt-3 pb-3">
-                <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준</div>
+                <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준 (v8.2)</div>
                 <div className="space-y-1.5 text-[10px] text-gray-500">
-                  <div><span className="font-medium text-orange-600">수요점수</span>: MA7(7일이동평균) 기반 판매추정으로 산출</div>
-                  <div><span className="font-medium text-purple-600">종합점수</span>: MA7 리뷰증가 + 상품당리뷰 + 경쟁도 + 수요 복합</div>
+                  <div><span className="font-medium text-orange-600">수요점수</span>: 판매추정 로그스케일(80%) + 리뷰활력·시장규모·로켓비율(20%)</div>
+                  <div><span className="font-medium text-purple-600">종합점수</span>: 성장성(30%) + 시장규모(25%) + 진입용이성(25%) + 수요(20%) 연속가중평균</div>
                   <div><span className="font-medium text-green-600">판매추정</span>: MA7 우선 → 기본(리뷰증가 × 전환율) fallback</div>
-                  <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수·평점·광고비율 종합 (0=블루오션, 100=레드오션)</div>
+                  <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수 log(35%) + 고리뷰비율(25%) + 평점(20%) + 광고비율(20%) 연속함수</div>
                   <div><span className="font-medium text-blue-600">MA7</span>=7일평균(안정) · <span className="font-medium text-amber-600">임시추정</span>=데이터 확정 대기 · <span className="font-medium text-gray-500">일간추정</span>=MA7 편차 3x↑ · <span className="font-medium text-gray-500">기본추정</span>=MA 없음</div>
                   <div><span className="font-medium text-red-500">급등뱃지</span>: today/MA7 비율 — 상승(1.8x) · 급등(2.5x) · 폭발적(4x)</div>
                   <div className="border-t border-gray-200 pt-1 mt-1"><span className="font-medium text-gray-600">📊 MA 기준</span>: MA7/MA30은 <b>최근 90일</b> 윈도우에서 계산됩니다. 차트 조회 기간과 무관합니다.</div>

@@ -817,23 +817,34 @@ function analyzeCompetition(items) {
   const highReviewRatio = Math.round((highReviewCount / items.length) * 100);
   const adCount = items.filter(i => i.isAd).length;
 
-  let competitionScore = 0;
-  if (avgReview > 1000) competitionScore += 40;
-  else if (avgReview > 500) competitionScore += 30;
-  else if (avgReview > 100) competitionScore += 20;
-  else if (avgReview > 30) competitionScore += 10;
-  if (highReviewRatio > 60) competitionScore += 25;
-  else if (highReviewRatio > 40) competitionScore += 15;
-  else if (highReviewRatio > 20) competitionScore += 8;
-  if (avgRating >= 4.5) competitionScore += 15;
-  else if (avgRating >= 4.0) competitionScore += 8;
+  // ★ v8.2.0: 연속 로그 스케일 경쟁도 (0–100 균등 분산)
+  // 기존: 4개 지표 × 고정 버킷 → 63~90 사이 밀집
+  // 개선: 각 지표를 연속 함수로 산출 후 가중합산
   const adRatio = adCount / items.length;
-  if (adRatio > 0.3) competitionScore += 20;
-  else if (adRatio > 0.15) competitionScore += 10;
+
+  // 축 1: 평균 리뷰 수 (0–35점) — log 스케일
+  // log10(1)=0→0, log10(30)=1.5→13, log10(500)=2.7→23, log10(5000)=3.7→32
+  const reviewAxis = avgReview > 0
+    ? Math.min(35, (Math.log10(avgReview) / 4) * 35)
+    : 0;
+
+  // 축 2: 고리뷰 비율 (0–25점) — 선형
+  const highReviewAxis = Math.min(25, (highReviewRatio / 80) * 25);
+
+  // 축 3: 평균 평점 (0–20점) — 4.0 미만=0, 4.0–5.0 선형
+  const ratingVal = parseFloat(avgRating) || 0;
+  const ratingAxis = ratingVal >= 4.0
+    ? Math.min(20, ((ratingVal - 4.0) / 1.0) * 20)
+    : 0;
+
+  // 축 4: 광고 비율 (0–20점) — 선형
+  const adAxis = Math.min(20, (adRatio / 0.4) * 20);
+
+  const competitionScore = Math.round(Math.min(100, reviewAxis + highReviewAxis + ratingAxis + adAxis));
 
   let level, levelText, levelCls;
-  if (competitionScore >= 70) { level = '강함'; levelText = '경쟁이 매우 치열합니다. 차별화 전략이 필요합니다.'; levelCls = 'level-hard'; }
-  else if (competitionScore >= 45) { level = '보통'; levelText = '경쟁이 있지만 진입 가능합니다.'; levelCls = 'level-medium'; }
+  if (competitionScore >= 65) { level = '강함'; levelText = '경쟁이 매우 치열합니다. 차별화 전략이 필요합니다.'; levelCls = 'level-hard'; }
+  else if (competitionScore >= 35) { level = '보통'; levelText = '경쟁이 있지만 진입 가능합니다.'; levelCls = 'level-medium'; }
   else { level = '약함'; levelText = '경쟁이 낮습니다. 소싱 기회!'; levelCls = 'level-easy'; }
 
   return { competitionScore, level, levelText, levelCls, avgPrice, avgReview, avgRating, highReviewRatio, adCount, totalItems: items.length };

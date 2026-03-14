@@ -52,7 +52,15 @@ function N(v: any): number {
 // ============================================================
 
 /**
- * ★ v7.7.0: MA7 기반 salesEstimate 사용 (daily raw보다 안정적)
+ * ★ v8.2.0: 연속 로그 스케일 수요점수 (0–100 균등 분산)
+ *
+ * 기존: 6단계 버킷 (500 초과 → 무조건 90) → 변별력 없음
+ * 개선: log 스케일로 0–100 연속 분포 + 보조 지표 보정
+ *
+ * 기준값 (쿠팡 시장):
+ *   - salesRef 1 → ~0점, 10 → ~17점, 50 → ~28점, 200 → ~39점
+ *   - 500 → ~46점, 2000 → ~56점, 10000 → ~68점, 50000 → ~79점
+ *   - salesRef 단독으로 최대 80점 (나머지 20점은 보조 지표)
  */
 function computeDemandScore(
   salesEstimateMa7: number,
@@ -61,39 +69,49 @@ function computeDemandScore(
   totalReviewSum: number,
   rocketCount: number,
 ): number {
-  // MA7을 주 지표로 사용
   const salesRef = salesEstimateMa7;
 
-  let demandScore = 0;
-  if (salesRef > 500) demandScore = 90;
-  else if (salesRef > 200) demandScore = 75;
-  else if (salesRef > 100) demandScore = 60;
-  else if (salesRef > 50) demandScore = 45;
-  else if (salesRef > 20) demandScore = 30;
-  else if (salesRef > 5) demandScore = 15;
-  else if (reviewGrowth > 0) demandScore = 10;
-
-  if (demandScore === 0 && items.length > 0) {
-    let baselineDemand = 0;
-    const avgReviewCount = totalReviewSum / Math.max(1, items.length);
-    if (avgReviewCount > 500) baselineDemand += 25;
-    else if (avgReviewCount > 200) baselineDemand += 20;
-    else if (avgReviewCount > 100) baselineDemand += 15;
-    else if (avgReviewCount > 50) baselineDemand += 10;
-    else if (avgReviewCount > 20) baselineDemand += 5;
-    if (items.length >= 30) baselineDemand += 10;
-    else if (items.length >= 20) baselineDemand += 5;
-    const rocketRatio = items.length ? rocketCount / items.length : 0;
-    if (rocketRatio > 0.5) baselineDemand += 10;
-    else if (rocketRatio > 0.3) baselineDemand += 5;
-    demandScore = Math.min(50, baselineDemand);
+  // ── 주 지표: salesRef 로그 스케일 (0–80점) ──
+  // log10(1)=0 → 0점, log10(100000)=5 → 80점
+  let mainScore = 0;
+  if (salesRef > 0) {
+    mainScore = Math.min(80, (Math.log10(salesRef) / 5) * 80);
   }
 
-  return demandScore;
+  // ── 보조 지표 (0–20점) ──
+  let auxScore = 0;
+
+  // 리뷰 증가 활력 (0–8점): log 스케일
+  if (reviewGrowth > 0) {
+    auxScore += Math.min(8, (Math.log10(reviewGrowth + 1) / 4) * 8);
+  }
+
+  // 시장 규모 (0–7점): 상품수 × 평균리뷰
+  if (items.length > 0) {
+    const avgReviewCount = totalReviewSum / Math.max(1, items.length);
+    const marketDepth = items.length * avgReviewCount;
+    if (marketDepth > 0) {
+      auxScore += Math.min(7, (Math.log10(marketDepth) / 6) * 7);
+    }
+  }
+
+  // 로켓배송 비율 (0–5점): 수요 신뢰도 지표
+  if (items.length > 0) {
+    const rocketRatio = rocketCount / items.length;
+    auxScore += rocketRatio * 5;
+  }
+
+  return Math.round(Math.min(100, mainScore + auxScore));
 }
 
 /**
- * ★ v7.7.0: MA7 기반 reviewGrowth 사용
+ * ★ v8.2.0: 연속 가중평균 종합점수 (0–100)
+ *
+ * 4개 축 각각 연속 함수로 산출 후 가중합산:
+ *   - 리뷰 성장성 (30%): MA7 기반 일간 리뷰 증가
+ *   - 시장 규모 (25%): 상품당 평균 리뷰 → 시장 깊이
+ *   - 진입 용이성 (25%): 경쟁도 역수 + 광고 비율 역수
+ *   - 수요 강도 (20%): demandScore 직접 반영
  */
 function computeKeywordScore(
   reviewGrowthMa7: number,
@@ -102,32 +120,41 @@ function computeKeywordScore(
   adRatio: number,
   demandScore: number,
 ): number {
-  const competitionFactor = Math.max(0, 100 - competitionScore) / 100;
+  // ── 축 1: 리뷰 성장성 (0–100) ──
+  // log10(1)=0 → 0, log10(200)≈2.3 → 100
+  let growthAxis = 0;
+  if (reviewGrowthMa7 > 0) {
+    growthAxis = Math.min(100, (Math.log10(reviewGrowthMa7 + 1) / 2.3) * 100);
+  }
 
-  let reviewGrowthScore = 0;
-  if (reviewGrowthMa7 >= 100) reviewGrowthScore = 25;
-  else if (reviewGrowthMa7 >= 50) reviewGrowthScore = 20;
-  else if (reviewGrowthMa7 >= 20) reviewGrowthScore = 15;
-  else if (reviewGrowthMa7 >= 10) reviewGrowthScore = 10;
-  else if (reviewGrowthMa7 >= 5) reviewGrowthScore = 7;
-  else if (reviewGrowthMa7 > 0) reviewGrowthScore = 3;
+  // ── 축 2: 시장 규모 (0–100) ──
+  // log10(1)=0 → 0, log10(1000)=3 → 100
+  let marketAxis = 0;
+  if (avgReviewPerProduct > 0) {
+    marketAxis = Math.min(
+      100,
+      (Math.log10(avgReviewPerProduct + 1) / 3) * 100,
+    );
+  }
 
-  let marketSizeScore = 0;
-  if (avgReviewPerProduct >= 500) marketSizeScore = 25;
-  else if (avgReviewPerProduct >= 200) marketSizeScore = 20;
-  else if (avgReviewPerProduct >= 100) marketSizeScore = 15;
-  else if (avgReviewPerProduct >= 50) marketSizeScore = 10;
-  else if (avgReviewPerProduct >= 20) marketSizeScore = 5;
+  // ── 축 3: 진입 용이성 (0–100) ──
+  // competitionScore 0=블루오션(100점), 100=레드오션(0점)
+  // adRatio 0%=광고없음(100점), 50%+=광고포화(0점)
+  const competitionEase = Math.max(0, 100 - competitionScore);
+  const adEase = Math.max(0, 100 - adRatio * 2); // 50%에서 0점
+  const entryAxis = competitionEase * 0.6 + adEase * 0.4;
 
-  const competitionEaseScore = Math.round(
-    competitionFactor * 15 + (1 - adRatio / 100) * 10,
-  );
-  const demandPart = Math.round(demandScore * 0.25);
+  // ── 축 4: 수요 강도 (0–100) ──
+  const demandAxis = demandScore; // 이미 0-100 연속 함수
 
-  return Math.min(
-    100,
-    reviewGrowthScore + marketSizeScore + competitionEaseScore + demandPart,
-  );
+  // ── 가중합산 ──
+  const weighted =
+    growthAxis * 0.3 +
+    marketAxis * 0.25 +
+    entryAxis * 0.25 +
+    demandAxis * 0.2;
+
+  return Math.round(Math.min(100, weighted));
 }
 
 // ============================================================

@@ -279,7 +279,7 @@ export default function ProductDiscovery() {
                       <Target className="w-5 h-5" /> "{detail.job.keyword}" 분석 결과
                     </h3>
 
-                    {detail.job.aiAnalysisJson && <MarketCard analysis={detail.job.aiAnalysisJson as any} />}
+                    {detail.job.aiAnalysisJson ? <MarketCard analysis={detail.job.aiAnalysisJson as any} /> : null}
 
                     {detail.job.errorMessage && (
                       <Card className="border-red-300 bg-red-50"><CardContent className="p-3 text-sm text-red-600">
