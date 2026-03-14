@@ -749,7 +749,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           // 2) 통합 마켓 데이터 조회
           const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
-          sendResponse({ ok: true, data: resp?.result?.data });
+          const data = resp?.result?.data;
+          console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`, 
+            data ? `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}` 
+                 : `data=undefined, resp=${JSON.stringify(resp).slice(0,200)}`);
+          sendResponse({ ok: true, data });
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
           // TRPC UNAUTHORIZED 에러 감지

@@ -1877,6 +1877,7 @@
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
+      console.log('[SH] fetchMarketData resp:', keyword, JSON.stringify(resp)?.slice(0, 300));
       if (resp?.ok && resp.data) {
         cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
         return resp.data;
