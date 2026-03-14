@@ -823,7 +823,6 @@ function analyzeCompetition(items) {
   const adRatio = adCount / items.length;
 
   // 축 1: 평균 리뷰 수 (0–35점) — log 스케일
-  // log10(1)=0→0, log10(30)=1.5→13, log10(500)=2.7→23, log10(5000)=3.7→32
   const reviewAxis = avgReview > 0
     ? Math.min(35, (Math.log10(avgReview) / 4) * 35)
     : 0;

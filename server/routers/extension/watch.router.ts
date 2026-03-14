@@ -45,6 +45,14 @@ export const watchRouter = router({
       const userId = ctx.user!.id;
       const itemsJson = input.items ? JSON.stringify(input.items.slice(0, 36)) : null;
 
+      // ★ v8.2.1: totalReviewSum이 0이면 items에서 자동 계산
+      let computedReviewSum = input.totalReviewSum;
+      if (computedReviewSum === 0 && input.items && input.items.length > 0) {
+        computedReviewSum = input.items.reduce(
+          (sum: number, i: any) => sum + (i.reviewCount || 0), 0,
+        );
+      }
+
       // 1. 검색 이벤트 저장
       const [result] = await db.insert(extSearchEvents).values({
         userId,
@@ -56,7 +64,7 @@ export const watchRouter = router({
         avgPrice: input.avgPrice,
         avgRating: input.avgRating.toFixed(1),
         avgReview: input.avgReview,
-        totalReviewSum: input.totalReviewSum,
+        totalReviewSum: computedReviewSum,
         adCount: input.adCount,
         rocketCount: input.rocketCount,
         highReviewCount: input.highReviewCount,

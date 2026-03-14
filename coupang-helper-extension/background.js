@@ -37,6 +37,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
   // 하이브리드 일일 배치 알람 (매 24시간마다)
   chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
+  // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
+  chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -48,9 +50,24 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.reload(tab.id);
       }
     });
-    console.log(`[SH] Extension ${details.reason}d — v7.4.1 — human-behavior delay + anti-bot evasion`);
+    console.log(`[SH] Extension ${details.reason}d — v8.1.0 — AI 자동 발견 + 시장 데이터 + CPC`);
   }
 });
+
+// v8.1: 서비스 워커 시작 시 — 알람 보장 + 즉시 체크
+(async () => {
+  // 알람이 없으면 재생성 (서비스 워커 재시작 시 알람이 사라질 수 있음)
+  const existing = await chrome.alarms.get('discoveryPolling').catch(() => null);
+  if (!existing) {
+    chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
+    console.log('[Discovery] 폴링 알람 재생성');
+  }
+  // 10초 후 즉시 체크
+  setTimeout(async () => {
+    console.log('[Discovery] 서비스 워커 시작 — 자동 체크 실행');
+    try { await discoveryAutoCheck(); } catch (e) { console.warn('[Discovery] 시작 체크 실패:', e.message); }
+  }, 10000);
+})();
 
 // ---- v5.3: SPA 재주입 제거 ----
 // content.js가 자체적으로 setInterval + popstate + MutationObserver로 URL 변경 감지
@@ -72,7 +89,45 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'dailyBatchCollection') {
     await autoRunDailyBatch();
   }
+  // v8.1: AI 제품 발견 자동 폴링
+  if (alarm.name === 'discoveryPolling') {
+    await discoveryAutoCheck();
+  }
 });
+
+// v8.1: 자동 발견 폴링 — pending 작업이 있으면 자동으로 크롤링 시작
+async function discoveryAutoCheck() {
+  try {
+    // 이미 실행 중이면 스킵
+    if (discoveryState.running) {
+      console.log('[Discovery] 자동 폴링: 이미 크롤링 실행 중 — 스킵');
+      return;
+    }
+    
+    // 로그인 상태 확인
+    const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+    if (!serverLoggedIn) {
+      console.log('[Discovery] 자동 폴링: 로그인 안됨 — 스킵');
+      return;
+    }
+    
+    console.log('[Discovery] 자동 폴링: 서버에 pending 작업 확인 중...');
+    
+    // 서버에 pending 작업 확인
+    const resp = await apiClient.discoveryGetPendingJobs();
+    console.log('[Discovery] 자동 폴링 응답:', JSON.stringify(resp)?.slice(0, 300));
+    const jobs = resp?.result?.data || [];
+    
+    if (jobs.length > 0) {
+      console.log(`[Discovery] 🔍 자동 폴링: ${jobs.length}개 대기 작업 발견 → 크롤링 시작`);
+      startDiscoveryCrawl();
+    } else {
+      console.log('[Discovery] 자동 폴링: 대기 작업 없음');
+    }
+  } catch (err) {
+    console.warn('[Discovery] 자동 폴링 체크 실패:', err.message, err.stack);
+  }
+}
 
 // ---- 메시지 핸들러 ----
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -790,6 +845,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.0: 쿠팡 애즈 CPC 데이터 수신 (content-coupang-ads.js → background)
+    case 'COUPANG_ADS_CPC_DATA': {
+      (async () => {
+        try {
+          const items = message.data || [];
+          let saved = 0;
+          for (const item of items) {
+            try {
+              await apiClient.saveCpcData({
+                keyword: item.keyword,
+                categoryId: item.categoryId || '',
+                categoryName: item.categoryName || '',
+                suggestedBid: item.suggestedBid || 0,
+                minBid: item.minBid || 0,
+                maxBid: item.maxBid || 0,
+                estimatedImpressions: item.estimatedImpressions || 0,
+                estimatedClicks: item.estimatedClicks || 0,
+                estimatedCtr: item.estimatedCtr || 0,
+                competitionLevel: item.competitionLevel || '',
+              });
+              saved++;
+            } catch (e) {
+              console.warn('[CPC] Save failed for', item.keyword, e);
+            }
+          }
+          console.log(`[CPC] Saved ${saved}/${items.length} CPC records`);
+          sendResponse({ ok: true, saved });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     // content.js → background: 자동 수집 파싱 완료
     case 'SEARCH_PARSE_SUCCESS': {
       handleAutoCollectSuccess(message).then(() => {
@@ -875,12 +964,61 @@ async function syncSnapshotToServer(payload) {
 
   const competitionLevel = competitionScore >= 65 ? 'hard' : competitionScore >= 35 ? 'medium' : 'easy';
 
+  // v8.0: 셀러라이프 수준 시장 데이터 계산
+  const minPrice = prices.length ? Math.min(...prices) : 0;
+  const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const sortedPrices = [...prices].sort((a, b) => a - b);
+  const medianPrice = sortedPrices.length ? sortedPrices[Math.floor(sortedPrices.length / 2)] : 0;
+  const totalReviewSum = reviews.reduce((a, b) => a + b, 0);
+  const maxReviewCount = reviews.length ? Math.max(...reviews) : 0;
+  const minReviewCount = reviews.length ? Math.min(...reviews) : 0;
+
+  // 배송 타입별 카운트
+  let rocketCnt = 0, sellerRocketCnt = 0, globalRocketCnt = 0;
+  let normalDeliveryCnt = 0, overseasDeliveryCnt = 0;
+  for (const it of items) {
+    const dt = it.deliveryType || '';
+    if (dt === 'rocketDelivery') rocketCnt++;
+    else if (dt === 'sellerRocketDelivery') sellerRocketCnt++;
+    else if (dt === 'globalRocketDelivery') globalRocketCnt++;
+    else if (dt === 'normalDelivery') normalDeliveryCnt++;
+    else if (dt === 'internationalDelivery') overseasDeliveryCnt++;
+  }
+
+  // 가격/리뷰 분포 히스토그램
+  function makeDistribution(values, bucketCount) {
+    if (!values.length) return [];
+    const vMin = Math.min(...values);
+    const vMax = Math.max(...values);
+    if (vMin === vMax) return [{ range: `${vMin}`, count: values.length }];
+    const step = (vMax - vMin) / bucketCount;
+    return Array.from({ length: bucketCount }, (_, i) => {
+      const lo = Math.round(vMin + step * i);
+      const hi = Math.round(vMin + step * (i + 1));
+      const count = values.filter(v => v >= lo && (i === bucketCount - 1 ? v <= hi : v < hi)).length;
+      return { range: `${lo}~${hi}`, count };
+    });
+  }
+
   await apiClient.saveSnapshot({
     query: payload.query,
     totalItems: payload.count,
     avgPrice, avgRating, avgReview, highReviewRatio, adCount,
     competitionScore, competitionLevel,
-    items: items.slice(0, 20),
+    items: items.slice(0, 36),
+    // v8.0: 확장 시장 데이터
+    totalProductCount: payload.totalProductCount || 0,
+    minPrice, maxPrice, medianPrice,
+    totalReviewSum: Math.min(totalReviewSum, 2147483647),
+    maxReviewCount, minReviewCount,
+    rocketCount: rocketCnt,
+    sellerRocketCount: sellerRocketCnt,
+    globalRocketCount: globalRocketCnt,
+    normalDeliveryCount: normalDeliveryCnt,
+    overseasDeliveryCount: overseasDeliveryCnt,
+    priceDistribution: makeDistribution(prices, 6),
+    reviewDistribution: makeDistribution(reviews, 5),
+    highReviewCount,
   });
 }
 
@@ -2258,53 +2396,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // ============================================================
-//  v8.1: AI 제품 발견 — 자동 폴링 + 크롤링 파이프라인
-//  서버에서 유저가 승인한 키워드 → 자동 검색 크롤링 → 상세 크롤링 → AI 분석
+//  v8.0: AI 제품 발견 크롤링 파이프라인
+//  서버 pending jobs 폴링 → 검색 크롤링 → 서버 필터링 → 상세 크롤링 → AI 분석
 // ============================================================
 const discoveryState = {
   running: false,
-  status: 'IDLE',
+  status: 'IDLE', // IDLE|POLLING|CRAWLING_SEARCH|SUBMITTING_SEARCH|CRAWLING_DETAIL|SUBMITTING_DETAIL|DONE|ERROR
   currentJob: null,
   progress: '',
   error: null,
-  autoPolling: false,
 };
-
-// 자동 폴링: 60초마다 서버 큐 확인
-let discoveryPollTimer = null;
-
-function startDiscoveryAutoPolling() {
-  if (discoveryState.autoPolling) return;
-  discoveryState.autoPolling = true;
-  console.log('[Discovery] 자동 폴링 시작 (60초 간격)');
-  discoveryPollTimer = setInterval(async () => {
-    if (discoveryState.running) return;
-    const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
-    if (!serverLoggedIn) return;
-    try {
-      const resp = await apiClient.discoveryGetPendingJobs();
-      const jobs = resp?.result?.data || [];
-      if (jobs.length > 0) {
-        console.log('[Discovery] 자동 감지: ' + jobs.length + '개 대기 작업 → 자동 크롤링 시작');
-        startDiscoveryCrawl();
-      }
-    } catch (_) {}
-  }, 60000);
-}
-
-function stopDiscoveryAutoPolling() {
-  discoveryState.autoPolling = false;
-  if (discoveryPollTimer) { clearInterval(discoveryPollTimer); discoveryPollTimer = null; }
-}
-
-// 서버 로그인 시 자동 폴링 시작
-chrome.storage.local.get('serverLoggedIn', ({ serverLoggedIn }) => {
-  if (serverLoggedIn) startDiscoveryAutoPolling();
-});
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.serverLoggedIn?.newValue) startDiscoveryAutoPolling();
-  else if (changes.serverLoggedIn && !changes.serverLoggedIn.newValue) stopDiscoveryAutoPolling();
-});
 
 async function startDiscoveryCrawl() {
   if (discoveryState.running) {

@@ -351,11 +351,67 @@ export const extSearchSnapshots = mysqlTable("ext_search_snapshots", {
   competitionScore: int("competition_score").default(0),       // 경쟁 강도 0~100
   competitionLevel: mysqlEnum("competition_level", ["easy", "medium", "hard"]).default("medium"),
   itemsJson: text("items_json"),                               // 상품 목록 JSON
+  // v8.0: 셀러라이프 수준 시장 데이터
+  totalProductCount: int("total_product_count").default(0),    // 쿠팡 검색 총 상품수 (헤더)
+  minPrice: int("min_price").default(0),
+  maxPrice: int("max_price").default(0),
+  medianPrice: int("median_price").default(0),
+  totalReviewSum: int("total_review_sum").default(0),          // 리뷰 합계
+  maxReviewCount: int("max_review_count").default(0),          // 최대 리뷰 상품
+  minReviewCount: int("min_review_count").default(0),          // 최소 리뷰 (>0)
+  avgRatingAll: decimal("avg_rating_all", { precision: 3, scale: 2 }).default("0"),
+  rocketCount: int("rocket_count").default(0),                 // 로켓배송
+  sellerRocketCount: int("seller_rocket_count").default(0),    // 판매자로켓
+  globalRocketCount: int("global_rocket_count").default(0),    // 로켓직구
+  normalDeliveryCount: int("normal_delivery_count").default(0),// 일반국내배송
+  overseasDeliveryCount: int("overseas_delivery_count").default(0), // 해외직구
+  priceDistributionJson: json("price_distribution_json"),      // 가격 분포
+  reviewDistributionJson: json("review_distribution_json"),    // 리뷰 분포
+  highReviewCount: int("high_review_count").default(0),        // 리뷰100+ 상품 수
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
 });
 
 export type ExtSearchSnapshot = typeof extSearchSnapshots.$inferSelect;
 export type InsertExtSearchSnapshot = typeof extSearchSnapshots.$inferInsert;
+
+// ==================== 검색량 월별 히스토리 (keyword_search_volume_history) ====================
+export const keywordSearchVolumeHistory = mysqlTable("keyword_search_volume_history", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  source: mysqlEnum("source", ["naver", "coupang_ads", "estimated"]).default("naver").notNull(),
+  yearMonth: varchar("year_month", { length: 7 }).notNull(),   // YYYY-MM
+  pcSearch: int("pc_search").default(0),
+  mobileSearch: int("mobile_search").default(0),
+  totalSearch: int("total_search").default(0),
+  competitionIndex: varchar("competition_index", { length: 20 }),
+  avgCpc: decimal("avg_cpc", { precision: 12, scale: 2 }).default("0"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type KeywordSearchVolumeHistory = typeof keywordSearchVolumeHistory.$inferSelect;
+export type InsertKeywordSearchVolumeHistory = typeof keywordSearchVolumeHistory.$inferInsert;
+
+// ==================== 쿠팡 애즈 CPC 캐시 (keyword_cpc_cache) ====================
+export const keywordCpcCache = mysqlTable("keyword_cpc_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  categoryId: varchar("category_id", { length: 50 }),
+  categoryName: varchar("category_name", { length: 255 }),
+  suggestedBid: int("suggested_bid").default(0),               // 추천 입찰가
+  minBid: int("min_bid").default(0),
+  maxBid: int("max_bid").default(0),
+  estimatedImpressions: int("estimated_impressions").default(0),
+  estimatedClicks: int("estimated_clicks").default(0),
+  estimatedCtr: decimal("estimated_ctr", { precision: 6, scale: 4 }).default("0"),
+  competitionLevel: varchar("competition_level", { length: 20 }),
+  collectedAt: timestamp("collected_at", tsOpts).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", tsOpts).notNull(),
+});
+
+export type KeywordCpcCache = typeof keywordCpcCache.$inferSelect;
+export type InsertKeywordCpcCache = typeof keywordCpcCache.$inferInsert;
 
 // ==================== Extension: 소싱 후보 (ext_candidates) ====================
 // 확장프로그램에서 ⭐ 저장한 소싱 후보 → 서버에 동기화

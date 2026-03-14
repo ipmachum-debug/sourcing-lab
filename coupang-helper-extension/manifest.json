@@ -19,6 +19,7 @@
     "https://m.coupang.com/*",
     "https://wing.coupang.com/*",
     "https://m-wing.coupang.com/*",
+    "https://advertising.coupang.com/*",
     "https://lumiriz.kr/*",
     "https://www.aliexpress.com/*",
     "https://ko.aliexpress.com/*",
@@ -82,6 +83,16 @@
       ],
       "js": [
         "content-ali-detail.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://advertising.coupang.com/*"
+      ],
+      "js": [
+        "content-coupang-ads.js"
       ],
       "run_at": "document_idle",
       "all_frames": false
