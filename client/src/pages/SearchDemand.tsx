@@ -51,6 +51,14 @@ export default function SearchDemand() {
   );
   const searchStats = trpc.extension.searchStats.useQuery();
   const snapshots = trpc.extension.listSnapshots.useQuery({ limit: 10 });
+  const marketOverview = trpc.extension.getLatestMarketOverview.useQuery(
+    { query: demandSelectedKw || "" },
+    { enabled: !!demandSelectedKw },
+  );
+  const searchVolume = trpc.extension.getKeywordSearchVolume.useQuery(
+    { query: demandSelectedKw || "" },
+    { enabled: !!demandSelectedKw },
+  );
 
   // ===== Mutations =====
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
@@ -235,7 +243,11 @@ export default function SearchDemand() {
                       keywordStatsList.refetch();
                       keywordStatsOverview.refetch();
                       autoCollectInfo.refetch();
-                      if (demandSelectedKw) keywordDailyStats.refetch();
+                      if (demandSelectedKw) {
+                        keywordDailyStats.refetch();
+                        marketOverview.refetch();
+                        searchVolume.refetch();
+                      }
                       toast.success("데이터 갱신됨");
                     }}>
                     <Activity className="w-3 h-3" />
@@ -530,6 +542,120 @@ export default function SearchDemand() {
                             </ComposedChart>
                           </ResponsiveContainer>
                         </div>
+
+                        {/* 검색량 (월간) — 네이버 + 쿠팡 추정 */}
+                        {searchVolume.data && (
+                          <div className="mt-4 pt-3 border-t border-gray-100">
+                            <div className="text-[10px] font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
+                              🔍 검색량 (월간)
+                              <Badge variant="outline" className="text-[8px] px-1 py-0 border-blue-200 text-blue-500">
+                                {searchVolume.data.estimateModel === "hybrid" ? "Hybrid" : "SIMPLE"}
+                              </Badge>
+                            </div>
+                            {/* 쿠팡 추정 + 네이버 검색량 2칸 */}
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div className="bg-purple-50 rounded-lg p-2.5 text-center border border-purple-100">
+                                <div className="text-lg font-bold text-purple-700">{searchVolume.data.coupangEstimate.toLocaleString()}</div>
+                                <div className="text-[9px] text-gray-500">쿠팡 추정</div>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-2.5 text-center border border-green-100">
+                                <div className="text-lg font-bold text-green-700">{searchVolume.data.totalSearch.toLocaleString()}</div>
+                                <div className="text-[9px] text-gray-500">네이버 검색량</div>
+                              </div>
+                            </div>
+                            {/* 상세 테이블 */}
+                            <div className="bg-gray-50 rounded-lg text-[10px]">
+                              <div className="grid grid-cols-2 divide-x divide-gray-200">
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">PC / 모바일</span>
+                                  <span className="font-medium">{searchVolume.data.pcSearch.toLocaleString()} / {searchVolume.data.mobileSearch.toLocaleString()}</span>
+                                </div>
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">경쟁 비율</span>
+                                  <span className="font-medium">{searchVolume.data.competitionRatio} : 1</span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 divide-x divide-gray-200 border-t border-gray-200">
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">네이버 경쟁</span>
+                                  <span className={`font-semibold ${searchVolume.data.competitionIndex === "높음" ? "text-red-600" : searchVolume.data.competitionIndex === "중간" ? "text-amber-600" : "text-green-600"}`}>
+                                    {searchVolume.data.competitionIndex || "-"}
+                                  </span>
+                                </div>
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">기준월</span>
+                                  <span className="font-medium">{searchVolume.data.yearMonth}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 시장 개요 (크롤링 데이터 기반) */}
+                        {marketOverview.data && (
+                          <div className="mt-4 pt-3 border-t border-gray-100">
+                            <div className="text-[10px] font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
+                              📊 시장 개요 ({marketOverview.data.totalItems}개 분석)
+                              {!marketOverview.data.isToday && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 border-amber-300 text-amber-600">
+                                  {marketOverview.data.snapshotDate?.slice(5)} 기준
+                                </Badge>
+                              )}
+                            </div>
+                            {/* 주요 지표 4칸 */}
+                            <div className="grid grid-cols-4 gap-2 mb-2">
+                              <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <div className="text-sm font-bold text-blue-700">{marketOverview.data.totalItems}</div>
+                                <div className="text-[9px] text-gray-500">상품수</div>
+                              </div>
+                              <div className="bg-red-50 rounded-lg p-2 text-center">
+                                <div className="text-sm font-bold text-red-600">{formatPrice(marketOverview.data.avgPrice)}</div>
+                                <div className="text-[9px] text-gray-500">평균가</div>
+                              </div>
+                              <div className="bg-yellow-50 rounded-lg p-2 text-center">
+                                <div className="text-sm font-bold text-yellow-700">★ {marketOverview.data.avgRating.toFixed(1)}</div>
+                                <div className="text-[9px] text-gray-500">평균평점</div>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-2 text-center">
+                                <div className="text-sm font-bold text-green-700">{marketOverview.data.totalReviewSum.toLocaleString()}</div>
+                                <div className="text-[9px] text-gray-500">총 리뷰수</div>
+                              </div>
+                            </div>
+                            {/* 상세 테이블 */}
+                            <div className="bg-gray-50 rounded-lg text-[10px]">
+                              <div className="grid grid-cols-2 divide-x divide-gray-200">
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">가격 범위</span>
+                                  <span className="font-medium">{formatPrice(marketOverview.data.minPrice)} ~ {formatPrice(marketOverview.data.maxPrice)}</span>
+                                </div>
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">중간가</span>
+                                  <span className="font-medium">{formatPrice(marketOverview.data.medianPrice)}</span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 divide-x divide-gray-200 border-t border-gray-200">
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">최다 리뷰</span>
+                                  <span className="font-medium">{marketOverview.data.maxReviewCount.toLocaleString()}개</span>
+                                </div>
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">리뷰 100+</span>
+                                  <span className="font-medium text-red-600">{marketOverview.data.highReviewCount}개 ({marketOverview.data.highReviewRatio}%)</span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 divide-x divide-gray-200 border-t border-gray-200">
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">광고 비율</span>
+                                  <span className="font-medium">{marketOverview.data.adCount}개 ({marketOverview.data.adRatio}%)</span>
+                                </div>
+                                <div className="p-1.5 flex justify-between">
+                                  <span className="text-gray-500">로켓배송</span>
+                                  <span className="font-medium text-blue-600">{marketOverview.data.rocketCount}개 ({marketOverview.data.rocketRatio}%)</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       );
                     })() : (
