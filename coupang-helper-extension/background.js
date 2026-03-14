@@ -954,21 +954,15 @@ async function syncSnapshotToServer(payload) {
   const highReviewRatio = items.length ? Math.round((highReviewCount / items.length) * 100) : 0;
   const adCount = items.filter(i => i.isAd).length;
 
-  let competitionScore = 0;
-  if (avgReview > 1000) competitionScore += 40;
-  else if (avgReview > 500) competitionScore += 30;
-  else if (avgReview > 100) competitionScore += 20;
-  else if (avgReview > 30) competitionScore += 10;
-  if (highReviewRatio > 60) competitionScore += 25;
-  else if (highReviewRatio > 40) competitionScore += 15;
-  else if (highReviewRatio > 20) competitionScore += 8;
-  if (avgRating >= 4.5) competitionScore += 15;
-  else if (avgRating >= 4.0) competitionScore += 8;
+  // ★ v8.2.0: 연속 로그 스케일 경쟁도 (0–100 균등 분산)
   const adRatio = items.length ? adCount / items.length : 0;
-  if (adRatio > 0.3) competitionScore += 20;
-  else if (adRatio > 0.15) competitionScore += 10;
+  const reviewAxis = avgReview > 0 ? Math.min(35, (Math.log10(avgReview) / 4) * 35) : 0;
+  const highReviewAxis = Math.min(25, (highReviewRatio / 80) * 25);
+  const ratingAxis = avgRating >= 4.0 ? Math.min(20, ((avgRating - 4.0) / 1.0) * 20) : 0;
+  const adAxis = Math.min(20, (adRatio / 0.4) * 20);
+  const competitionScore = Math.round(Math.min(100, reviewAxis + highReviewAxis + ratingAxis + adAxis));
 
-  const competitionLevel = competitionScore >= 70 ? 'hard' : competitionScore >= 45 ? 'medium' : 'easy';
+  const competitionLevel = competitionScore >= 65 ? 'hard' : competitionScore >= 35 ? 'medium' : 'easy';
 
   // v8.0: 셀러라이프 수준 시장 데이터 계산
   const minPrice = prices.length ? Math.min(...prices) : 0;

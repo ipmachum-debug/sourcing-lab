@@ -602,7 +602,10 @@ export function normalizeReviewSeries(
   // 양수 구간 분산(globalPositiveAvg)이 음수/0 구간을 이미 처리하므로 불필요.
   // 기존 carry-forward는 보간된 정상값을 덮어쓰는 문제가 있었음.
 
-  // ── Step 7: MA7/MA30 (기준점 이후부터만 계산) ──
+  // ── Step 7: MA7/MA30 (기준점 이후, 실제 앵커만 사용) ──
+  // ★ v8.2.0: interpolated 데이터는 MA 계산에서 제외
+  // 기존: 보간된 동일 값 7개를 평균 → MA7 = 그 동일 값 (변별력 없음)
+  // 개선: raw_valid/anomaly 등 실제 스냅샷 데이터만 MA에 포함
   for (let i = 0; i < result.length; i++) {
     // baseline 이전/baseline 자체 = MA 계산하지 않음
     if (i <= baselineIdx) {
@@ -611,32 +614,29 @@ export function normalizeReviewSeries(
       continue;
     }
 
-    // ★ v7.7.4+: MA7/MA30 — finalized/interpolated 날은 0이어도 포함
-    // missing/baseline은 제외, provisional은 제외 (아직 불확실)
-    const isValidForMA = (r: NormalizedMetric) =>
-      r.dataStatus !== "missing" &&
-      r.dataStatus !== "baseline" &&
-      !r.isProvisional;
+    // ★ 실제 앵커 데이터만 MA에 포함 (interpolated 제외)
+    const isRealDataForMA = (r: NormalizedMetric) =>
+      r.dataStatus === "raw_valid" || r.dataStatus === "anomaly";
 
-    // MA7: 기준점 이후 최근 7일
+    // MA7: 기준점 이후 최근 7일 (실제 앵커만)
     const startIdx7 = Math.max(baselineIdx + 1, i - 6);
     const w7 = result
       .slice(startIdx7, i + 1)
-      .filter(x => isValidForMA(x))
+      .filter(x => isRealDataForMA(x))
       .map(x => x.salesEstimateDaily);
     result[i].salesEstimateMa7 =
-      w7.length >= 2
+      w7.length >= 1
         ? Math.round(w7.reduce((a, b) => a + b, 0) / w7.length)
         : null;
 
-    // MA30: 기준점 이후 최근 30일
+    // MA30: 기준점 이후 최근 30일 (실제 앵커만)
     const startIdx30 = Math.max(baselineIdx + 1, i - 29);
     const w30 = result
       .slice(startIdx30, i + 1)
-      .filter(x => isValidForMA(x))
+      .filter(x => isRealDataForMA(x))
       .map(x => x.salesEstimateDaily);
     result[i].salesEstimateMa30 =
-      w30.length >= 2
+      w30.length >= 1
         ? Math.round(w30.reduce((a, b) => a + b, 0) / w30.length)
         : null;
   }

@@ -421,7 +421,7 @@ export default function ProductDiscovery() {
                         </Button>
                       )}
                     </div>
-                    {detail.job.aiAnalysisJson && <MarketOverviewCard analysis={detail.job.aiAnalysisJson as any} />}
+                    {detail.job.aiAnalysisJson ? <MarketOverviewCard analysis={detail.job.aiAnalysisJson as any} /> : null}
                     {detail.job.errorMessage && (
                       <Card className="border-red-300 bg-red-50 dark:bg-red-900/20">
                         <CardContent className="p-3 text-sm text-red-600">
