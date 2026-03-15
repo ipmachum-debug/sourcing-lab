@@ -49,7 +49,7 @@ export default function BatchStatusCard({ data }: BatchStatusProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-indigo-500" />
-            <span className="text-xs font-bold text-gray-700">배치 수집 엔진 v2</span>
+            <span className="text-xs font-bold text-gray-700">수집 엔진 v2</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-slate-300">
@@ -108,7 +108,7 @@ export default function BatchStatusCard({ data }: BatchStatusProps) {
 
         {/* 하단 정보 */}
         <div className="flex items-center justify-between text-[10px] text-gray-400 pt-2 border-t border-gray-100">
-          <span>마지막 배치: {lastBatchStr}</span>
+          <span>마지막 수집: {lastBatchStr}</span>
           <span>세션 상한: 100개 / 80분</span>
         </div>
       </CardContent>

@@ -89,7 +89,7 @@
         <!-- 배치 상태 카드 -->
         <div class="analysis-card" id="demandStatusCard">
           <div class="competition-header">
-            <span class="competition-label">배치 상태</span>
+            <span class="competition-label">수집 상태</span>
             <span class="competition-badge" id="autoCollectStatusBadge">준비</span>
           </div>
 
@@ -105,10 +105,10 @@
           <div id="liveBatchStatusPanel" style="display:none;margin-top:8px;padding:8px 10px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
               <span style="font-size:11px;font-weight:700;color:#0284c7">🔄 수집 진행 중</span>
-              <span id="liveBatchRunCount" style="font-size:10px;background:#0ea5e9;color:#fff;border-radius:8px;padding:0 6px;font-weight:600">0배치</span>
+              <span id="liveBatchRunCount" style="font-size:10px;background:#0ea5e9;color:#fff;border-radius:8px;padding:0 6px;font-weight:600">0회차</span>
             </div>
             <div class="stats-grid" style="display:grid;margin-top:4px">
-              <div class="stat-box"><div class="stat-value" id="liveBatchCurrent" style="font-size:12px;color:#0284c7">-</div><div class="stat-label">현재 배치</div></div>
+              <div class="stat-box"><div class="stat-value" id="liveBatchCurrent" style="font-size:12px;color:#0284c7">-</div><div class="stat-label">현재 수집</div></div>
               <div class="stat-box"><div class="stat-value" id="liveBatchTotal" style="font-size:12px">-</div><div class="stat-label">전체 키워드</div></div>
               <div class="stat-box"><div class="stat-value" id="liveBatchSuccess" style="font-size:12px;color:#16a34a">0</div><div class="stat-label">성공</div></div>
               <div class="stat-box"><div class="stat-value" id="liveBatchFail" style="font-size:12px;color:#dc2626">0</div><div class="stat-label">실패</div></div>
@@ -122,7 +122,7 @@
 
           <!-- 오늘의 배치 요약 (v8.5.1) -->
           <div id="todayBatchSummary" style="display:none;margin-top:6px;padding:6px 10px;background:#f8fafc;border-radius:6px;font-size:10px;color:#64748b">
-            <span>📅 오늘: <b id="todayBatchCount" style="color:#475569">0</b>/5 배치 완료 · <b id="todayValidKeywords" style="color:#16a34a">0</b>개 유효 수집</span>
+            <span>📅 오늘: <b id="todayBatchCount" style="color:#475569">0</b>/5 수집 완료 · <b id="todayValidKeywords" style="color:#16a34a">0</b>개 유효 수집</span>
           </div>
 
           <div class="demand-last-run" id="demandLastRun" style="display:none">
@@ -139,7 +139,7 @@
           </div>
           <div class="demand-batch-size-row" style="flex-wrap:wrap;gap:6px">
             <div style="font-size:10px;color:#64748b;width:100%;padding:4px 0;border-top:1px solid #e2e8f0;margin-top:2px">
-              📦 1배치 = 100개 · 하루 최대 5배치(500개) · 배치 간 자동 쿨다운
+              📦 1수집 = 100개 · 하루 최대 5회(500개) · 수집 간 자동 쿨다운
             </div>
             <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" /> 상세 Top3</label>
           </div>
@@ -147,10 +147,6 @@
             <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1">▶ 시작</button>
             <button class="btn-sm" id="pauseAutoCollectBtn" style="display:none;background:#f59e0b;color:#fff">⏸</button>
             <button class="btn-sm" id="stopAutoCollectBtn" style="display:none;background:#dc2626;color:#fff">⏹</button>
-          </div>
-          <div class="demand-batch-progress" id="batchProgressBar" style="display:none">
-            <div class="demand-progress-fill" id="batchProgressFill" style="width:0%"></div>
-            <span class="demand-progress-text" id="batchProgressText">0/0</span>
           </div>
           <div id="autoCollectProgress" style="display:none;margin-top:8px">
             <div class="demand-batch-progress" style="display:block">
@@ -161,20 +157,14 @@
           </div>
         </div>
 
-        <!-- 배치 토글 -->
+        <!-- 자동 수집 스케줄 안내 -->
         <div class="analysis-card" style="padding:10px 14px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:12px;font-weight:600;color:#374151">자동 배치 스케줄</span>
-            <div class="demand-toggle-wrap">
-              <label class="demand-toggle" title="배치 수집 ON/OFF">
-                <input type="checkbox" id="batchToggle" />
-                <span class="demand-slider"></span>
-              </label>
-              <span class="demand-toggle-label" id="batchToggleLabel">OFF</span>
-            </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;font-weight:600;color:#374151">자동 수집 스케줄</span>
+            <span style="font-size:9px;background:#6366f1;color:#fff;border-radius:8px;padding:0 6px;font-weight:600">활성</span>
           </div>
           <p class="desc" style="font-size:10px;color:#94a3b8;margin-top:4px">
-            ON 시 자동 배치 실행 · 1배치=100개 · 하루 5배치 500개 · 배치 간 1~3분 쿨다운
+            1수집 = 100개 · 하루 5회 500개 · 수집 간 자동 쿨다운
           </p>
         </div>
 
