@@ -930,11 +930,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const newVal = !scheduleEnabled;
         await chrome.storage.local.set({ scheduleEnabled: newVal });
         if (newVal) {
-          chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+          // 즉시 첫 수집 실행 + 이후 2시간마다 반복
+          chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: 0.1, periodInMinutes: 120 });
+          console.log('[Schedule] 예약 수집 활성화 — 즉시 시작 + 2시간 주기');
+          // 즉시 첫 수집 트리거 (알람 최소 딜레이 우회)
+          setTimeout(() => runScheduledAutoCollect(), 3000);
         } else {
           chrome.alarms.clear('scheduledAutoCollect');
+          console.log('[Schedule] 예약 수집 비활성화');
         }
-        console.log('[Schedule] 예약 수집 ' + (newVal ? '활성화' : '비활성화'));
         sendResponse({ ok: true, enabled: newVal });
       })();
       return true;
