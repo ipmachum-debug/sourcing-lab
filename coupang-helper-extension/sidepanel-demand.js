@@ -204,7 +204,7 @@ async function loadDemandKeywords() {
   const sortSel = document.querySelector('#demandSortSelect');
   const sortBy = sortSel ? sortSel.value : 'compositeScore';
   try {
-    const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 200 } });
+    const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 1000 } });
     // v8.5.1: data 형식 유연하게 처리
     var keywords = null;
     if (resp && resp.ok && resp.data) {
@@ -521,23 +521,37 @@ function stopAutoCollectPolling() {
   if (autoCollectPollingId) { clearInterval(autoCollectPollingId); autoCollectPollingId = null; }
 }
 
-// 통합 수집 시작 버튼 (v7.1.1: 서버 키워드 직접 조회 폴백)
+// v8.5.2: 통합 수집 시작 버튼 — 배치 로직 수정
+// 핵심 배치 로직:
+//   - 1 배치 = 최대 100 키워드
+//   - 하루 최대 5 배치 = 총 500 키워드
+//   - 이미 수집된 키워드 자동 제외
+//   - 배치 간 재설정 시간(버스트 휴식) 자동 적용
 document.querySelector('#startAutoCollectBtn').addEventListener('click', async function() {
   var collectDetail = document.querySelector('#autoCollectDetailCheck').checked;
   var mode = document.querySelector('input[name="batchMode"]:checked');
   mode = mode ? mode.value : 'all';
-  var batchSize = parseInt(document.querySelector('#batchSizeSelect').value || '0');
+
+  // v8.5.2: 하루 5배치 제한 먼저 체크
+  var todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+  var todayStr = new Date().toISOString().slice(0, 10);
+  var todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
+  if (todayRuns >= 5) {
+    alert('오늘 배치 한도(5회)에 도달했습니다.\n하루 최대 5배치 × 100개 = 500개까지 수집 가능합니다.\n내일 다시 시도해주세요.');
+    return;
+  }
+  var remainingBatches = 5 - todayRuns;
 
   // 키워드 목록 준비 (서버의 검색수요 키워드 사용)
   var keywordList = [];
+  var totalRegisteredCount = 0; // 전체 등록 키워드 수 (필터 전)
   if (mode === 'uncollected') {
-    // v8.4.6: 미수집 키워드만 서버에서 가져와서 수집
     try {
       var ucResp = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
       if (ucResp && ucResp.ok && ucResp.data && ucResp.data.uncollectedKeywords) {
         keywordList = ucResp.data.uncollectedKeywords;
+        totalRegisteredCount = ucResp.data.total || keywordList.length;
         console.log('[수집] 미수집 키워드 ' + keywordList.length + '개 로드 (전체 ' + ucResp.data.total + '개 중 ' + ucResp.data.collectedCount + '개 수집완료)');
-        // 미수집 키워드 우선수집 예약 (next_collect_at 리셋)
         await sendMsg({ type: 'HYBRID_BOOST_UNCOLLECTED' });
       }
     } catch(e) { console.error('[수집] 미수집 키워드 조회 실패:', e); }
@@ -548,16 +562,17 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
   } else if (mode === 'selected' && selectedKeywordIds.size > 0) {
     var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
     keywordList = selectedKws.map(function(kw) { return kw.keyword; });
+    totalRegisteredCount = keywordList.length;
   } else {
     keywordList = demandKeywords.map(function(kw) { return kw.keyword; });
+    totalRegisteredCount = keywordList.length;
   }
 
-  // v7.1.1: demandKeywords가 비어있으면 서버에서 직접 가져옴
+  // demandKeywords가 비어있으면 서버에서 직접 가져옴
   if (keywordList.length === 0 && mode !== 'selected' && mode !== 'uncollected') {
     console.log('[수집] demandKeywords 비어있음, 서버에서 직접 키워드 조회...');
     try {
-      var kwResp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 } });
-      // v8.5.1: data 형식 유연하게 처리
+      var kwResp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 } });
       var kwData = null;
       if (kwResp && kwResp.ok && kwResp.data) {
         if (Array.isArray(kwResp.data)) kwData = kwResp.data;
@@ -567,18 +582,18 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       if (kwData && kwData.length > 0) {
         demandKeywords = kwData;
         keywordList = kwData.map(function(kw) { return kw.keyword; });
+        totalRegisteredCount = keywordList.length;
         console.log('[수집] 서버에서 ' + keywordList.length + '개 키워드 로드 완료');
       }
     } catch(e) { console.error('[수집] 서버 키워드 조회 실패:', e); }
   }
 
-  // 그래도 없으면 START_AUTO_COLLECT가 서버에서 자체 조회하도록 빈 상태로 전달
+  // 그래도 없으면 서버에서 자체 조회
   if (keywordList.length === 0) {
     if (!confirm('사이드패널에 로드된 키워드가 없습니다.\n서버의 감시 키워드에서 직접 가져와서 수집할까요?')) return;
-    // keywords를 전달하지 않으면 background.js가 서버 getBatchKeywordSelection으로 자체 조회
     var resp = await sendMsg({
       type: 'START_AUTO_COLLECT',
-      payload: { limit: batchSize > 0 ? batchSize : 100, collectDetail: collectDetail },
+      payload: { limit: 100, collectDetail: collectDetail },
     });
     if (resp && resp.ok) {
       batchRunning = true;
@@ -586,7 +601,6 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       document.querySelector('#batchProgressBar').style.display = '';
       document.querySelector('#batchProgressFill').style.width = '0%';
       document.querySelector('#batchProgressText').textContent = '서버 키워드 수집중...';
-      // v7.4: 즉시 UI 반영 (워밍업 중에도 수집중 표시)
       updateAutoCollectUI({
         status: 'RUNNING', running: true, paused: false,
         queueLength: resp.queueLength || 0, currentKeyword: null,
@@ -595,7 +609,6 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
       });
       startAutoCollectPolling();
     } else {
-      // v7.2: Already running 에러 시 강제 리셋 옵션
       var errMsg1 = resp ? resp.error : '';
       if (errMsg1 && (errMsg1.indexOf('이미 실행') >= 0 || errMsg1.indexOf('Already') >= 0)) {
         if (confirm('수집기가 실행 중 상태입니다.\n강제 리셋 후 다시 시작하세요.')) {
@@ -608,24 +621,17 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     return;
   }
 
-  // v8.5.1: 하루 5배치 제한 체크
-  var todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
-  var todayStr = new Date().toISOString().slice(0, 10);
-  var todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
-  if (todayRuns >= 5) {
-    alert('오늘 배치 한도(5회)에 도달했습니다.\n내일 다시 시도해주세요.');
-    return;
-  }
-
-  // v8.5.1: 이미 수집된 키워드 필터링 (오늘 수집된 키워드 제외)
+  // v8.5.2: 이미 수집된 키워드 필터링 (오늘 수집된 키워드 제외)
+  var alreadyCollectedCount = 0;
   try {
     var ucResp2 = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
     if (ucResp2 && ucResp2.ok && ucResp2.data && ucResp2.data.collectedKeywords && ucResp2.data.collectedKeywords.length > 0) {
       var collectedSet = new Set(ucResp2.data.collectedKeywords);
       var beforeLen = keywordList.length;
       keywordList = keywordList.filter(function(kw) { return !collectedSet.has(kw); });
-      if (beforeLen !== keywordList.length) {
-        console.log('[수집] 이미 수집된 키워드 ' + (beforeLen - keywordList.length) + '개 제외, 남은: ' + keywordList.length + '개');
+      alreadyCollectedCount = beforeLen - keywordList.length;
+      if (alreadyCollectedCount > 0) {
+        console.log('[수집] 이미 수집된 키워드 ' + alreadyCollectedCount + '개 제외, 남은: ' + keywordList.length + '개');
       }
     }
   } catch(e) { console.warn('[수집] 수집완료 키워드 필터링 실패:', e); }
@@ -635,28 +641,36 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     return;
   }
 
-  // v7.2.7: "수집수 N" = 전체 키워드를 N개씩 라운드로 수집
-  // batchSize가 0이면 전체를 한 번에, 아니면 N개씩 라운드
-  var targetKeywords = keywordList; // 항상 전체 키워드 대상
-  var roundSize = batchSize > 0 ? batchSize : keywordList.length;
-  var totalRounds = Math.ceil(targetKeywords.length / roundSize);
-  var estSec = 20; // 키워드당 평균 예상 시간 (25~45초)
-  var estMin = Math.ceil(targetKeywords.length * estSec / 60);
+  // v8.5.2: 배치 로직 — 이번 배치에서 수집할 키워드 (최대 100개)
+  var BATCH_SIZE = 100;
+  var batchKeywords = keywordList.slice(0, BATCH_SIZE); // 이번 배치 대상
+  var totalUncollected = keywordList.length; // 미수집 전체 수
+  var neededBatches = Math.ceil(totalUncollected / BATCH_SIZE);
+  var estSec = 25; // 키워드당 평균 예상 시간
+  var estMin = Math.ceil(batchKeywords.length * estSec / 60);
 
-  var confirmMsg = '쿠팡 데이터를 수집합니다.\n\n' +
-    '📋 전체 대상: ' + targetKeywords.length + '개 키워드\n';
-  if (batchSize > 0) {
-    confirmMsg += '🔄 라운드: ' + roundSize + '개씩 ' + totalRounds + '라운드\n';
+  var confirmMsg = '📊 쿠팡 데이터 배치 수집\n\n';
+  confirmMsg += '🗂️ 전체 등록 키워드: ' + totalRegisteredCount + '개\n';
+  if (alreadyCollectedCount > 0) {
+    confirmMsg += '✅ 오늘 수집 완료: ' + alreadyCollectedCount + '개\n';
   }
-  confirmMsg += '⏱️ 예상: 약 ' + estMin + '분 (키워드당 15~25초)\n' +
-    '⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?';
+  confirmMsg += '📋 미수집 키워드: ' + totalUncollected + '개\n';
+  confirmMsg += '\n── 배치 설정 ──\n';
+  confirmMsg += '📦 이번 배치: ' + batchKeywords.length + '개 (1배치 = 최대 100개)\n';
+  confirmMsg += '📅 오늘 남은 배치: ' + remainingBatches + '회 (5회 중 ' + todayRuns + '회 완료)\n';
+  if (totalUncollected > BATCH_SIZE) {
+    confirmMsg += '🔄 전체 완료까지: ' + neededBatches + '배치 필요\n';
+  }
+  confirmMsg += '⏱️ 예상: 약 ' + estMin + '분 (키워드당 15~35초)\n';
+  confirmMsg += '⏸️ 배치 간 재설정 시간: 1~3분 (봇 탐지 회피)\n';
+  confirmMsg += '\n⚠️ 수집 중 쿠팡 탭이 자동 전환됩니다.\n\n계속하시겠습니까?';
 
   if (!confirm(confirmMsg)) return;
 
-  // 전체 키워드를 한 번에 전달하되 roundSize 정보도 함께 전달
+  // v8.5.2: 이번 배치 키워드만 전달 (100개), roundSize=100 고정
   var resp = await sendMsg({
     type: 'START_AUTO_COLLECT',
-    payload: { limit: targetKeywords.length, collectDetail: collectDetail, keywords: targetKeywords, roundSize: roundSize },
+    payload: { limit: batchKeywords.length, collectDetail: collectDetail, keywords: batchKeywords, roundSize: BATCH_SIZE },
   });
 
   if (resp && resp.ok) {
@@ -664,16 +678,13 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     document.querySelector('#autoCollectProgress').style.display = '';
     document.querySelector('#batchProgressBar').style.display = '';
     document.querySelector('#batchProgressFill').style.width = '0%';
-    var startMsg = '0/' + targetKeywords.length;
-    if (batchSize > 0) startMsg += ' (R1/' + totalRounds + ' - ' + roundSize + '개씩)';
-    startMsg += ' 수집 시작중...';
-    document.querySelector('#batchProgressText').textContent = startMsg;
-    // v7.4: 즉시 UI 반영 (워밍업 중에도 수집중 표시)
+    var batchLabel = '배치 ' + (todayRuns + 1) + '/5';
+    document.querySelector('#batchProgressText').textContent = '0/' + batchKeywords.length + ' (' + batchLabel + ') 수집 시작중...';
     updateAutoCollectUI({
       status: 'RUNNING', running: true, paused: false,
-      queueLength: resp.queueLength || targetKeywords.length, currentKeyword: null,
+      queueLength: resp.queueLength || batchKeywords.length, currentKeyword: null,
       successCount: 0, failCount: 0, skipCount: 0,
-      totalQueued: resp.queueLength || targetKeywords.length, lastError: null, progress: 0,
+      totalQueued: resp.queueLength || batchKeywords.length, lastError: null, progress: 0,
     });
     startAutoCollectPolling();
     // 완료 감지 폴링
@@ -683,16 +694,10 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
         if (!st || !st.ok) return;
         var state = st.data;
         var done = state.successCount + state.failCount + state.skipCount;
-        var total = state.totalQueued || targetKeywords.length;
+        var total = state.totalQueued || batchKeywords.length;
         var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
         document.querySelector('#batchProgressFill').style.width = pct + '%';
-        var statusText = done + '/' + total;
-        // v7.2.7: 라운드 정보 표시
-        if (roundSize > 0 && roundSize < total) {
-          var currentRound = Math.floor(done / roundSize) + 1;
-          var maxRounds = Math.ceil(total / roundSize);
-          statusText += ' (R' + currentRound + '/' + maxRounds + ')';
-        }
+        var statusText = done + '/' + total + ' (' + batchLabel + ')';
         if (state.currentKeyword) statusText += ' "' + state.currentKeyword + '"';
         if (state.status === 'NAVIGATING') statusText += ' (이동중)';
         else if (state.status === 'PARSING') statusText += ' (파싱중)';
@@ -703,10 +708,10 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
         if (!state.running && state.status !== 'PAUSED') {
           clearInterval(completePollId);
           document.querySelector('#batchProgressFill').style.width = '100%';
-          document.querySelector('#batchProgressText').textContent = '✅ 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
+          document.querySelector('#batchProgressText').textContent = '✅ 배치 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
           batchRunning = false;
           try { await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' }); } catch(_){}
-          // v8.5.1: 오늘의 배치 카운트 업데이트
+          // v8.5.2: 오늘의 배치 카운트 업데이트
           var td = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate', 'todayValidCount']);
           var tdStr = new Date().toISOString().slice(0, 10);
           var tdRuns = (td.todayBatchDate === tdStr) ? (td.todayBatchRuns || 0) : 0;
@@ -718,13 +723,13 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
             todayValidCount: tdValid + (state.successCount || 0),
             todayBatchDate: tdStr
           });
+          updateTodayBatchSummary();
           setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 1000);
           setTimeout(function() { document.querySelector('#batchProgressBar').style.display = 'none'; }, 8000);
         }
       } catch (e) {}
     }, 3000);
   } else {
-    // v7.2: Already running 에러 시 강제 리셋 옵션
     var errMsg2 = resp ? resp.error : '';
     if (errMsg2 && (errMsg2.indexOf('이미 실행') >= 0 || errMsg2.indexOf('Already') >= 0)) {
       if (confirm('수집기가 실행 중 상태로 남아있습니다.\n강제 리셋 후 다시 시작 버튼을 눌러주세요.')) {
@@ -830,18 +835,23 @@ document.querySelectorAll('.demand-subtab').forEach(function(btn) {
 });
 
 async function loadManualKeywords() {
+  var emptyEl = document.querySelector('#manualEmpty');
+  var totalCountEl = document.querySelector('#manualKwTotalCount');
   var { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
   if (!serverLoggedIn) {
-    document.querySelector('#manualEmpty').textContent = '서버 로그인이 필요합니다.';
-    document.querySelector('#manualEmpty').style.display = '';
+    emptyEl.textContent = '서버 로그인이 필요합니다. 서버 탭에서 먼저 로그인하세요.';
+    emptyEl.style.display = '';
     return;
   }
+  // v8.5.2: 로딩 표시
+  emptyEl.textContent = '⏳ 서버에서 키워드 목록을 불러오는 중...';
+  emptyEl.style.display = '';
   try {
     console.log('[Manual] 키워드 목록 로드 시작...');
     var resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'keyword', limit: 1000 } });
-    console.log('[Manual] 응답:', resp ? ('ok=' + resp.ok + ' data=' + (resp.data ? (Array.isArray(resp.data) ? resp.data.length + '개' : typeof resp.data) : 'null')) : 'null');
+    console.log('[Manual] 응답 원본:', JSON.stringify(resp).slice(0, 500));
     
-    // v8.5.1: data가 배열이 아닌 경우 처리 (tRPC 응답 형식 차이)
+    // v8.5.2: data 형식을 최대한 유연하게 처리 (tRPC, 배열, 객체 등)
     var keywords = null;
     if (resp && resp.ok && resp.data) {
       if (Array.isArray(resp.data)) {
@@ -850,27 +860,57 @@ async function loadManualKeywords() {
         keywords = resp.data.items;
       } else if (resp.data.keywords && Array.isArray(resp.data.keywords)) {
         keywords = resp.data.keywords;
+      } else if (resp.data.result && resp.data.result.data) {
+        // 이중 래핑된 tRPC 응답
+        var inner = resp.data.result.data;
+        if (Array.isArray(inner)) keywords = inner;
+        else if (inner.items) keywords = inner.items;
+        else if (inner.keywords) keywords = inner.keywords;
+      }
+      // 객체의 값들이 키워드 배열인 경우 (ex: { 0: {...}, 1: {...} })
+      if (!keywords && typeof resp.data === 'object' && !Array.isArray(resp.data)) {
+        var vals = Object.values(resp.data);
+        if (vals.length > 0 && typeof vals[0] === 'object' && vals[0].keyword) {
+          keywords = vals;
+        }
       }
     }
+    // resp 자체가 ok 없이 배열인 경우
+    if (!keywords && Array.isArray(resp)) {
+      keywords = resp;
+    }
+    
+    // 키워드 객체 정규화: keyword 속성이 없으면 문자열로 변환
+    if (keywords && keywords.length > 0) {
+      keywords = keywords.map(function(kw) {
+        if (typeof kw === 'string') return { keyword: kw, id: kw, compositeScore: 0 };
+        if (!kw.keyword && kw.name) kw.keyword = kw.name;
+        if (!kw.id) kw.id = kw.keyword || Math.random().toString(36);
+        return kw;
+      }).filter(function(kw) { return kw && kw.keyword; });
+    }
+    
+    console.log('[Manual] 파싱된 키워드:', keywords ? keywords.length + '개' : 'null');
     
     if (!keywords || !keywords.length) {
-      document.querySelector('#manualEmpty').style.display = '';
-      document.querySelector('#manualEmpty').textContent = '감시 키워드가 없습니다. 쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.';
-      document.querySelector('#manualKwTotalCount').textContent = '0';
+      emptyEl.style.display = '';
+      emptyEl.textContent = '감시 키워드가 없습니다. 쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.';
+      totalCountEl.textContent = '0';
       manualAllKeywords = [];
       filterManualKeywords();
       return;
     }
     manualAllKeywords = keywords;
-    document.querySelector('#manualEmpty').style.display = 'none';
-    document.querySelector('#manualKwTotalCount').textContent = manualAllKeywords.length;
+    emptyEl.style.display = 'none';
+    totalCountEl.textContent = manualAllKeywords.length;
     updateChosungCounts();
     filterManualKeywords();
-    console.log('[Manual] ' + manualAllKeywords.length + '개 키워드 로드 완료');
+    console.log('[Manual] ' + manualAllKeywords.length + '개 키워드 로드 완료, 첫 키워드:', manualAllKeywords[0].keyword);
   } catch (e) {
     console.error('[Manual] load error:', e);
-    document.querySelector('#manualEmpty').textContent = '키워드 로드 실패: ' + e.message;
-    document.querySelector('#manualEmpty').style.display = '';
+    emptyEl.textContent = '키워드 로드 실패: ' + e.message + '\n3초 후 재시도...';
+    emptyEl.style.display = '';
+    setTimeout(loadManualKeywords, 3000);
   }
 }
 
