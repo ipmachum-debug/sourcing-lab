@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.5.2",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.5.2 — 배치수집 로직 수정(100/배치, 5배치/일) + 수동수집 안정화",
+  "version": "8.5.3",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.5.3 — 서버 적응형 배치 스케줄러 + 팝업 안내 정확도 개선",
   "permissions": [
     "storage",
     "tabs",
