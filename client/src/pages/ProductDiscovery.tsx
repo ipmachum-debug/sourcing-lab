@@ -58,8 +58,8 @@ function verdictLabel(verdict: string) {
 function deliveryLabel(dt: string | null | undefined): string {
   if (!dt) return "일반판매";
   const d = dt.toLowerCase();
-  if (d.includes("seller") || d.includes("판매자")) return "판매자로켓";
-  if (d.includes("growth") || d.includes("그로스")) return "로켓그로스";
+  if (d.includes("seller") || d === "seller_rocket" || d.includes("판매자")) return "판매자로켓";
+  if (d.includes("growth") || d === "rocket_growth" || d.includes("그로스")) return "판매자로켓";
   if (d === "normaldelivery" || d === "standard" || d === "free" || d === "") return "일반판매";
   return "일반판매";
 }
@@ -396,7 +396,7 @@ export default function ProductDiscovery() {
                                     {Number(tp.rating) > 0 && <span>{Number(tp.rating).toFixed(1)}점</span>}
                                     <span className="text-blue-500">{deliveryLabel(tp.deliveryType)}</span>
                                     {tp.searchRank > 0 && <span>#{tp.searchRank}</span>}
-                                    {tp.estimatedMonthlySales > 0 && <span className="text-green-600">월{formatNum(tp.estimatedMonthlySales)}개</span>}
+                                    {tp.estimatedMonthlySales > 0 && <span className="text-green-600 font-semibold">월{formatNum(tp.estimatedMonthlySales)}개</span>}
                                   </div>
                                 </div>
                                 {tp.userDecision === "track" && <Badge className="bg-green-600 text-white text-[10px] flex-shrink-0">추적중</Badge>}
@@ -682,7 +682,15 @@ function ProductDetailDialog({
               {p.sellerName && <div><span className="text-muted-foreground">판매자:</span> {p.sellerName}</div>}
               <div><span className="text-muted-foreground">배송:</span> {deliveryLabel(p.deliveryType)}</div>
               {p.estimatedMonthlySales > 0 && (
-                <div><span className="text-muted-foreground">예상 월매출:</span> {formatNum(p.estimatedMonthlySales)}개</div>
+                <div>
+                  <span className="text-muted-foreground">
+                    {p.detailDataJson?.purchaseCount && !/만족/.test(p.detailDataJson.purchaseCount) && /구매/.test(p.detailDataJson.purchaseCount) ? "월 구매수:" : "예상 월매출:"}
+                  </span>{" "}
+                  {formatNum(p.estimatedMonthlySales)}개
+                  {p.detailDataJson?.purchaseCount && !/만족/.test(p.detailDataJson.purchaseCount) && /구매/.test(p.detailDataJson.purchaseCount) && (
+                    <span className="text-[10px] text-green-600 ml-1">(실제)</span>
+                  )}
+                </div>
               )}
               {Number(p.estimatedMarginPercent) > 0 && (
                 <div><span className="text-muted-foreground">예상 마진:</span> {Number(p.estimatedMarginPercent).toFixed(0)}%</div>
