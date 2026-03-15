@@ -1925,7 +1925,7 @@
     panel.id = 'sh-panel';
     panel.innerHTML = `
       <div class="sh-hd" id="sh-drag">
-        <span class="logo">🐢</span>
+        <span class="logo"><img src="${chrome.runtime.getURL('icon32.png')}" style="width:18px !important;height:18px !important;vertical-align:middle !important;border-radius:4px !important;" /></span>
         <div class="sh-hc">
           <span class="ver">v${VER}</span>
           <span class="qr" id="sh-q"></span>
@@ -1950,7 +1950,7 @@
           <div class="sh-batch-kw" id="sh-batch-kw"></div>
         </div>
       </div>
-      <div class="sh-foot">🐢 소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
+      <div class="sh-foot">소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
     `;
     document.body.appendChild(panel);
     initDrag();
@@ -2184,10 +2184,21 @@
           <span class="sh-hero-row-val" style="color:#4338ca !important;">${Math.round(confidence * 100)}%</span>
         </div>` : ''}
       </div>
-      ${maturityHtml}
       <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:6px !important;text-align:right !important;">
         ${isHybrid ? '네이버 50% + 리뷰역산 35% + 보정 15%' : '네이버 × ' + COUPANG_RATIO} | ${sv.yearMonth || ''}
       </div>`;
+
+    // Hybrid 성숙도를 맨 하단 섹션에 렌더링
+    const maturityEl = document.getElementById('sh-maturity-section');
+    if (maturityEl) {
+      if (maturityHtml) {
+        maturityEl.innerHTML = maturityHtml;
+        maturityEl.style.display = '';
+      } else {
+        maturityEl.style.display = 'none';
+        maturityEl.innerHTML = '';
+      }
+    }
   }
 
   // ============================================================
@@ -2344,6 +2355,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Hybrid 전환 성숙도 (맨 하단) -->
+      <div class="sh-sec" id="sh-maturity-section" style="display:none !important;"></div>
     `;
 
     // 검색량 비동기 로딩

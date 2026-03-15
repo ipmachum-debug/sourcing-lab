@@ -409,7 +409,7 @@
     panel.id = 'sh-ali-panel';
     panel.innerHTML = `
       <div class="sh-ali-hd" id="sh-ali-drag">
-        <span class="logo">🐢</span>
+        <span class="logo"><img src="${chrome.runtime.getURL('icon32.png')}" style="width:18px !important;height:18px !important;vertical-align:middle !important;border-radius:4px !important;" /></span>
         <div class="sh-hc">
           <span class="ver">Ali v${VER}</span>
           <span class="qr" id="sh-ali-q"></span>
@@ -421,7 +421,7 @@
         </div>
       </div>
       <div class="sh-body" id="sh-ali-body"></div>
-      <div class="sh-foot">🐢 소싱 헬퍼 Ali · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
+      <div class="sh-foot">소싱 헬퍼 Ali · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
     `;
     document.body.appendChild(panel);
     initDrag();
