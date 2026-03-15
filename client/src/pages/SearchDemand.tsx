@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
-  Activity, Zap, Trash2, Loader2, Square,
+  Activity, Zap, Trash2, Loader2, Square, Search,
 } from "lucide-react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -60,7 +60,7 @@ export default function SearchDemand() {
   const [demandDays, setDemandDays] = useState(30);
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSort, setDemandSort] = useState<
-    "keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price"
+    "keyword_score" | "demand_score" | "review_growth" | "sales_estimate" | "competition_score" | "avg_price" | "monthly_search_volume"
   >("keyword_score");
   const [selectedDeleteKws, setSelectedDeleteKws] = useState<Set<string>>(new Set());
   const [statsRunning, setStatsRunning] = useState(false);
@@ -184,6 +184,7 @@ export default function SearchDemand() {
   }, [keywordStatsList.data, kwTabMode, kwChosungFilter, kwPage, uncollectedKws.data]);
 
   const [rebuildRunning, setRebuildRunning] = useState(false);
+  const [svFetching, setSvFetching] = useState(false);
   const handleRebuildNormalized = useCallback(async () => {
     if (rebuildRunning) return;
     setRebuildRunning(true);
@@ -227,6 +228,41 @@ export default function SearchDemand() {
 
   const handleStopStats = () => { statsStoppedRef.current = true; };
 
+  // ===== 검색량 일괄 수집: 검색량 없는 키워드에 대해 네이버 API 호출 =====
+  const handleBulkSearchVolume = useCallback(async () => {
+    if (svFetching) return;
+    setSvFetching(true);
+    try {
+      const allKws = (keywordStatsList.data as any[]) || [];
+      const missing = allKws
+        .filter((kw: any) => kw.monthlySearchVolume == null)
+        .map((kw: any) => kw.query as string);
+      if (missing.length === 0) {
+        toast.info("모든 키워드에 검색량 데이터가 있습니다");
+        return;
+      }
+      let fetched = 0;
+      // 20개씩 배치 호출 (네이버 API 제한)
+      for (let i = 0; i < missing.length; i += 20) {
+        const batch = missing.slice(i, i + 20);
+        try {
+          await fetchSearchVolumeMut.mutateAsync({ keywords: batch });
+          fetched += batch.length;
+          toast.info(`검색량 수집중... ${fetched}/${missing.length}`);
+        } catch (err: any) {
+          toast.error(`검색량 수집 오류 (${batch[0]}...): ${err.message}`);
+        }
+      }
+      toast.success(`검색량 수집 완료! (${fetched}개 키워드)`);
+      keywordStatsList.refetch();
+      if (demandSelectedKw) searchVolume.refetch();
+    } catch (err: any) {
+      toast.error(`검색량 일괄 수집 오류: ${err.message}`);
+    } finally {
+      setSvFetching(false);
+    }
+  }, [svFetching, keywordStatsList.data, demandSelectedKw]);
+
   const refreshAll = () => {
     keywordStatsList.refetch();
     keywordStatsOverview.refetch();
@@ -261,6 +297,10 @@ export default function SearchDemand() {
               <>
                 <Button size="sm" className="text-xs bg-orange-600 hover:bg-orange-700 gap-1.5" onClick={handleAutoStats}>
                   <Zap className="w-3 h-3" /> 통계 계산
+                </Button>
+                <Button size="sm" variant="outline" className="text-xs gap-1.5 border-purple-300 text-purple-600 hover:bg-purple-50"
+                  onClick={handleBulkSearchVolume} disabled={svFetching}>
+                  <Search className="w-3 h-3" /> {svFetching ? "수집중..." : "검색량 수집"}
                 </Button>
                 <Button size="sm" variant="outline" className="text-xs gap-1.5 border-purple-300 text-purple-600 hover:bg-purple-50"
                   onClick={handleRebuildNormalized} disabled={rebuildRunning || rebuildDailyStats.isPending}>
@@ -434,6 +474,7 @@ export default function SearchDemand() {
                   ["review_growth", "리뷰증가"],
                   ["sales_estimate", "판매추정"],
                   ["competition_score", "경쟁도"],
+                  ["monthly_search_volume", "검색량"],
                   ["avg_price", "평균가"],
                 ] as const).map(([key, label]) => (
                   <button key={key}
