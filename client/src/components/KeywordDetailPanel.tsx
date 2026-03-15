@@ -204,13 +204,14 @@ export default function KeywordDetailPanel({
       {/* 점수 설명 */}
       <Card className="bg-gray-50">
         <CardContent className="pt-3 pb-3">
-          <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 점수 산출 기준 (v8.3.1 Per-Product Delta)</div>
+          <div className="text-[10px] font-semibold text-gray-600 mb-2 flex items-center gap-1"><Info className="w-3 h-3" /> 키워드 점수 산출 기준</div>
           <div className="space-y-1.5 text-[10px] text-gray-500">
             <div><span className="font-medium text-green-600">리뷰증가</span>: 동일 상품(productId)의 리뷰 변화만 추적</div>
             <div><span className="font-medium text-green-600">판매추정</span>: 리뷰증가 × 20 → MA7 기반 안정화</div>
             <div><span className="font-medium text-orange-600">수요점수</span>: 판매추정 로그스케일(80%) + 시장규모(20%)</div>
             <div><span className="font-medium text-purple-600">종합점수</span>: 성장성(30%) + 시장규모(25%) + 진입용이성(25%) + 수요(20%)</div>
             <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수(35%) + 고리뷰비율(25%) + 평점(20%) + 광고비율(20%)</div>
+            <div className="pt-1 border-t border-gray-200 mt-1"><span className="font-medium text-pink-600">소싱점수</span>: 시장기회(45%) + 분석완성도(35%) + 차별화전략(20%) → 80점↑ 테스트후보</div>
           </div>
         </CardContent>
       </Card>

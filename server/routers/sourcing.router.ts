@@ -28,7 +28,48 @@ const productInput = z.object({
   finalOpinion: z.string().optional(),
   coupangUrl: z.string().optional(),
   referenceUrl: z.string().optional(),
+  // 시장 데이터 (프론트에서 전달 시 직접 사용, 없으면 키워드로 DB 조회)
+  marketKeywordScore: z.number().optional(),
+  marketCompetitionScore: z.number().optional(),
+  marketDemandScore: z.number().optional(),
+  marketSalesEstimate: z.number().optional(),
+  marketReviewGrowth: z.number().optional(),
 });
+
+/** 키워드 기반 시장 데이터 조회 */
+async function lookupMarketData(
+  db: any, userId: number, keywords: (string | undefined | null)[],
+): Promise<{ keywordScore?: number; competitionScore?: number; demandScore?: number; salesEstimate?: number; reviewGrowth?: number } | undefined> {
+  const validKws = keywords.filter(Boolean) as string[];
+  if (validKws.length === 0) return undefined;
+
+  for (const kw of validKws) {
+    const rows = await db.select({
+      keywordScore: extKeywordDailyStats.keywordScore,
+      competitionScore: extKeywordDailyStats.competitionScore,
+      demandScore: extKeywordDailyStats.demandScore,
+      salesEstimate: extKeywordDailyStats.salesEstimate,
+      reviewGrowth: extKeywordDailyStats.reviewGrowth,
+    }).from(extKeywordDailyStats)
+      .where(and(
+        eq(extKeywordDailyStats.userId, userId),
+        eq(extKeywordDailyStats.query, kw),
+      ))
+      .orderBy(desc(extKeywordDailyStats.createdAt))
+      .limit(1);
+
+    if (rows.length > 0) {
+      return {
+        keywordScore: N(rows[0].keywordScore),
+        competitionScore: N(rows[0].competitionScore),
+        demandScore: N(rows[0].demandScore),
+        salesEstimate: N(rows[0].salesEstimate),
+        reviewGrowth: N(rows[0].reviewGrowth),
+      };
+    }
+  }
+  return undefined;
+}
 
 function getWeekKey(dateStr: string): string {
   const d = new Date(dateStr);
@@ -49,7 +90,18 @@ export const sourcingRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      const score = calculateScore(input);
+      // 시장 데이터: 프론트에서 전달된 값 우선, 없으면 키워드로 DB 조회
+      const market = (input.marketKeywordScore != null)
+        ? {
+          keywordScore: input.marketKeywordScore,
+          competitionScore: input.marketCompetitionScore,
+          demandScore: input.marketDemandScore,
+          salesEstimate: input.marketSalesEstimate,
+          reviewGrowth: input.marketReviewGrowth,
+        }
+        : await lookupMarketData(db, ctx.user.id, [input.keyword1, input.keyword2, input.keyword3]);
+
+      const score = calculateScore(input, market);
       const scoreGrade = getScoreGrade(score);
       const status = getAutoStatus(score);
 
@@ -81,7 +133,7 @@ export const sourcingRouter = router({
         status,
       });
 
-      return { success: true };
+      return { success: true, score, status };
     }),
 
   /** 상품 수정 */
@@ -99,9 +151,13 @@ export const sourcingRouter = router({
         .limit(1);
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "상품을 찾을 수 없습니다." });
 
-      // 점수 재계산용 merged data
+      // 시장 데이터 조회
       const merged = { ...existing, ...data };
-      const score = calculateScore(merged);
+      const market = await lookupMarketData(
+        db, ctx.user.id,
+        [merged.keyword1, merged.keyword2, merged.keyword3],
+      );
+      const score = calculateScore(merged, market);
       const scoreGrade = getScoreGrade(score);
 
       await db.update(products).set({

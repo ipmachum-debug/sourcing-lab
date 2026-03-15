@@ -31,7 +31,7 @@ export default function TestCandidates() {
             <span className="text-2xl">🧪</span>
             테스트 후보
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">점수 85점 이상 자동 분류된 상품</p>
+          <p className="text-muted-foreground text-sm mt-1">점수 80점 이상 자동 분류된 상품 (시장 데이터 + 분석 완성도 기반)</p>
         </div>
 
         {isLoading ? (
@@ -92,7 +92,7 @@ export default function TestCandidates() {
               <FlaskConical className="h-10 w-10 text-pink-300" />
             </div>
             <p className="font-medium text-lg">테스트 후보 상품이 없습니다</p>
-            <p className="text-sm mt-1 text-pink-400">85점 이상 상품이 자동으로 분류됩니다</p>
+            <p className="text-sm mt-1 text-pink-400">80점 이상 상품이 자동으로 분류됩니다</p>
           </div>
         )}
       </div>
