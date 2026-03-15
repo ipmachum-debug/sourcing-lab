@@ -1075,6 +1075,12 @@ document.querySelector('#manualCollectBtn').addEventListener('click', async func
 
   if (!confirm('선택한 ' + keywordList.length + '개 키워드를 수집합니다.\n⏱️ 예상: 약 ' + estMin + '분\n\n계속하시겠습니까?')) return;
 
+  // 수동 수집: 선택된 키워드의 nextCollectAt 리셋 (수집주기 바이패스)
+  try {
+    await sendMsg({ type: 'HYBRID_RESET_NEXT_COLLECT', data: { keywords: keywordList } });
+    console.log('[Manual] nextCollectAt 리셋 완료: ' + keywordList.length + '개');
+  } catch (e) { console.warn('[Manual] nextCollectAt 리셋 실패:', e.message); }
+
   var resp = await sendMsg({
     type: 'START_AUTO_COLLECT',
     payload: { limit: keywordList.length, collectDetail: collectDetail, keywords: keywordList, roundSize: keywordList.length }

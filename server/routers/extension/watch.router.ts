@@ -640,9 +640,27 @@ export const watchRouter = router({
       now.setHours(now.getHours() + 9);
       const nowStr = now.toISOString().slice(0, 19).replace('T', ' ');
 
+      // 기존 키워드의 적응형 간격 조회
+      const [kw] = await db.select({
+        id: extWatchKeywords.id,
+        adaptiveIntervalHours: extWatchKeywords.adaptiveIntervalHours,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.keyword, input.keyword),
+        ))
+        .limit(1);
+
+      // nextCollectAt도 함께 재설정 (수동 수집 후에도 다음 자동 수집 스케줄 반영)
+      const intervalHours = N(kw?.adaptiveIntervalHours) || 24;
+      const nextCollect = new Date(now.getTime() + intervalHours * 3600 * 1000);
+      const nextCollectStr = nextCollect.toISOString().slice(0, 19).replace('T', ' ');
+
       await db.update(extWatchKeywords)
         .set({
           lastCollectedAt: nowStr,
+          nextCollectAt: nextCollectStr,
         })
         .where(and(
           eq(extWatchKeywords.userId, userId),
@@ -650,6 +668,34 @@ export const watchRouter = router({
         ));
 
       return { success: true, keyword: input.keyword, collectedAt: nowStr };
+    }),
+
+  // ===== 수동 수집용: 선택된 키워드의 nextCollectAt 리셋 =====
+  // 수동 수집 시 수집주기 제한을 바이패스하여 즉시 수집 가능하게 함
+  resetNextCollectForKeywords: protectedProcedure
+    .input(z.object({
+      keywords: z.array(z.string().min(1)).min(1).max(500),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      // 선택된 키워드들의 nextCollectAt을 NULL로 리셋
+      let resetCount = 0;
+      for (const keyword of input.keywords) {
+        const [result] = await db.update(extWatchKeywords)
+          .set({ nextCollectAt: null })
+          .where(and(
+            eq(extWatchKeywords.userId, userId),
+            eq(extWatchKeywords.keyword, keyword),
+          ));
+        if (result.affectedRows > 0) resetCount++;
+      }
+
+      console.log(`[resetNextCollect] 수동 수집 바이패스: ${resetCount}/${input.keywords.length}개 키워드 nextCollectAt 리셋`);
+      return { success: true, resetCount };
     }),
 
   // ===== 키워드 수집 실패 기록 =====

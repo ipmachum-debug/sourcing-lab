@@ -253,6 +253,10 @@ class ApiClient {
     return this._call('extension.boostUncollectedPriority', undefined, 'mutation');
   }
 
+  async resetNextCollectForKeywords(data) {
+    return this._call('extension.resetNextCollectForKeywords', data, 'mutation');
+  }
+
   // ===== v6.5: 상세 페이지 확장 파싱 데이터 =====
   async saveDetailSnapshot(data) {
     return this._call('extension.saveDetailSnapshot', data, 'mutation');

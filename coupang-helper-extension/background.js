@@ -729,6 +729,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // 수동 수집용: 선택된 키워드 nextCollectAt 리셋 (수집주기 바이패스)
+    case 'HYBRID_RESET_NEXT_COLLECT': {
+      apiClient.resetNextCollectForKeywords(message.data).then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
     case 'HYBRID_UPDATE_WATCH_KEYWORD': {
       apiClient.updateWatchKeyword(message.data).then((resp) => {
         sendResponse({ ok: true, data: resp?.result?.data });
