@@ -1919,6 +1919,10 @@
   let savedSet = new Set();
   let isMin = false;
 
+  function saveMinState() {
+    try { chrome.storage.local.set({ shPanelMin: isMin }); } catch (_) {}
+  }
+
   function createPanel() {
     if (panel) panel.remove();
     panel = document.createElement('div');
@@ -1953,14 +1957,26 @@
       <div class="sh-foot">소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
     `;
     document.body.appendChild(panel);
+
+    // 저장된 미니바 상태 복원
+    try {
+      chrome.storage.local.get("shPanelMin", r => {
+        if (r && r.shPanelMin) {
+          isMin = true;
+          panel.classList.add('sh-minibar');
+        }
+      });
+    } catch (_) {}
+
     initDrag();
 
     document.getElementById('sh-min').addEventListener('click', (e) => {
       e.stopPropagation();
       isMin = !isMin;
       panel.classList.toggle('sh-minibar', isMin);
+      saveMinState();
     });
-    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-minibar'); } });
+    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-minibar'); saveMinState(); } });
     document.getElementById('sh-ref').addEventListener('click', (e) => { e.stopPropagation(); doScan(true); });
 
     // 배치 수집 버튼
