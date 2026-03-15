@@ -531,6 +531,14 @@ export const watchRouter = router({
         .from(extSearchEvents)
         .where(and(eq(extSearchEvents.userId, userId), gte(extSearchEvents.searchedAt, sevenDaysAgoStr)));
 
+      // 배치 엔진 상태 (확장프로그램 수집 현황 동기화용)
+      const todayStr = now.toISOString().slice(0, 10);
+      const [batchState] = await db.select()
+        .from(extBatchState)
+        .where(eq(extBatchState.userId, userId))
+        .limit(1);
+      const isBatchDateToday = batchState?.stateDate === todayStr;
+
       return {
         watchKeywords: {
           total: N(kwStats?.total),
@@ -555,6 +563,16 @@ export const watchRouter = router({
           avgPriceRate: Math.round(N(parseQuality?.avgPrice)),
           avgRatingRate: Math.round(N(parseQuality?.avgRating)),
           avgReviewRate: Math.round(N(parseQuality?.avgReview)),
+        },
+        batchEngine: {
+          currentGroupTurn: batchState?.currentGroupTurn ?? 0,
+          totalCollectedToday: isBatchDateToday ? N(batchState?.totalCollectedToday) : 0,
+          roundsToday: isBatchDateToday ? N(batchState?.roundsToday) : 0,
+          lastBatchCompletedAt: batchState?.lastBatchCompletedAt || null,
+          dailyLimit: 500,
+          maxRoundsPerDay: 5,
+          batchPerRound: 100,
+          groupCount: 5,
         },
       };
     }),

@@ -63,10 +63,6 @@ async function loadDemandTab() {
     document.querySelector('#demandEmpty').style.display = '';
     return;
   }
-  const { batchEnabled } = await chrome.storage.local.get('batchEnabled');
-  document.querySelector('#batchToggle').checked = !!batchEnabled;
-  updateBatchToggleUI(!!batchEnabled);
-
   const { lastDailyBatchRun } = await chrome.storage.local.get('lastDailyBatchRun');
   if (lastDailyBatchRun) {
     document.querySelector('#demandLastRun').style.display = '';

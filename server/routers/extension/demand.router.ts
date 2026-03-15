@@ -138,23 +138,27 @@ export const demandRouter = router({
         ));
       const pinMap = new Map(pinRows.map(p => [p.keyword, p]));
 
-      // 검색량 데이터 조회 (최신 월, 키워드별)
-      const svRows = await db.select({
-        keyword: keywordSearchVolumeHistory.keyword,
-        totalSearch: keywordSearchVolumeHistory.totalSearch,
-        yearMonth: keywordSearchVolumeHistory.yearMonth,
-      })
-        .from(keywordSearchVolumeHistory)
-        .where(and(
-          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
-          eq(keywordSearchVolumeHistory.source, "naver"),
-          sql`(${keywordSearchVolumeHistory.keyword}, ${keywordSearchVolumeHistory.yearMonth}) IN (
-            SELECT keyword, MAX(year_month) FROM keyword_search_volume_history
-            WHERE user_id = ${ctx.user!.id} AND source = 'naver'
-            GROUP BY keyword
-          )`,
-        ));
-      const svMap = new Map(svRows.map(sv => [sv.keyword, N(sv.totalSearch)]));
+      // 검색량 데이터 조회 (최신 월, 키워드별) — 실패해도 목록은 표시
+      let svMap = new Map<string, number>();
+      try {
+        const svRows = await db.select({
+          keyword: keywordSearchVolumeHistory.keyword,
+          totalSearch: keywordSearchVolumeHistory.totalSearch,
+        })
+          .from(keywordSearchVolumeHistory)
+          .where(and(
+            eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+            eq(keywordSearchVolumeHistory.source, "naver"),
+            sql`(${keywordSearchVolumeHistory.keyword}, ${keywordSearchVolumeHistory.yearMonth}) IN (
+              SELECT keyword, MAX(year_month) FROM keyword_search_volume_history
+              WHERE user_id = ${ctx.user!.id} AND source = 'naver'
+              GROUP BY keyword
+            )`,
+          ));
+        svMap = new Map(svRows.map(sv => [sv.keyword, N(sv.totalSearch)]));
+      } catch (e) {
+        console.error("[listKeywordStats] search volume query failed:", e);
+      }
 
       // 핀 상태 + 검색량 합치기
       const enriched = rows.map((r: any) => {
