@@ -419,6 +419,11 @@
       if (/\d.*(?:명이?\s*(?:이\s*)?(?:상품을?\s*)?구매|만\+?\s*구매|천\+?\s*구매)/.test(t) && t.length < 80) {
         return t;
       }
+
+      // "N명이 만족한 제품이에요" 형태 (구매수 적을 때 쿠팡이 표시)
+      if (/\d[\d,.]*\s*만?\+?\s*명이?\s*만족/.test(t) && t.length < 80) {
+        return t;
+      }
     }
 
     return '';
@@ -624,6 +629,9 @@
 
   function extractDeliveryType() {
     const bodyText = tx(document.body);
+    // 판매자로켓을 먼저 체크 (로켓배송 텍스트와 공존하므로 우선 매칭)
+    if (/판매자\s*로켓/.test(bodyText)) return 'SELLER_ROCKET';
+    if (/로켓그로스/.test(bodyText)) return 'ROCKET_GROWTH';
     if (/로켓직구/.test(bodyText)) return 'ROCKET_GLOBAL';
     if (/로켓와우/.test(bodyText)) return 'ROCKET_WOW';
     if (/로켓배송/.test(bodyText)) return 'ROCKET';

@@ -28,9 +28,12 @@ import { invokeLLM } from "../../_core/llm";
 //  예: "한 달간 6,000명 이상 구매했어요" → 6000
 //      "1,000+명이 이 상품을 구매" → 1000
 //      "1만+ 구매" → 10000
+//      "500명이 만족한 제품이에요" → 0 (만족 표기는 구매수가 아님)
 // ============================================================
 function parsePurchaseCount(raw: string | null | undefined): number {
   if (!raw) return 0;
+  // "만족한" 패턴은 실구매수가 아니므로 0 반환
+  if (/만족/.test(raw)) return 0;
   const s = raw.replace(/,/g, "").replace(/\s+/g, "");
   // "N만" 패턴
   const manMatch = s.match(/(\d+(?:\.\d+)?)\s*만/);
@@ -55,14 +58,19 @@ function filterCandidates(
   const nonAd = items.filter((it: any) => !it.isAd);
 
   // 로켓배송(쿠팡 자체 판매) 제외 — 판매자로켓/일반배송만 소싱 대상
-  // deliveryType: rocketDelivery, rocketFresh = 쿠팡 직매입 (제외)
-  // deliveryType: sellerRocketDelivery, rocketGrowth, normalDelivery = 3P 판매자 (유지)
+  // deliveryType: rocketDelivery, rocketFresh, ROCKET, ROCKET_GLOBAL, ROCKET_WOW = 쿠팡 직매입 (제외)
+  // deliveryType: sellerRocketDelivery, SELLER_ROCKET, rocketGrowth, ROCKET_GROWTH, normalDelivery, STANDARD, FREE = 3P 판매자 (유지)
   const sourceable = nonAd.filter((it: any) => {
     const dt = (it.deliveryType || "").toLowerCase();
+    // 3P 판매자 배송 유형 — 명시적으로 유지
+    if (dt.includes("seller") || dt === "seller_rocket") return true;
+    if (dt.includes("growth") || dt === "rocket_growth") return true;
+    if (dt === "normaldelivery" || dt === "standard" || dt === "free" || dt === "") return true;
     // 쿠팡 직매입 배송 유형 제외
     if (dt === "rocketdelivery" || dt === "rocketfresh" || dt === "rocket_delivery" || dt === "rocket_fresh") return false;
+    if (dt === "rocket" || dt === "rocket_global" || dt === "rocket_wow") return false;
     // isRocket이 true이지만 판매자로켓/로켓그로스가 아닌 경우 제외
-    if (it.isRocket && !dt.includes("seller") && !dt.includes("growth") && dt !== "normaldelivery" && dt !== "") return false;
+    if (it.isRocket) return false;
     return true;
   });
 
@@ -95,7 +103,7 @@ function filterCandidates(
 
     // 판매자로켓 = 풀필먼트 사용 가능, 일반배송보다 유리
     const dt = (it.deliveryType || "").toLowerCase();
-    if (dt.includes("seller") || dt.includes("growth")) score += 15;
+    if (dt.includes("seller") || dt === "seller_rocket" || dt.includes("growth") || dt === "rocket_growth") score += 15;
     else score += 10; // 일반배송
 
     // 상위 랭크 가산 (1~10위)
@@ -349,7 +357,7 @@ function ruleBasedAnalysis(
 
     // 배송 유형 (filterCandidates에서 로켓배송 이미 제외됨)
     const dt = (d.deliveryType || searchItem?.deliveryType || "").toLowerCase();
-    if (dt.includes("seller") || dt.includes("growth")) {
+    if (dt.includes("seller") || dt === "seller_rocket" || dt.includes("growth") || dt === "rocket_growth") {
       score += 15;
       opportunities.push({ text: "판매자로켓 — 풀필먼트 활용 가능" });
     } else {
