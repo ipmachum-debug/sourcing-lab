@@ -1620,10 +1620,19 @@ async function autoRunDailyBatch() {
     return;
   }
 
+  // v8.5.1: 하루 5배치 제한 체크
+  const todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
+  if (todayRuns >= 5) {
+    console.log('[SH] 자동배치 스킵: 오늘 5배치 완료');
+    return;
+  }
+
   try {
-    // 배치 크기 및 오프셋 설정 (분할 배치 지원)
+    // v8.5.1: 배치 크기 100 키워드 기본값 (서버에서 스마트 선택)
     const { batchSize, batchOffset } = await chrome.storage.local.get(['batchSize', 'batchOffset']);
-    const size = parseInt(batchSize) || 10;
+    const size = parseInt(batchSize) || 100;
     const offset = parseInt(batchOffset) || 0;
 
     const resp = await apiClient.runDailyBatchCollection({ limit: size, offset: offset });
@@ -1652,7 +1661,14 @@ async function autoRunDailyBatch() {
         });
       }
 
-      await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString() });
+      // v8.5.1: 오늘 배치 카운트 업데이트
+      const tdValid = (todayData.todayBatchDate === todayStr) ? (todayData.todayValidCount || 0) : 0;
+      await chrome.storage.local.set({
+        lastDailyBatchRun: new Date().toISOString(),
+        todayBatchRuns: todayRuns + 1,
+        todayValidCount: tdValid + (data.processed || 0),
+        todayBatchDate: todayStr,
+      });
     }
   } catch (e) {
     console.error('[SH] 일일 배치 실패:', e.message);

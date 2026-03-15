@@ -2388,8 +2388,10 @@
         });
 
         let keywordList = [];
-        if (kwResp?.ok && kwResp.data?.length) {
-          keywordList = kwResp.data.map(kw => kw.keyword);
+        if (kwResp?.ok && kwResp.data) {
+          const data = kwResp.data;
+          const arr = Array.isArray(data) ? data : (data.items || data.keywords || []);
+          keywordList = arr.map(kw => kw.keyword || kw);
         }
 
         if (keywordList.length === 0) {
