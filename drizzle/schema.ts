@@ -798,6 +798,8 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
   adaptiveIntervalHours: int("adaptive_interval_hours"),
   volatilityScore: int("volatility_score").notNull().default(0),
   priorityScore: int("priority_score").default(0),
+  // 핀(고정) 키워드 — 배치 수집 시 최우선 수집 대상
+  isPinned: boolean("is_pinned").notNull().default(false),
   // 키워드 마스터 연결 + 감시 상태
   keywordMasterId: int("keyword_master_id"),
   watchReason: varchar("watch_reason", { length: 100 }),

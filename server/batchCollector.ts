@@ -55,6 +55,7 @@ export interface BatchKeywordSelection {
   id: number;
   keyword: string;
   priority: number;
+  isPinned: boolean;
   lastSearchedAt: string | null;
   lastCollectedAt: string | null;
   nextCollectAt: string | null;
@@ -63,6 +64,7 @@ export interface BatchKeywordSelection {
   volatilityScore: number;
   adaptiveIntervalHours: number | null;
   selectionReason: string;
+  tier: "pin" | "new" | "regular";
 }
 
 export interface AdaptiveBatchResult {
@@ -70,7 +72,24 @@ export interface AdaptiveBatchResult {
   delayConfig: HumanDelayConfig;
   totalActive: number;
   totalOverdue: number;
+  /** 일일 수집 현황 */
+  dailyStats: {
+    collectedToday: number;
+    dailyLimit: number;
+    remainingToday: number;
+  };
 }
+
+// ============================================================
+//  배치 수집 v2 상수
+// ============================================================
+
+/** 1회 배치 최대 키워드 수 */
+const BATCH_PER_ROUND_LIMIT = 200;
+/** 1일 최대 수집 키워드 수 */
+const DAILY_COLLECT_LIMIT = 600;
+/** 신규 키워드 안정화 기간 (일) */
+const NEW_KEYWORD_STABILIZATION_DAYS = 7;
 
 /** 인간 행동 딜레이 설정 — 클라이언트에 전달 */
 export interface HumanDelayConfig {
@@ -191,14 +210,14 @@ function computeVolatilityScore(kw: {
 /**
  * 변동성 점수 → 적응형 수집 주기 (시간)
  *
- * | 시나리오         | 점수    | 주기      |
- * |-----------------|---------|----------|
- * | 🔥 급변          | ≥80     | 8시간    |
- * | 🆕 신규 (3일)    | any     | 24~30시간 |
- * | 📊 높은 변동     | 60~79   | 24시간    |
- * | 📊 중간 변동     | 40~59   | 48시간    |
- * | 😴 낮은 변동     | 20~39   | 72시간    |
- * | 💤 안정          | <20     | 120시간   |
+ * | 시나리오                | 점수    | 주기        |
+ * |------------------------|---------|------------|
+ * | 🔥 급변                | ≥80     | 8시간       |
+ * | 🆕 신규 (7일 안정화)    | any     | 12~24시간   |
+ * | 📊 높은 변동            | 60~79   | 24시간      |
+ * | 📊 중간 변동            | 40~59   | 48시간      |
+ * | 😴 낮은 변동            | 20~39   | 72시간      |
+ * | 💤 안정                | <20     | 120시간     |
  */
 function computeAdaptiveInterval(
   volatilityScore: number,
@@ -206,13 +225,17 @@ function computeAdaptiveInterval(
 ): number {
   const now = nowKST();
 
-  // 신규 키워드 보너스 (등록 3일 이내)
+  // 신규 키워드 안정화 기간 (등록 7일 이내) — 자주 수집하여 기초 데이터 축적
   if (createdAt) {
     const created = new Date(createdAt);
     const daysSinceCreation = (now.getTime() - created.getTime()) / (24 * 3600 * 1000);
-    if (daysSinceCreation <= 3) {
-      // 신규는 자주 수집하되, 변동성 높으면 더 자주
-      return volatilityScore >= 60 ? 12 : 24;
+    if (daysSinceCreation <= NEW_KEYWORD_STABILIZATION_DAYS) {
+      // 신규 3일 이내: 더 자주
+      if (daysSinceCreation <= 3) {
+        return volatilityScore >= 60 ? 12 : 18;
+      }
+      // 신규 4~7일: 점진적 완화
+      return volatilityScore >= 60 ? 18 : 24;
     }
   }
 
@@ -279,26 +302,61 @@ function generateDelayConfig(keywordCount: number): HumanDelayConfig {
 // ============================================================
 
 /**
- * 적응형 배치 수집 대상 키워드 선택
+ * 배치 수집 v2 — 3-티어 적응형 키워드 선택
  *
- * 선택 전략:
- * 1. next_collect_at이 현재 이전인 키워드 (수집 기한 초과) — 우선
- * 2. next_collect_at이 NULL인 키워드 (아직 스케줄링 안 됨) — 다음
- * 3. 변동성 높은 순 → 마지막 수집이 오래된 순 정렬
+ * 티어 1: 핀(Pin) 키워드 → 무조건 포함 (1일 1회)
+ * 티어 2: 신규 키워드 (등록 7일 이내) → 남은 슬롯 우선 배정
+ * 티어 3: 일반 키워드 → 종합점수 기반 라운드로빈 균등 배치
  *
- * 반환에 delayConfig 포함 → 클라이언트는 이 설정대로 딜레이만 적용
+ * 제외 조건:
+ * - isActive = false / watchStatus = paused/expired
+ * - 오늘 이미 수집 완료 (핀 제외, 1회차 이후)
+ * - 2회차+: 오늘 유효 데이터가 이미 존재하는 키워드 자동 제외
+ * - 일일 상한(600개) 초과
+ *
+ * @param roundNumber 1=첫 회차, 2+=후속 회차 (제외 로직 적용)
  */
 export async function selectBatchKeywords(
   userId: number,
-  limit: number = 20,
+  limit: number = BATCH_PER_ROUND_LIMIT,
+  roundNumber: number = 1,
 ): Promise<AdaptiveBatchResult> {
   const db = await getDb();
-  if (!db) return { keywords: [], delayConfig: generateDelayConfig(0), totalActive: 0, totalOverdue: 0 };
+  const emptyResult: AdaptiveBatchResult = {
+    keywords: [],
+    delayConfig: generateDelayConfig(0),
+    totalActive: 0,
+    totalOverdue: 0,
+    dailyStats: { collectedToday: 0, dailyLimit: DAILY_COLLECT_LIMIT, remainingToday: DAILY_COLLECT_LIMIT },
+  };
+  if (!db) return emptyResult;
 
   const now = nowKST();
   const nowStr = toMySQLTimestamp(now);
+  const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
 
-  // 전체 활성 키워드 수
+  // ── 1. 오늘 이미 수집한 키워드 수 (일일 상한 체크) ──
+  const [{ cnt: collectedTodayCount }] = await db.select({
+    cnt: sql<number>`COUNT(*)`,
+  })
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+      sql`DATE(${extWatchKeywords.lastCollectedAt}) = ${todayStr}`,
+    ));
+  const collectedToday = N(collectedTodayCount);
+  const remainingToday = Math.max(0, DAILY_COLLECT_LIMIT - collectedToday);
+  const effectiveLimit = Math.min(limit, remainingToday, BATCH_PER_ROUND_LIMIT);
+
+  if (effectiveLimit <= 0) {
+    return {
+      ...emptyResult,
+      dailyStats: { collectedToday, dailyLimit: DAILY_COLLECT_LIMIT, remainingToday: 0 },
+    };
+  }
+
+  // ── 2. 전체 활성 키워드 수 ──
   const [{ cnt: totalActive }] = await db.select({
     cnt: sql<number>`COUNT(*)`,
   })
@@ -308,11 +366,28 @@ export async function selectBatchKeywords(
       eq(extWatchKeywords.isActive, true),
     ));
 
-  // next_collect_at 기한 초과 또는 NULL인 키워드 선택
-  const keywords = await db.select({
+  // ── 3. 2회차+: 오늘 유효 데이터가 있는 키워드 목록 (자동 제외용) ──
+  let todayValidKeywords: Set<string> = new Set();
+  if (roundNumber >= 2) {
+    const validRows = await db.select({
+      keyword: extKeywordDailyStatus.keyword,
+    })
+      .from(extKeywordDailyStatus)
+      .where(and(
+        eq(extKeywordDailyStatus.userId, userId),
+        eq(extKeywordDailyStatus.statDate, todayStr),
+        sql`${extKeywordDailyStatus.dataQualityScore} >= 50`,
+        sql`${extKeywordDailyStatus.totalItems} >= 5`,
+      ));
+    todayValidKeywords = new Set(validRows.map(r => r.keyword));
+  }
+
+  // ── 4. 수집 대상 키워드 전체 로드 (활성 + 수집 기한 도래) ──
+  const selectFields = {
     id: extWatchKeywords.id,
     keyword: extWatchKeywords.keyword,
     priority: extWatchKeywords.priority,
+    isPinned: extWatchKeywords.isPinned,
     lastSearchedAt: extWatchKeywords.lastSearchedAt,
     lastCollectedAt: extWatchKeywords.lastCollectedAt,
     nextCollectAt: extWatchKeywords.nextCollectAt,
@@ -325,43 +400,100 @@ export async function selectBatchKeywords(
     priceChange1d: extWatchKeywords.priceChange1d,
     createdAt: extWatchKeywords.createdAt,
     lastUserViewAt: extWatchKeywords.lastUserViewAt,
-  })
+  };
+
+  // ── 티어 1: 핀 키워드 (오늘 미수집 + 핀 설정) ──
+  const pinnedKeywords = await db.select(selectFields)
     .from(extWatchKeywords)
     .where(and(
       eq(extWatchKeywords.userId, userId),
       eq(extWatchKeywords.isActive, true),
+      eq(extWatchKeywords.isPinned, true),
+      // 핀 키워드도 1일 1회: 오늘 이미 수집했으면 제외
+      or(
+        isNull(extWatchKeywords.lastCollectedAt),
+        sql`DATE(${extWatchKeywords.lastCollectedAt}) < ${todayStr}`,
+      ),
+    ))
+    .orderBy(desc(extWatchKeywords.compositeScore));
+
+  // ── 티어 2: 신규 키워드 (등록 7일 이내, 오늘 미수집) ──
+  const sevenDaysAgo = new Date(now.getTime() - NEW_KEYWORD_STABILIZATION_DAYS * 24 * 3600 * 1000);
+  const sevenDaysAgoStr = toMySQLTimestamp(sevenDaysAgo);
+
+  const newKeywords = await db.select(selectFields)
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+      eq(extWatchKeywords.isPinned, false), // 핀과 중복 방지
+      gte(extWatchKeywords.createdAt, sevenDaysAgoStr),
+      or(
+        isNull(extWatchKeywords.lastCollectedAt),
+        sql`DATE(${extWatchKeywords.lastCollectedAt}) < ${todayStr}`,
+      ),
+    ))
+    .orderBy(
+      asc(extWatchKeywords.lastCollectedAt),
+      desc(extWatchKeywords.compositeScore),
+    );
+
+  // ── 티어 3: 일반 키워드 (라운드로빈, 종합점수 기반 그룹 분할) ──
+  const regularKeywords = await db.select(selectFields)
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+      eq(extWatchKeywords.isPinned, false),
+      // 신규 제외 (7일 이내)
+      lt(extWatchKeywords.createdAt, sevenDaysAgoStr),
+      // 수집 기한 도래 또는 미스케줄링
       or(
         isNull(extWatchKeywords.nextCollectAt),
         lte(extWatchKeywords.nextCollectAt, nowStr),
       ),
     ))
     .orderBy(
-      // NULL(미스케줄링) 먼저
-      sql`${extWatchKeywords.nextCollectAt} IS NOT NULL`,
-      // 기한 초과가 오래된 순
-      asc(extWatchKeywords.nextCollectAt),
-      // 변동성 높은 순
-      desc(extWatchKeywords.volatilityScore),
-      // 마지막 수집이 오래된 순
+      // 종합점수 기반 라운드로빈: 점수 높은 순 + 마지막 수집 오래된 순
       asc(extWatchKeywords.lastCollectedAt),
-    )
-    .limit(limit);
+      desc(extWatchKeywords.compositeScore),
+      desc(extWatchKeywords.volatilityScore),
+    );
 
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
+  // ── 5. 3-티어 병합 + 제외 처리 ──
+  const result: BatchKeywordSelection[] = [];
+  const seenKeywords = new Set<string>();
 
-  const result: BatchKeywordSelection[] = keywords.map(k => {
-    // 변동성 재계산 (최신 데이터 기반)
+  const processKeyword = (
+    k: typeof pinnedKeywords[number],
+    tier: "pin" | "new" | "regular",
+  ): BatchKeywordSelection | null => {
+    // 중복 방지
+    if (seenKeywords.has(k.keyword)) return null;
+
+    // 2회차+: 오늘 유효 데이터가 있으면 제외 (핀 키워드는 이미 1일 1회 필터 적용됨)
+    if (roundNumber >= 2 && tier !== "pin" && todayValidKeywords.has(k.keyword)) {
+      return null;
+    }
+
+    seenKeywords.add(k.keyword);
+
     const volScore = computeVolatilityScore(k);
     const intervalHours = computeAdaptiveInterval(volScore, k.createdAt);
 
     // 선택 사유
     let reason = "";
-    if (!k.nextCollectAt) {
+    if (tier === "pin") {
+      reason = "핀_키워드";
+    } else if (tier === "new") {
+      reason = "신규_안정화";
+    } else if (!k.nextCollectAt) {
       reason = "미스케줄링_초기수집";
     } else if (!k.lastCollectedAt) {
       reason = "미수집_키워드";
     } else {
       const lastSearch = k.lastSearchedAt ? new Date(k.lastSearchedAt) : null;
+      const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
       if (volScore >= 80) reason = "급변_감지";
       else if (lastSearch && lastSearch >= threeDaysAgo) reason = "최근_3일_검색";
       else if (N(k.compositeScore) >= 70) reason = "높은_종합점수";
@@ -373,6 +505,7 @@ export async function selectBatchKeywords(
       id: k.id,
       keyword: k.keyword,
       priority: N(k.priority),
+      isPinned: !!k.isPinned,
       lastSearchedAt: k.lastSearchedAt,
       lastCollectedAt: k.lastCollectedAt,
       nextCollectAt: k.nextCollectAt,
@@ -381,14 +514,41 @@ export async function selectBatchKeywords(
       volatilityScore: volScore,
       adaptiveIntervalHours: intervalHours,
       selectionReason: reason,
+      tier,
     };
-  });
+  };
+
+  // 티어 1: 핀 키워드 (무조건 포함)
+  for (const k of pinnedKeywords) {
+    if (result.length >= effectiveLimit) break;
+    const entry = processKeyword(k, "pin");
+    if (entry) result.push(entry);
+  }
+
+  // 티어 2: 신규 키워드 (남은 슬롯)
+  for (const k of newKeywords) {
+    if (result.length >= effectiveLimit) break;
+    const entry = processKeyword(k, "new");
+    if (entry) result.push(entry);
+  }
+
+  // 티어 3: 일반 키워드 (라운드로빈 — 나머지 슬롯)
+  for (const k of regularKeywords) {
+    if (result.length >= effectiveLimit) break;
+    const entry = processKeyword(k, "regular");
+    if (entry) result.push(entry);
+  }
 
   return {
     keywords: result,
     delayConfig: generateDelayConfig(result.length),
     totalActive: N(totalActive),
     totalOverdue: result.length,
+    dailyStats: {
+      collectedToday,
+      dailyLimit: DAILY_COLLECT_LIMIT,
+      remainingToday: Math.max(0, remainingToday - result.length),
+    },
   };
 }
 

@@ -469,9 +469,12 @@ export const watchRouter = router({
 
   // ===== 배치 수집 대상 키워드 조회 =====
   getBatchKeywordSelection: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(200).default(20) }))
+    .input(z.object({
+      limit: z.number().int().min(1).max(200).default(200),
+      roundNumber: z.number().int().min(1).max(10).default(1),
+    }))
     .query(async ({ ctx, input }) => {
-      return await selectBatchKeywords(ctx.user!.id, input.limit);
+      return await selectBatchKeywords(ctx.user!.id, input.limit, input.roundNumber);
     }),
 
   // ===== 검색 이벤트 히스토리 =====
@@ -665,6 +668,26 @@ export const watchRouter = router({
   // ===================================================================
   //  v6.4: 자동 순회 수집기 (Auto-Collect) API
   // ===================================================================
+
+  // ===== 키워드 핀(고정) 토글 =====
+  togglePinKeyword: protectedProcedure
+    .input(z.object({
+      keywordId: z.number().int(),
+      isPinned: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      await db.update(extWatchKeywords)
+        .set({ isPinned: input.isPinned })
+        .where(and(
+          eq(extWatchKeywords.id, input.keywordId),
+          eq(extWatchKeywords.userId, ctx.user!.id),
+        ));
+
+      return { success: true, keywordId: input.keywordId, isPinned: input.isPinned };
+    }),
 
   // ===== 키워드 수집 완료 마킹 =====
   markKeywordCollected: protectedProcedure
