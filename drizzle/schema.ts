@@ -817,8 +817,9 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
 export type ExtWatchKeyword = typeof extWatchKeywords.$inferSelect;
 export type InsertExtWatchKeyword = typeof extWatchKeywords.$inferInsert;
 
-// ==================== Extension: 키워드 일별 상태 (ext_keyword_daily_status) ====================
-// 키워드별 일별 집계 — 7일 이상 축적 후 판매량 추정 가능
+// ==================== [DEPRECATED 2026-03-15] Extension: 키워드 일별 상태 (ext_keyword_daily_status) ====================
+// ⚠ 구 sum-diff 방식 (393배 오차). ext_keyword_daily_stats가 단일 진실 테이블.
+// batchCollector.ts의 deprecated 함수에서만 사용됨.
 export const extKeywordDailyStatus = mysqlTable("ext_keyword_daily_status", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("user_id").notNull(),
@@ -882,8 +883,8 @@ export const extKeywordDailyStatus = mysqlTable("ext_keyword_daily_status", {
 export type ExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferSelect;
 export type InsertExtKeywordDailyStatus = typeof extKeywordDailyStatus.$inferInsert;
 
-// ==================== Extension: 키워드 메트릭 (ext_keyword_metrics) ====================
-// EMA 스무딩 + 판매 추정 + 급등 탐지 결과 저장
+// ==================== [DEPRECATED 2026-03-15] Extension: 키워드 메트릭 (ext_keyword_metrics) ====================
+// ⚠ 미사용 (0행). ext_keyword_daily_stats에서 직접 MA/spike 처리.
 export const extKeywordMetrics = mysqlTable("ext_keyword_metrics", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("user_id").notNull(),
@@ -914,8 +915,8 @@ export const extKeywordMetrics = mysqlTable("ext_keyword_metrics", {
 export type ExtKeywordMetric = typeof extKeywordMetrics.$inferSelect;
 export type InsertExtKeywordMetric = typeof extKeywordMetrics.$inferInsert;
 
-// ==================== Extension: 키워드 알림 (ext_keyword_alerts) ====================
-// 급등/폭발/가격 붕괴/경쟁 폭증 알람 기록
+// ==================== [DEPRECATED 2026-03-15] Extension: 키워드 알림 (ext_keyword_alerts) ====================
+// ⚠ 미사용 (0행). ext_keyword_daily_stats.spike_level에서 직접 처리.
 export const extKeywordAlerts = mysqlTable("ext_keyword_alerts", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("user_id").notNull(),
