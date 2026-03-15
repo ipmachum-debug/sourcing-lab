@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.4.4",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.4.4 — AI 자동 키워드 발견 + 시장 데이터 + 검색량 추정 + 경쟁강도 분석",
+  "version": "8.5.3",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.5.3 — 서버 적응형 배치 스케줄러 + 팝업 안내 정확도 개선",
   "permissions": [
     "storage",
     "tabs",
@@ -107,12 +107,39 @@
         "https://wing.coupang.com/*",
         "https://m-wing.coupang.com/*"
       ]
+    },
+    {
+      "resources": [
+        "icon16.png",
+        "icon32.png",
+        "icon48.png",
+        "icon128.png",
+        "logo.png"
+      ],
+      "matches": [
+        "https://www.coupang.com/*",
+        "https://m.coupang.com/*",
+        "https://www.aliexpress.com/*",
+        "https://ko.aliexpress.com/*",
+        "https://*.aliexpress.com/*"
+      ]
     }
   ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Coupang Sourcing Helper"
+    "default_title": "Coupang Sourcing Helper",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   }
 }

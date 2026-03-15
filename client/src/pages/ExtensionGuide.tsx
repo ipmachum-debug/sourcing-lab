@@ -13,9 +13,9 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.4.4";
+const EXTENSION_VERSION = "8.5.3";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
-const EXTENSION_FILE_SIZE = "179KB";
+const EXTENSION_FILE_SIZE = "688KB";
 
 function AccordionSection({
   icon: Icon,
@@ -834,9 +834,23 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
+                    version: "v8.5.3",
+                    date: "2026-03-15",
+                    badge: "Latest",
+                    changes: [
+                      "🔧 사이드패널 모듈 분할: sidepanel.js 2680줄 → 6개 파일 (utils, analysis, demand, wing, tabs, main)",
+                      "📊 사이드패널 탭 정리: 미사용 5개 탭 제거 → 6개 탭 (분석, 수집, WING, 이력, 마진, 서버)",
+                      "🔄 수집 탭 자동/수동 서브탭 분리: 배치 자동수집 + 수동 키워드별 수집 UI 분리",
+                      "⚡ 플로팅 패널 배치 수집: 자동 수집 시작/중지 버튼 + 실시간 진행률 바 추가",
+                      "🗄️ ext_keyword_daily_stats 전면 마이그레이션: watch.router, batchCollector, 사이드패널 모두 전환",
+                      "🏷️ 미수집 라벨 개선: '미수집' → '신규(미배치)' (개요), '오늘 미수집' (탭), '오늘 수집 안 된 키워드' (배너)",
+                      "📈 backfillDemandScores API 추가: demandScore=0 과거 데이터 자동 재계산",
+                      "⚠️ 레거시 정리: ext_keyword_daily_status, ext_keyword_metrics, ext_keyword_alerts DEPRECATED 표시",
+                    ],
+                  },
+                  {
                     version: "v8.4.4",
                     date: "2026-03-14",
-                    badge: "Latest",
                     changes: [
                       "🔍 검색량 추정 엔진 v1: Simple(네이버×0.33) → Hybrid(네이버 50% + 리뷰역산 35% + 자동완성 15%) 자동 전환",
                       "📊 Hybrid 전환 프로그레스: 축적일/델타/정합 3개 조건별 미니 바 표시",

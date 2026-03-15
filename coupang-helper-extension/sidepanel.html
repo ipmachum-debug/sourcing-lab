@@ -10,10 +10,10 @@
     <!-- ========== 헤더 ========== -->
     <header>
       <div class="header-top">
-        <h1>🐢 소싱 헬퍼</h1>
+        <h1><img src="icon32.png" style="width:20px;height:20px;vertical-align:middle;border-radius:4px;margin-right:6px;" />소싱 헬퍼</h1>
         <div class="header-right">
           <span class="sync-status" id="syncStatus" title="서버 연결 상태">●</span>
-          <span class="version">v8.0.0</span>
+          <span class="version">v8.5.3</span>
         </div>
       </div>
       <p id="summary">쿠팡 검색 결과 페이지를 열면 자동 분석됩니다.</p>
@@ -101,6 +101,30 @@
             <div class="stat-box"><div class="stat-value" id="demandStatGrowth">-</div><div class="stat-label">성장 키워드</div></div>
           </div>
 
+          <!-- 실시간 수집 상태 표시 (v8.5.1) -->
+          <div id="liveBatchStatusPanel" style="display:none;margin-top:8px;padding:8px 10px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:#0284c7">🔄 수집 진행 중</span>
+              <span id="liveBatchRunCount" style="font-size:10px;background:#0ea5e9;color:#fff;border-radius:8px;padding:0 6px;font-weight:600">0배치</span>
+            </div>
+            <div class="stats-grid" style="display:grid;margin-top:4px">
+              <div class="stat-box"><div class="stat-value" id="liveBatchCurrent" style="font-size:12px;color:#0284c7">-</div><div class="stat-label">현재 배치</div></div>
+              <div class="stat-box"><div class="stat-value" id="liveBatchTotal" style="font-size:12px">-</div><div class="stat-label">전체 키워드</div></div>
+              <div class="stat-box"><div class="stat-value" id="liveBatchSuccess" style="font-size:12px;color:#16a34a">0</div><div class="stat-label">성공</div></div>
+              <div class="stat-box"><div class="stat-value" id="liveBatchFail" style="font-size:12px;color:#dc2626">0</div><div class="stat-label">실패</div></div>
+            </div>
+            <div id="liveBatchCurrentKw" style="margin-top:4px;font-size:10px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            <div class="demand-batch-progress" id="liveBatchProgressBar" style="display:block;margin-top:4px">
+              <div class="demand-progress-fill" id="liveBatchProgressFill" style="width:0%"></div>
+              <span class="demand-progress-text" id="liveBatchProgressText">0/0</span>
+            </div>
+          </div>
+
+          <!-- 오늘의 배치 요약 (v8.5.1) -->
+          <div id="todayBatchSummary" style="display:none;margin-top:6px;padding:6px 10px;background:#f8fafc;border-radius:6px;font-size:10px;color:#64748b">
+            <span>📅 오늘: <b id="todayBatchCount" style="color:#475569">0</b>/5 배치 완료 · <b id="todayValidKeywords" style="color:#16a34a">0</b>개 유효 수집</span>
+          </div>
+
           <div class="demand-last-run" id="demandLastRun" style="display:none">
             <small>마지막 수집: <span id="demandLastRunTime">-</span></small>
           </div>
@@ -113,19 +137,10 @@
             <label class="demand-radio"><input type="radio" name="batchMode" value="selected" /> 선택한 키워드</label>
             <label class="demand-radio" style="color:#dc2626"><input type="radio" name="batchMode" value="uncollected" /> 미수집 키워드 <span id="uncollectedBadge" style="background:#dc2626;color:#fff;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700;display:none">0</span></label>
           </div>
-          <div class="demand-batch-size-row">
-            <label>라운드 단위:</label>
-            <select id="batchSizeSelect">
-              <option value="1">1개씩</option>
-              <option value="2" selected>2개씩</option>
-              <option value="3">3개씩</option>
-              <option value="5">5개씩</option>
-              <option value="10">10개씩</option>
-              <option value="20">20개씩</option>
-              <option value="30">30개씩</option>
-              <option value="50">50개씩</option>
-              <option value="0">전체 한번에</option>
-            </select>
+          <div class="demand-batch-size-row" style="flex-wrap:wrap;gap:6px">
+            <div style="font-size:10px;color:#64748b;width:100%;padding:4px 0;border-top:1px solid #e2e8f0;margin-top:2px">
+              📦 1배치 = 100개 · 하루 최대 5배치(500개) · 배치 간 자동 쿨다운
+            </div>
             <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" /> 상세 Top3</label>
           </div>
           <div style="display:flex;gap:4px;margin-top:6px">
@@ -159,7 +174,7 @@
             </div>
           </div>
           <p class="desc" style="font-size:10px;color:#94a3b8;margin-top:4px">
-            ON 시 50~89초 간격으로 순차 수집 · 실패 시 2~5분 대기 후 재시도
+            ON 시 자동 배치 실행 · 1배치=100개 · 하루 5배치 500개 · 배치 간 1~3분 쿨다운
           </p>
         </div>
 

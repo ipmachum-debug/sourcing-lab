@@ -105,7 +105,7 @@ export default function SearchDemand() {
   });
   const deleteKeyword = trpc.extension.deleteKeyword.useMutation({
     onSuccess: () => {
-      keywordStatsList.refetch(); keywordStatsOverview.refetch();
+      keywordStatsList.refetch(); keywordStatsOverview.refetch(); uncollectedKws.refetch();
       toast.success("키워드가 삭제되었습니다");
     },
     onError: (err: any) => toast.error(err.message || "삭제 실패"),
@@ -114,7 +114,7 @@ export default function SearchDemand() {
     onSuccess: (data: any) => {
       setSelectedDeleteKws(new Set());
       toast.success(`${data.count}개 키워드 삭제 완료`);
-      keywordStatsList.refetch(); keywordStatsOverview.refetch();
+      keywordStatsList.refetch(); keywordStatsOverview.refetch(); uncollectedKws.refetch();
     },
     onError: (err: any) => toast.error(err.message || "삭제 실패"),
   });

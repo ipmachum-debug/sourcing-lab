@@ -229,6 +229,11 @@ export const demandRouter = router({
       await db.delete(extKeywordDailyStats)
         .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, input.query)));
 
+      // 감시 키워드 삭제 (is_active = false 처리)
+      await db.update(extWatchKeywords)
+        .set({ isActive: false })
+        .where(and(eq(extWatchKeywords.userId, ctx.user!.id), eq(extWatchKeywords.keyword, input.query)));
+
       return { success: true, query: input.query };
     }),
 
@@ -244,6 +249,10 @@ export const demandRouter = router({
           .where(and(eq(extSearchSnapshots.userId, ctx.user!.id), eq(extSearchSnapshots.query, query)));
         await db.delete(extKeywordDailyStats)
           .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, query)));
+        // 감시 키워드 삭제 (is_active = false 처리)
+        await db.update(extWatchKeywords)
+          .set({ isActive: false })
+          .where(and(eq(extWatchKeywords.userId, ctx.user!.id), eq(extWatchKeywords.keyword, query)));
       }
 
       return { success: true, count: input.queries.length };
