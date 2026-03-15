@@ -438,10 +438,8 @@ export const demandRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // KST 기준 오늘 날짜
-      const nowKST = new Date();
-      nowKST.setHours(nowKST.getHours() + 9);
-      const todayStr = nowKST.toISOString().slice(0, 10);
+      // KST 기준 오늘 날짜 (서버/MySQL TZ가 이미 Asia/Seoul이므로 이중 변환 방지)
+      const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 
       // 1. 모든 활성 감시 키워드
       const watchRows = await db.select({
@@ -461,7 +459,7 @@ export const demandRouter = router({
         .from(extSearchSnapshots)
         .where(and(
           eq(extSearchSnapshots.userId, ctx.user!.id),
-          sql`DATE(CONVERT_TZ(${extSearchSnapshots.createdAt}, '+00:00', '+09:00')) = ${todayStr}`,
+          sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
         ));
       const collectedSet = new Set(collectedRows.map(r => r.query));
 
@@ -492,10 +490,8 @@ export const demandRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // KST 기준 오늘 날짜
-      const nowKST = new Date();
-      nowKST.setHours(nowKST.getHours() + 9);
-      const todayStr = nowKST.toISOString().slice(0, 10);
+      // KST 기준 오늘 날짜 (서버/MySQL TZ가 이미 Asia/Seoul이므로 이중 변환 방지)
+      const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 
       // 오늘 스냅샷이 있는 키워드
       const collectedRows = await db.select({
@@ -504,7 +500,7 @@ export const demandRouter = router({
         .from(extSearchSnapshots)
         .where(and(
           eq(extSearchSnapshots.userId, ctx.user!.id),
-          sql`DATE(CONVERT_TZ(${extSearchSnapshots.createdAt}, '+00:00', '+09:00')) = ${todayStr}`,
+          sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
         ));
       const collectedSet = new Set(collectedRows.map(r => r.query));
 
