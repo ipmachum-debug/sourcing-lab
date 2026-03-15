@@ -6,7 +6,7 @@ import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import {
   extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
-  extSearchSnapshots, extKeywordDailyStats,
+  extSearchSnapshots, extKeywordDailyStats, extBatchState,
 } from "../../../drizzle/schema";
 import { eq, and, desc, sql, like, asc, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -923,6 +923,44 @@ export const watchRouter = router({
         .from(extKeywordDailyStats)
         .where(eq(extKeywordDailyStats.userId, userId));
 
+      // 배치 수집 상태 (v2)
+      const [batchState] = await db.select()
+        .from(extBatchState)
+        .where(eq(extBatchState.userId, userId))
+        .limit(1);
+
+      // 핀 키워드 수
+      const [pinStats] = await db.select({
+        pinnedCount: sql<number>`SUM(CASE WHEN is_pinned = 1 THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      // 신규 7일 이내 키워드 수
+      const [newStats] = await db.select({
+        newCount: sql<number>`SUM(CASE WHEN created_at >= ${sevenDaysAgoStr} THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      // overdue 키워드 수 (nextCollectAt이 현재보다 이전)
+      const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
+      const [overdueStats] = await db.select({
+        overdueCount: sql<number>`SUM(CASE WHEN next_collect_at IS NOT NULL AND next_collect_at <= ${nowStr} THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      const isBatchDateToday = batchState?.stateDate === todayStr;
       return {
         collectedToday: N(todayStats?.collectedToday),
         totalActive: N(queueStats?.totalActive),
@@ -931,6 +969,20 @@ export const watchRouter = router({
         sourceDist: sourceDist.map(s => ({ source: s.source, count: N(s.count) })),
         lastCollectedAt: lastCollected?.lastAt || null,
         lastStatsUpdatedAt: lastDailyStat?.lastAt || null,
+        // v2 배치 엔진 상태
+        batchEngine: {
+          currentGroupTurn: batchState?.currentGroupTurn ?? 0,
+          totalCollectedToday: isBatchDateToday ? N(batchState?.totalCollectedToday) : 0,
+          roundsToday: isBatchDateToday ? N(batchState?.roundsToday) : 0,
+          lastBatchCompletedAt: batchState?.lastBatchCompletedAt || null,
+          dailyLimit: 500,
+          maxRoundsPerDay: 5,
+          batchPerRound: 100,
+          groupCount: 5,
+        },
+        pinnedCount: N(pinStats?.pinnedCount),
+        newKeywordCount: N(newStats?.newCount),
+        overdueCount: N(overdueStats?.overdueCount),
       };
     }),
 });
