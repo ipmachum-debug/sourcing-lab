@@ -1612,21 +1612,14 @@ async function autoRunDailyBatch() {
   // 1) 서버 로그인 체크
   const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
   if (!serverLoggedIn) {
-    console.log('[SH] 자동배치 스킵: 서버 미로그인');
+    console.log('[SH] 자동수집 스킵: 서버 미로그인');
     return;
   }
 
-  // 2) 배치 토글 체크 — 사용자가 OFF하면 자동 실행 안 함
-  const { batchEnabled } = await chrome.storage.local.get('batchEnabled');
-  if (!batchEnabled) {
-    console.log('[SH] 자동배치 스킵: 배치 토글 OFF');
-    return;
-  }
-
-  // 3) 쿠팡 탭이 열려있는지 확인 — 쿠팡 검색창을 열었을 때만 실행
+  // 2) 쿠팡 탭이 열려있는지 확인 — 쿠팡 검색창을 열었을 때만 실행
   const coupangTabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
   if (!coupangTabs || coupangTabs.length === 0) {
-    console.log('[SH] 자동배치 스킵: 쿠팡 탭 미열림');
+    console.log('[SH] 자동수집 스킵: 쿠팡 탭 미열림');
     return;
   }
 
@@ -1635,7 +1628,7 @@ async function autoRunDailyBatch() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
   if (todayRuns >= 5) {
-    console.log('[SH] 자동배치 스킵: 오늘 5배치 완료');
+    console.log('[SH] 자동수집 스킵: 오늘 5회 완료');
     return;
   }
 

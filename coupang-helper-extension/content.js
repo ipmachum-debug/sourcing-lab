@@ -2417,10 +2417,18 @@
             dailyStats = serverBatch.dailyStats || {};
             sessionLimits = serverBatch.sessionLimits || {};
             totalActive = serverBatch.totalActive || 0;
-            console.log('[SH] 서버 선별: ' + batchKeywords.length + '개 (활성 ' + totalActive + ', 배치 ' + (dailyStats.roundsToday || 0) + '/' + (dailyStats.maxRoundsPerDay || 5) + ', 그룹턴 ' + (dailyStats.currentGroupTurn || 0) + ')');
+            console.log('[SH] 서버 선별: ' + batchKeywords.length + '개 (활성 ' + totalActive + ', 수집 ' + (dailyStats.roundsToday || 0) + '/' + (dailyStats.maxRoundsPerDay || 5) + ', 그룹턴 ' + (dailyStats.currentGroupTurn || 0) + ')');
+          } else if (batchResp && !batchResp.ok) {
+            const errMsg = batchResp.error || '';
+            if (errMsg.indexOf('로그인') >= 0 || errMsg.indexOf('UNAUTHORIZED') >= 0 || errMsg.indexOf('401') >= 0) {
+              startBtn.disabled = false;
+              startBtn.textContent = '🤖 자동 수집';
+              alert('서버 로그인이 필요합니다.\n사이드패널 > 서버 탭에서 로그인해주세요.');
+              return;
+            }
           }
         } catch (ex) {
-          console.warn('[SH] 서버 배치 선별 실패, 로컬 폴백:', ex.message);
+          console.warn('[SH] 서버 수집 선별 실패, 로컬 폴백:', ex.message);
         }
 
         // ── 서버 응답 기반 한도 체크 ──
@@ -2428,7 +2436,7 @@
           if (dailyStats.roundsToday >= (dailyStats.maxRoundsPerDay || 5)) {
             startBtn.disabled = false;
             startBtn.textContent = '🤖 자동 수집';
-            alert('오늘 배치 한도(' + (dailyStats.maxRoundsPerDay || 5) + '회)에 도달했습니다.\n오늘 수집: ' + (dailyStats.collectedToday || 0) + '/' + (dailyStats.dailyLimit || 500) + '개\n내일 다시 시도해주세요.');
+            alert('오늘 수집 한도(' + (dailyStats.maxRoundsPerDay || 5) + '회)에 도달했습니다.\n오늘 수집: ' + (dailyStats.collectedToday || 0) + '/' + (dailyStats.dailyLimit || 500) + '개\n내일 다시 시도해주세요.');
             return;
           }
           if ((dailyStats.remainingToday || 0) <= 0) {
@@ -2444,7 +2452,7 @@
           if (todayRuns >= 5) {
             startBtn.disabled = false;
             startBtn.textContent = '🤖 자동 수집';
-            alert('오늘 배치 한도(5회)에 도달했습니다.\n하루 최대 5배치 × 100개 = 500개까지 수집 가능합니다.');
+            alert('오늘 수집 한도(5회)에 도달했습니다.\n하루 최대 5회 × 100개 = 500개까지 수집 가능합니다.');
             return;
           }
         }
@@ -2503,13 +2511,13 @@
           if (tierParts.length > 0) tierInfo = tierParts.join(' · ');
         }
 
-        let confirmMsg = '📊 자동 배치 수집\n\n';
+        let confirmMsg = '📊 자동 수집\n\n';
         confirmMsg += '🗂️ 활성 키워드: ' + totalActive + '개\n';
         if (totalOverdue > 0) confirmMsg += '⏰ 만기 도래: ' + totalOverdue + '개\n';
         confirmMsg += '✅ 오늘 수집: ' + collectedToday + '/' + dailyLimit + '개\n';
-        confirmMsg += '📅 배치: ' + (roundsToday + 1) + '/' + maxRounds + '회차 (남은: ' + (remainingBatches - 1) + '회)\n';
+        confirmMsg += '📅 수집: ' + (roundsToday + 1) + '/' + maxRounds + '회차 (남은: ' + (remainingBatches - 1) + '회)\n';
         confirmMsg += '🔄 그룹 턴: ' + groupTurn + '/5\n\n';
-        confirmMsg += '── 이번 배치 ──\n';
+        confirmMsg += '── 이번 수집 ──\n';
         confirmMsg += '📦 수집 대상: ' + batchKeywords.length + '개\n';
         if (tierInfo) confirmMsg += '   ' + tierInfo + '\n';
         confirmMsg += '⏱️ 예상: 약 ' + estMin + '분\n\n';
