@@ -737,7 +737,8 @@ export const watchRouter = router({
       failCount: z.number().int().default(0),
       skipCount: z.number().int().default(0),
       keywords: z.array(z.string()).optional(),
-    }).optional().default({ successCount: 0, failCount: 0, skipCount: 0 }))
+      isManual: z.boolean().default(false),
+    }).optional().default({ successCount: 0, failCount: 0, skipCount: 0, isManual: false }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -794,10 +795,14 @@ export const watchRouter = router({
       // 4. ext_watch_keywords → keyword_master 동기화 (니치파인더 데이터 연동)
       const nicheSync = await syncWatchKeywordsToMaster(userId);
 
-      // 5. 배치 상태 전진 (그룹 턴 이월 + 일일 카운트 증가)
-      await advanceBatchState(userId, input.successCount).catch(err =>
-        console.error("[autoCollectComplete] 배치 상태 업데이트 오류:", err.message)
-      );
+      // 5. 배치 상태 전진 (그룹 턴 이월 + 일일 카운트 증가) — 수동 수집은 제외
+      if (!input.isManual) {
+        await advanceBatchState(userId, input.successCount).catch(err =>
+          console.error("[autoCollectComplete] 배치 상태 업데이트 오류:", err.message)
+        );
+      } else {
+        console.log(`[autoCollectComplete] 수동 수집 — 배치 카운트 증가 생략 (성공: ${input.successCount})`);
+      }
 
       console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}, nicheSynced=${nicheSync.synced}, nicheMetrics=${nicheSync.metricsCreated}`);
       return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount, nicheSynced: nicheSync.synced, nicheMetricsCreated: nicheSync.metricsCreated };
