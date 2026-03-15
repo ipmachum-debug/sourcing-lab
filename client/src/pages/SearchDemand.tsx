@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
   Activity, Zap, Trash2, Clock, Loader2, Square, Sparkles, Info, Plus,
-  ArrowUpRight, ArrowDownRight, Minus, TrendingUp,
+  ArrowUpRight, ArrowDownRight, Minus, TrendingUp, Pin, PinOff,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -59,6 +59,9 @@ export default function SearchDemand() {
   // ===== Mutations =====
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
   const rebuildDailyStats = trpc.extension.rebuildDailyStats.useMutation();
+  const togglePin = trpc.extension.togglePinKeyword.useMutation({
+    onSuccess: () => { keywordStatsList.refetch(); },
+  });
 
   const [rebuildRunning, setRebuildRunning] = useState(false);
   const handleRebuildNormalized = useCallback(async () => {
@@ -372,7 +375,10 @@ export default function SearchDemand() {
                                     setSelectedDeleteKws(next);
                                   }} />
                               </td>
-                              <td className="p-2 font-medium text-indigo-600 max-w-[140px] truncate">"{kw.query}"</td>
+                              <td className="p-2 font-medium text-indigo-600 max-w-[140px] truncate">
+                                {kw.isPinned && <Pin className="w-3 h-3 inline mr-0.5 text-amber-500" />}
+                                "{kw.query}"
+                              </td>
                               <td className="p-2 text-center">{kw.productCount || 0}</td>
                               <td className="p-2 text-center text-red-500 font-medium">{formatPrice(kw.avgPrice)}</td>
                               <td className="p-2 text-center">{kw.avgRating || "-"}</td>
@@ -420,6 +426,16 @@ export default function SearchDemand() {
                               </td>
                               <td className="p-2 text-center" onClick={e => e.stopPropagation()}>
                                 <div className="flex gap-0.5 justify-center">
+                                  <Button variant="ghost" size="sm"
+                                    className={`h-5 w-5 p-0 ${kw.isPinned ? "text-amber-500" : "text-gray-300 hover:text-amber-400"}`}
+                                    title={kw.isPinned ? "핀 해제" : "핀 고정 (배치 최우선)"}
+                                    disabled={!kw.watchId}
+                                    onClick={() => {
+                                      if (!kw.watchId) return;
+                                      togglePin.mutate({ keywordId: kw.watchId, isPinned: !kw.isPinned });
+                                    }}>
+                                    {kw.isPinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
+                                  </Button>
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-pink-500" title="소싱 등록"
                                     onClick={() => openSourcingModal({
                                       source: "keyword", keyword: kw.query,

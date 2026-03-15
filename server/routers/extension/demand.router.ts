@@ -123,6 +123,31 @@ export const demandRouter = router({
         ))
         .limit(input?.limit || 100);
 
+      // 핀 상태 조회 (ext_watch_keywords에서)
+      const pinRows = await db.select({
+        keyword: extWatchKeywords.keyword,
+        isPinned: extWatchKeywords.isPinned,
+        pinOrder: extWatchKeywords.pinOrder,
+        watchId: extWatchKeywords.id,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, ctx.user!.id),
+          eq(extWatchKeywords.isActive, true),
+        ));
+      const pinMap = new Map(pinRows.map(p => [p.keyword, p]));
+
+      // 핀 상태 합치기
+      const enriched = rows.map((r: any) => {
+        const pin = pinMap.get(r.query);
+        return {
+          ...r,
+          isPinned: pin ? !!pin.isPinned : false,
+          pinOrder: pin ? Number(pin.pinOrder) || 0 : 0,
+          watchId: pin?.watchId || null,
+        };
+      });
+
       // 정렬 (snake_case sortBy → camelCase Drizzle 프로퍼티 매핑)
       const sortFieldMap: Record<string, string> = {
         keyword_score: "keywordScore",
@@ -135,7 +160,10 @@ export const demandRouter = router({
       };
       const sortField = sortFieldMap[input?.sortBy || "keyword_score"] || "keywordScore";
       const sortDir = input?.sortDir || "desc";
-      rows.sort((a: any, b: any) => {
+      enriched.sort((a: any, b: any) => {
+        // 핀 키워드 항상 최상단
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        if (a.isPinned && b.isPinned && a.pinOrder !== b.pinOrder) return a.pinOrder - b.pinOrder;
         const av = sortField === "query" ? (a.query || "") : Number(a[sortField] || 0);
         const bv = sortField === "query" ? (b.query || "") : Number(b[sortField] || 0);
         if (sortField === "query") {
@@ -144,7 +172,7 @@ export const demandRouter = router({
         return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
       });
 
-      return rows;
+      return enriched;
     }),
 
   // 키워드별 통계 전체 요약 (대시보드 헤더)

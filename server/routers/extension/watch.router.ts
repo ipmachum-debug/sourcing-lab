@@ -15,7 +15,7 @@ import {
   selectBatchKeywords, computeDailyAggregation, runDailyBatch,
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
-  syncWatchKeywordsToMaster,
+  syncWatchKeywordsToMaster, advanceBatchState,
 } from "../../batchCollector";
 import { autoComputeKeywordDailyStat, autoMatchTrackedProducts } from "./_autoHelpers";
 
@@ -125,6 +125,7 @@ export const watchRouter = router({
           nextCollectAt: nextCollectStr,
           adaptiveIntervalHours: 24,
           volatilityScore: 0,
+          groupNo: Math.floor(Math.random() * 5),
         });
       }
 
@@ -350,6 +351,8 @@ export const watchRouter = router({
           reviewGrowth7d: N(r.reviewGrowth7d),
           priceChange1d: N(r.priceChange1d),
           compositeScore: N(r.compositeScore),
+          isPinned: !!r.isPinned,
+          pinOrder: N(r.pinOrder),
           keywordScore: ds?.keywordScore || N(r.compositeScore),
           demandScore: ds?.demandScore || 0,
           dailyReviewGrowth: ds?.reviewGrowth || 0,
@@ -470,11 +473,10 @@ export const watchRouter = router({
   // ===== 배치 수집 대상 키워드 조회 =====
   getBatchKeywordSelection: protectedProcedure
     .input(z.object({
-      limit: z.number().int().min(1).max(200).default(200),
-      roundNumber: z.number().int().min(1).max(10).default(1),
+      limit: z.number().int().min(1).max(100).default(100),
     }))
     .query(async ({ ctx, input }) => {
-      return await selectBatchKeywords(ctx.user!.id, input.limit, input.roundNumber);
+      return await selectBatchKeywords(ctx.user!.id, input.limit);
     }),
 
   // ===== 검색 이벤트 히스토리 =====
@@ -674,13 +676,19 @@ export const watchRouter = router({
     .input(z.object({
       keywordId: z.number().int(),
       isPinned: z.boolean(),
+      pinOrder: z.number().int().min(0).max(999).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+      const update: any = { isPinned: input.isPinned };
+      if (input.pinOrder !== undefined) update.pinOrder = input.pinOrder;
+      // 핀 해제 시 pinOrder 초기화
+      if (!input.isPinned) update.pinOrder = 0;
+
       await db.update(extWatchKeywords)
-        .set({ isPinned: input.isPinned })
+        .set(update)
         .where(and(
           eq(extWatchKeywords.id, input.keywordId),
           eq(extWatchKeywords.userId, ctx.user!.id),
@@ -796,6 +804,7 @@ export const watchRouter = router({
               isActive: true,
               totalSearchCount: 1,
               collectIntervalHours: 24,
+              groupNo: Math.floor(Math.random() * 5),
             });
             syncCount++;
           }
@@ -807,6 +816,11 @@ export const watchRouter = router({
 
       // 4. ext_watch_keywords → keyword_master 동기화 (니치파인더 데이터 연동)
       const nicheSync = await syncWatchKeywordsToMaster(userId);
+
+      // 5. 배치 상태 전진 (그룹 턴 이월 + 일일 카운트 증가)
+      await advanceBatchState(userId, input.successCount).catch(err =>
+        console.error("[autoCollectComplete] 배치 상태 업데이트 오류:", err.message)
+      );
 
       console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}, nicheSynced=${nicheSync.synced}, nicheMetrics=${nicheSync.metricsCreated}`);
       return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount, nicheSynced: nicheSync.synced, nicheMetricsCreated: nicheSync.metricsCreated };
