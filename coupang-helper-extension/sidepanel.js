@@ -3137,5 +3137,280 @@ async function checkAutoCollectOnTabSwitch() {
     await origLoadDemand();
     showAutoCollectCard();
     await checkAutoCollectOnTabSwitch();
+    // 수동 수집 탭이 활성화되어 있으면 로드
+    var activeSubtab = document.querySelector('.demand-subtab.active');
+    if (activeSubtab && activeSubtab.dataset.subtab === 'manual') {
+      loadManualKeywords();
+    }
   };
 })();
+
+// ============================================================
+//  수동 수집 탭 — 초성 필터 + 수동 배치 수집
+// ============================================================
+
+// 초성 추출 유틸
+var CHOSUNG_LIST = [
+  '\u3131','\u3132','\u3134','\u3137','\u3138','\u3139','\u3141','\u3142','\u3143','\u3145','\u3146',
+  '\u3147','\u3148','\u3149','\u314A','\u314B','\u314C','\u314D','\u314E'
+];
+var CHOSUNG_GROUP = {
+  '\u3132': '\u3131', '\u3138': '\u3137', '\u3143': '\u3142', '\u3146': '\u3145', '\u3149': '\u3148'
+};
+
+function getChosung(ch) {
+  var code = ch.charCodeAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    var idx = Math.floor((code - 0xAC00) / (21 * 28));
+    var raw = CHOSUNG_LIST[idx];
+    return CHOSUNG_GROUP[raw] || raw;
+  }
+  return null;
+}
+
+function getKeywordGroup(query) {
+  if (!query) return 'ETC';
+  var first = query.charAt(0);
+  var chosung = getChosung(first);
+  if (chosung) return chosung;
+  if (/[a-zA-Z]/.test(first)) return 'ABC';
+  if (/[0-9]/.test(first)) return '123';
+  return 'ETC';
+}
+
+// 수동 수집 상태
+var manualAllKeywords = [];
+var manualFilteredKeywords = [];
+var manualSelectedIds = new Set();
+var manualChosungFilter = '전체';
+var manualSearchText = '';
+var manualPage = 1;
+var MANUAL_PER_PAGE = 50;
+
+// 서브탭 전환
+document.querySelectorAll('.demand-subtab').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.demand-subtab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.demand-subtab-content').forEach(function(c) { c.classList.remove('active'); });
+    btn.classList.add('active');
+    var target = document.querySelector('#subtab-' + btn.dataset.subtab);
+    if (target) target.classList.add('active');
+    if (btn.dataset.subtab === 'manual') loadManualKeywords();
+  });
+});
+
+async function loadManualKeywords() {
+  var { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    document.querySelector('#manualEmpty').textContent = '서버 로그인이 필요합니다.';
+    document.querySelector('#manualEmpty').style.display = '';
+    return;
+  }
+  try {
+    var resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'keyword', limit: 1000 } });
+    if (!resp || !resp.ok || !resp.data || !resp.data.length) {
+      document.querySelector('#manualEmpty').style.display = '';
+      document.querySelector('#manualKwTotalCount').textContent = '0';
+      manualAllKeywords = [];
+      filterManualKeywords();
+      return;
+    }
+    manualAllKeywords = resp.data;
+    document.querySelector('#manualEmpty').style.display = 'none';
+    document.querySelector('#manualKwTotalCount').textContent = manualAllKeywords.length;
+    updateChosungCounts();
+    filterManualKeywords();
+  } catch (e) {
+    console.error('[Manual] load error:', e);
+  }
+}
+
+function updateChosungCounts() {
+  var counts = {};
+  manualAllKeywords.forEach(function(kw) {
+    var grp = getKeywordGroup(kw.keyword);
+    counts[grp] = (counts[grp] || 0) + 1;
+  });
+  document.querySelectorAll('.chosung-btn').forEach(function(btn) {
+    var ch = btn.dataset.chosung;
+    if (ch === '전체') {
+      btn.textContent = '전체';
+      return;
+    }
+    var cnt = counts[ch] || 0;
+    btn.innerHTML = ch + (cnt > 0 ? '<span class="ch-count">' + cnt + '</span>' : '');
+    btn.classList.toggle('disabled', cnt === 0);
+  });
+}
+
+function filterManualKeywords() {
+  var filtered = manualAllKeywords;
+
+  // 초성 필터
+  if (manualChosungFilter !== '전체') {
+    filtered = filtered.filter(function(kw) {
+      return getKeywordGroup(kw.keyword) === manualChosungFilter;
+    });
+  }
+
+  // 검색어 필터
+  if (manualSearchText.trim()) {
+    var q = manualSearchText.trim().toLowerCase();
+    filtered = filtered.filter(function(kw) {
+      return kw.keyword.toLowerCase().includes(q);
+    });
+  }
+
+  // 한글 정렬
+  filtered.sort(function(a, b) { return a.keyword.localeCompare(b.keyword, 'ko'); });
+
+  manualFilteredKeywords = filtered;
+  manualPage = 1;
+  renderManualKeywords();
+}
+
+function renderManualKeywords() {
+  var list = document.querySelector('#manualKeywordList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  var total = manualFilteredKeywords.length;
+  var totalPages = Math.max(1, Math.ceil(total / MANUAL_PER_PAGE));
+  manualPage = Math.min(manualPage, totalPages);
+  var start = (manualPage - 1) * MANUAL_PER_PAGE;
+  var pageItems = manualFilteredKeywords.slice(start, start + MANUAL_PER_PAGE);
+
+  if (pageItems.length === 0) {
+    document.querySelector('#manualEmpty').style.display = '';
+    document.querySelector('#manualEmpty').textContent = manualSearchText || manualChosungFilter !== '전체'
+      ? '검색 결과가 없습니다.' : '감시 키워드가 없습니다.';
+    document.querySelector('#manualPagination').style.display = 'none';
+    updateManualSelectedCount();
+    return;
+  }
+  document.querySelector('#manualEmpty').style.display = 'none';
+
+  pageItems.forEach(function(kw) {
+    var el = document.createElement('div');
+    el.className = 'demand-kw-item' + (manualSelectedIds.has(kw.id) ? ' selected' : '');
+    el.dataset.kwId = kw.id;
+
+    var scoreClass = kw.compositeScore >= 60 ? 's-high' : kw.compositeScore >= 30 ? 's-mid' : 's-low';
+    var lastStr = kw.lastSearchedAt ? timeAgo(kw.lastSearchedAt) : '미수집';
+    var tags = '';
+    if (kw.latestAvgPrice > 0) tags += '<span class="demand-kw-tag">' + formatDemandPrice(kw.latestAvgPrice) + '</span>';
+    tags += '<span class="demand-kw-tag">' + lastStr + '</span>';
+
+    el.innerHTML =
+      '<div class="demand-kw-check"><input type="checkbox" ' + (manualSelectedIds.has(kw.id) ? 'checked' : '') + ' /></div>' +
+      '<div class="demand-kw-info">' +
+        '<div class="demand-kw-name">' + escHtml(kw.keyword) + '</div>' +
+        '<div class="demand-kw-meta">' + tags + '</div>' +
+      '</div>' +
+      '<div class="demand-kw-score ' + scoreClass + '">' + (kw.compositeScore || 0) + '</div>';
+
+    el.querySelector('input[type="checkbox"]').addEventListener('change', function(e) {
+      e.stopPropagation();
+      if (e.target.checked) { manualSelectedIds.add(kw.id); el.classList.add('selected'); }
+      else { manualSelectedIds.delete(kw.id); el.classList.remove('selected'); }
+      updateManualSelectedCount();
+    });
+
+    el.addEventListener('click', function(e) {
+      if (e.target.tagName === 'INPUT') return;
+      var cb = el.querySelector('input[type="checkbox"]');
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event('change'));
+    });
+
+    list.appendChild(el);
+  });
+
+  // 페이지네이션
+  var pagEl = document.querySelector('#manualPagination');
+  if (totalPages > 1) {
+    pagEl.style.display = 'flex';
+    document.querySelector('#manualPageInfo').textContent = manualPage + ' / ' + totalPages;
+  } else {
+    pagEl.style.display = 'none';
+  }
+  updateManualSelectedCount();
+}
+
+function updateManualSelectedCount() {
+  var el = document.querySelector('#manualSelectedCount');
+  if (el) el.textContent = manualSelectedIds.size + '개 선택';
+}
+
+// 초성 필터 클릭
+document.querySelector('#chosungFilter').addEventListener('click', function(e) {
+  var btn = e.target.closest('.chosung-btn');
+  if (!btn || btn.classList.contains('disabled')) return;
+  document.querySelectorAll('.chosung-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  manualChosungFilter = btn.dataset.chosung;
+  filterManualKeywords();
+});
+
+// 검색 입력
+document.querySelector('#manualKwSearch').addEventListener('input', function(e) {
+  manualSearchText = e.target.value;
+  filterManualKeywords();
+});
+
+// 새로고침
+document.querySelector('#manualKwRefreshBtn').addEventListener('click', function() {
+  manualSelectedIds.clear();
+  loadManualKeywords();
+});
+
+// 페이지네이션
+document.querySelector('#manualPrevPage').addEventListener('click', function() {
+  if (manualPage > 1) { manualPage--; renderManualKeywords(); }
+});
+document.querySelector('#manualNextPage').addEventListener('click', function() {
+  var totalPages = Math.max(1, Math.ceil(manualFilteredKeywords.length / MANUAL_PER_PAGE));
+  if (manualPage < totalPages) { manualPage++; renderManualKeywords(); }
+});
+
+// 수동 수집 실행 버튼
+document.querySelector('#manualCollectBtn').addEventListener('click', async function() {
+  if (manualSelectedIds.size === 0) {
+    alert('수집할 키워드를 선택해주세요.');
+    return;
+  }
+
+  var selectedKws = manualAllKeywords.filter(function(kw) { return manualSelectedIds.has(kw.id); });
+  var keywordList = selectedKws.map(function(kw) { return kw.keyword; });
+  var collectDetail = document.querySelector('#manualCollectDetailCheck').checked;
+  var estMin = Math.ceil(keywordList.length * 20 / 60);
+
+  if (!confirm('선택한 ' + keywordList.length + '개 키워드를 수집합니다.\n⏱️ 예상: 약 ' + estMin + '분\n\n계속하시겠습니까?')) return;
+
+  var resp = await sendMsg({
+    type: 'START_AUTO_COLLECT',
+    payload: { limit: keywordList.length, collectDetail: collectDetail, keywords: keywordList, roundSize: keywordList.length }
+  });
+
+  if (resp && resp.ok) {
+    document.querySelector('#manualCollectProgress').style.display = '';
+    var pollId = setInterval(async function() {
+      var st = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+      if (!st || !st.ok) return;
+      var state = st.data;
+      var done = state.successCount + state.failCount + state.skipCount;
+      var total = state.totalQueued || keywordList.length;
+      var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+      document.querySelector('#manualCollectProgressFill').style.width = pct + '%';
+      document.querySelector('#manualCollectProgressText').textContent = done + '/' + total;
+
+      if (!state.running && state.status !== 'PAUSED') {
+        clearInterval(pollId);
+        document.querySelector('#manualCollectProgress').style.display = 'none';
+        manualSelectedIds.clear();
+        await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' });
+        setTimeout(function() { loadManualKeywords(); }, 1000);
+      }
+    }, 3000);
+  }
+});

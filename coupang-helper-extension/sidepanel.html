@@ -170,112 +170,183 @@
       </div>
     </div>
 
-    <!-- ========== 검색수요 탭 (v7.2) ========== -->
+    <!-- ========== 수집 탭 (v8.5 자동/수동 분리) ========== -->
     <div class="tab-content" id="tab-demand">
-      <div class="section-header">
-        <h2>🔥 자동 수집</h2>
-        <div style="display:flex;gap:4px;align-items:center">
-          <div class="demand-toggle-wrap">
-            <label class="demand-toggle" title="배치 수집 ON/OFF">
-              <input type="checkbox" id="batchToggle" />
-              <span class="demand-slider"></span>
-            </label>
-            <span class="demand-toggle-label" id="batchToggleLabel">배치 OFF</span>
-          </div>
-        </div>
-      </div>
+      <!-- 서브탭 네비게이션 -->
+      <nav class="demand-subtabs">
+        <button class="demand-subtab active" data-subtab="auto">🤖 자동 수집</button>
+        <button class="demand-subtab" data-subtab="manual">✋ 수동 수집</button>
+      </nav>
 
-      <!-- 통합 수집 상태 카드 (v7.2) -->
-      <div class="analysis-card" id="demandStatusCard">
-        <div class="competition-header">
-          <span class="competition-label">🔍 데이터 수집</span>
-          <span class="competition-badge" id="autoCollectStatusBadge">준비</span>
-        </div>
-        <p class="desc" style="font-size:10px;color:#64748b;margin:4px 0">
-          서버의 검색수요 키워드를 순차적으로 쿠팡에서 수집합니다.<br/>
-          <small>순차 1개씩 · 50~89초 랜덤 간격 · 실패 시 2~5분 대기 후 1회 재시도</small>
-        </p>
-        <div class="demand-last-run" id="demandLastRun" style="display:none">
-          <small>마지막 수집: <span id="demandLastRunTime">-</span></small>
-        </div>
-      </div>
-
-      <!-- 대시보드 통계 -->
-      <div class="stats-grid" id="demandStatsGrid" style="display:none">
-        <div class="stat-box"><div class="stat-value" id="demandStatKeywords">-</div><div class="stat-label">감시 키워드</div></div>
-        <div class="stat-box"><div class="stat-value" id="demandStatEvents">-</div><div class="stat-label">검색이벤트(7d)</div></div>
-        <div class="stat-box"><div class="stat-value" id="demandStatQuality">-</div><div class="stat-label">파싱 품질</div></div>
-        <div class="stat-box"><div class="stat-value" id="demandStatGrowth">-</div><div class="stat-label">성장 키워드</div></div>
-      </div>
-
-      <!-- 통합 수집 컨트롤 (v7.2) -->
-      <div class="analysis-card demand-batch-controls" id="demandBatchControls" style="display:none">
-        <div class="demand-mode-row">
-          <label class="demand-radio"><input type="radio" name="batchMode" value="all" checked /> 전체 키워드</label>
-          <label class="demand-radio"><input type="radio" name="batchMode" value="selected" /> 선택한 키워드</label>
-          <label class="demand-radio" style="color:#dc2626"><input type="radio" name="batchMode" value="uncollected" /> 미수집 키워드 <span id="uncollectedBadge" style="background:#dc2626;color:#fff;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700;display:none">0</span></label>
-        </div>
-        <div class="demand-batch-size-row">
-          <label>라운드 단위:</label>
-          <select id="batchSizeSelect">
-            <option value="1">1개씩</option>
-            <option value="2" selected>2개씩</option>
-            <option value="3">3개씩</option>
-            <option value="5">5개씩</option>
-            <option value="10">10개씩</option>
-            <option value="20">20개씩</option>
-            <option value="30">30개씩</option>
-            <option value="50">50개씩</option>
-            <option value="0">전체 한번에</option>
-          </select>
-          <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" /> 상세 Top3</label>
-        </div>
-        <div style="display:flex;gap:4px;margin-top:6px">
-          <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1">▶ 수집 시작</button>
-          <button class="btn-sm" id="pauseAutoCollectBtn" style="display:none;background:#f59e0b;color:#fff">⏸ 일시정지</button>
-          <button class="btn-sm" id="stopAutoCollectBtn" style="display:none;background:#dc2626;color:#fff">⏹ 중단</button>
-        </div>
-        <div class="demand-batch-progress" id="batchProgressBar" style="display:none">
-          <div class="demand-progress-fill" id="batchProgressFill" style="width:0%"></div>
-          <span class="demand-progress-text" id="batchProgressText">0/0</span>
-        </div>
-        <!-- 수집 진행 상황 -->
-        <div id="autoCollectProgress" style="display:none;margin-top:8px">
-          <div class="demand-batch-progress" style="display:block">
-            <div class="demand-progress-fill" id="autoCollectProgressFill" style="width:0%"></div>
-            <span class="demand-progress-text" id="autoCollectProgressText">0/0</span>
-          </div>
-          <div id="autoCollectLog" style="margin-top:4px;font-size:9px;color:#64748b;max-height:80px;overflow-y:auto"></div>
-        </div>
-      </div>
-
-      <!-- 키워드 목록 -->
-      <div class="demand-kw-header" id="demandKwHeader" style="display:none">
-        <div class="demand-kw-sort">
-          <label>정렬:</label>
-          <select id="demandSortSelect">
-            <option value="compositeScore">종합점수</option>
-            <option value="lastSearched">최근검색</option>
-            <option value="reviewGrowth">리뷰증가</option>
-            <option value="priority">우선순위</option>
-          </select>
-        </div>
-        <div class="demand-kw-actions">
-          <label class="filter-check"><input type="checkbox" id="demandSelectAll" /> 전체선택</label>
-          <button class="btn-sm" id="demandRefreshBtn" title="목록 새로고침">🔄</button>
-        </div>
-      </div>
-
-      <div id="demandKeywordList" class="demand-kw-list"></div>
-      <p class="empty-msg" id="demandEmpty">아직 감시 키워드가 없습니다.<br/>쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.</p>
-
-      <!-- 선택 키워드 상세 -->
-      <div id="demandDetailCard" class="analysis-card" style="display:none">
+      <!-- ═══════ 자동 수집 서브탭 ═══════ -->
+      <div class="demand-subtab-content active" id="subtab-auto">
         <div class="section-header">
-          <h2 id="demandDetailTitle">-</h2>
-          <button class="btn-sm" id="demandDetailClose">✕</button>
+          <h2>🤖 자동 수집</h2>
+          <div style="display:flex;gap:4px;align-items:center">
+            <div class="demand-toggle-wrap">
+              <label class="demand-toggle" title="배치 수집 ON/OFF">
+                <input type="checkbox" id="batchToggle" />
+                <span class="demand-slider"></span>
+              </label>
+              <span class="demand-toggle-label" id="batchToggleLabel">배치 OFF</span>
+            </div>
+          </div>
         </div>
-        <div id="demandDetailContent"></div>
+
+        <!-- 통합 수집 상태 카드 (v7.2) -->
+        <div class="analysis-card" id="demandStatusCard">
+          <div class="competition-header">
+            <span class="competition-label">🔍 데이터 수집</span>
+            <span class="competition-badge" id="autoCollectStatusBadge">준비</span>
+          </div>
+          <p class="desc" style="font-size:10px;color:#64748b;margin:4px 0">
+            서버의 검색수요 키워드를 순차적으로 쿠팡에서 수집합니다.<br/>
+            <small>순차 1개씩 · 50~89초 랜덤 간격 · 실패 시 2~5분 대기 후 1회 재시도</small>
+          </p>
+          <div class="demand-last-run" id="demandLastRun" style="display:none">
+            <small>마지막 수집: <span id="demandLastRunTime">-</span></small>
+          </div>
+        </div>
+
+        <!-- 대시보드 통계 -->
+        <div class="stats-grid" id="demandStatsGrid" style="display:none">
+          <div class="stat-box"><div class="stat-value" id="demandStatKeywords">-</div><div class="stat-label">감시 키워드</div></div>
+          <div class="stat-box"><div class="stat-value" id="demandStatEvents">-</div><div class="stat-label">검색이벤트(7d)</div></div>
+          <div class="stat-box"><div class="stat-value" id="demandStatQuality">-</div><div class="stat-label">파싱 품질</div></div>
+          <div class="stat-box"><div class="stat-value" id="demandStatGrowth">-</div><div class="stat-label">성장 키워드</div></div>
+        </div>
+
+        <!-- 통합 수집 컨트롤 (v7.2) -->
+        <div class="analysis-card demand-batch-controls" id="demandBatchControls" style="display:none">
+          <div class="demand-mode-row">
+            <label class="demand-radio"><input type="radio" name="batchMode" value="all" checked /> 전체 키워드</label>
+            <label class="demand-radio"><input type="radio" name="batchMode" value="selected" /> 선택한 키워드</label>
+            <label class="demand-radio" style="color:#dc2626"><input type="radio" name="batchMode" value="uncollected" /> 미수집 키워드 <span id="uncollectedBadge" style="background:#dc2626;color:#fff;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700;display:none">0</span></label>
+          </div>
+          <div class="demand-batch-size-row">
+            <label>라운드 단위:</label>
+            <select id="batchSizeSelect">
+              <option value="1">1개씩</option>
+              <option value="2" selected>2개씩</option>
+              <option value="3">3개씩</option>
+              <option value="5">5개씩</option>
+              <option value="10">10개씩</option>
+              <option value="20">20개씩</option>
+              <option value="30">30개씩</option>
+              <option value="50">50개씩</option>
+              <option value="0">전체 한번에</option>
+            </select>
+            <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" /> 상세 Top3</label>
+          </div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1">▶ 수집 시작</button>
+            <button class="btn-sm" id="pauseAutoCollectBtn" style="display:none;background:#f59e0b;color:#fff">⏸ 일시정지</button>
+            <button class="btn-sm" id="stopAutoCollectBtn" style="display:none;background:#dc2626;color:#fff">⏹ 중단</button>
+          </div>
+          <div class="demand-batch-progress" id="batchProgressBar" style="display:none">
+            <div class="demand-progress-fill" id="batchProgressFill" style="width:0%"></div>
+            <span class="demand-progress-text" id="batchProgressText">0/0</span>
+          </div>
+          <!-- 수집 진행 상황 -->
+          <div id="autoCollectProgress" style="display:none;margin-top:8px">
+            <div class="demand-batch-progress" style="display:block">
+              <div class="demand-progress-fill" id="autoCollectProgressFill" style="width:0%"></div>
+              <span class="demand-progress-text" id="autoCollectProgressText">0/0</span>
+            </div>
+            <div id="autoCollectLog" style="margin-top:4px;font-size:9px;color:#64748b;max-height:80px;overflow-y:auto"></div>
+          </div>
+        </div>
+
+        <!-- 키워드 목록 -->
+        <div class="demand-kw-header" id="demandKwHeader" style="display:none">
+          <div class="demand-kw-sort">
+            <label>정렬:</label>
+            <select id="demandSortSelect">
+              <option value="compositeScore">종합점수</option>
+              <option value="lastSearched">최근검색</option>
+              <option value="reviewGrowth">리뷰증가</option>
+              <option value="priority">우선순위</option>
+            </select>
+          </div>
+          <div class="demand-kw-actions">
+            <label class="filter-check"><input type="checkbox" id="demandSelectAll" /> 전체선택</label>
+            <button class="btn-sm" id="demandRefreshBtn" title="목록 새로고침">🔄</button>
+          </div>
+        </div>
+
+        <div id="demandKeywordList" class="demand-kw-list"></div>
+        <p class="empty-msg" id="demandEmpty">아직 감시 키워드가 없습니다.<br/>쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.</p>
+
+        <!-- 선택 키워드 상세 -->
+        <div id="demandDetailCard" class="analysis-card" style="display:none">
+          <div class="section-header">
+            <h2 id="demandDetailTitle">-</h2>
+            <button class="btn-sm" id="demandDetailClose">✕</button>
+          </div>
+          <div id="demandDetailContent"></div>
+        </div>
+      </div>
+
+      <!-- ═══════ 수동 수집 서브탭 ═══════ -->
+      <div class="demand-subtab-content" id="subtab-manual">
+        <div class="section-header">
+          <h2>✋ 수동 수집</h2>
+          <span class="badge" id="manualKwTotalCount">0</span>
+        </div>
+
+        <!-- 검색 입력 -->
+        <div class="manual-search-bar">
+          <input type="text" id="manualKwSearch" placeholder="키워드 검색..." class="manual-search-input" />
+          <button class="btn-sm" id="manualKwRefreshBtn" title="새로고침">🔄</button>
+        </div>
+
+        <!-- 초성 필터 -->
+        <div class="chosung-filter" id="chosungFilter">
+          <button class="chosung-btn active" data-chosung="전체">전체</button>
+          <button class="chosung-btn" data-chosung="ㄱ">ㄱ</button>
+          <button class="chosung-btn" data-chosung="ㄴ">ㄴ</button>
+          <button class="chosung-btn" data-chosung="ㄷ">ㄷ</button>
+          <button class="chosung-btn" data-chosung="ㄹ">ㄹ</button>
+          <button class="chosung-btn" data-chosung="ㅁ">ㅁ</button>
+          <button class="chosung-btn" data-chosung="ㅂ">ㅂ</button>
+          <button class="chosung-btn" data-chosung="ㅅ">ㅅ</button>
+          <button class="chosung-btn" data-chosung="ㅇ">ㅇ</button>
+          <button class="chosung-btn" data-chosung="ㅈ">ㅈ</button>
+          <button class="chosung-btn" data-chosung="ㅊ">ㅊ</button>
+          <button class="chosung-btn" data-chosung="ㅋ">ㅋ</button>
+          <button class="chosung-btn" data-chosung="ㅌ">ㅌ</button>
+          <button class="chosung-btn" data-chosung="ㅍ">ㅍ</button>
+          <button class="chosung-btn" data-chosung="ㅎ">ㅎ</button>
+          <button class="chosung-btn" data-chosung="ABC">ABC</button>
+          <button class="chosung-btn" data-chosung="123">123</button>
+        </div>
+
+        <!-- 수동 수집 컨트롤 -->
+        <div class="manual-collect-controls" id="manualCollectControls">
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="manual-selected-count" id="manualSelectedCount">0개 선택</span>
+            <label class="filter-check" style="font-size:10px"><input type="checkbox" id="manualCollectDetailCheck" /> 상세 Top3</label>
+            <button class="btn-sm btn-primary-sm" id="manualCollectBtn" style="flex:1">▶ 선택 수집</button>
+          </div>
+          <!-- 수동 수집 진행 상황 -->
+          <div id="manualCollectProgress" style="display:none;margin-top:6px">
+            <div class="demand-batch-progress" style="display:block">
+              <div class="demand-progress-fill" id="manualCollectProgressFill" style="width:0%"></div>
+              <span class="demand-progress-text" id="manualCollectProgressText">0/0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 키워드 목록 -->
+        <div id="manualKeywordList" class="demand-kw-list"></div>
+        <p class="empty-msg" id="manualEmpty">서버 로그인 후 키워드가 표시됩니다.</p>
+
+        <!-- 페이지네이션 -->
+        <div class="manual-pagination" id="manualPagination" style="display:none">
+          <button class="btn-sm" id="manualPrevPage">◀ 이전</button>
+          <span class="ds-page-info" id="manualPageInfo">1 / 1</span>
+          <button class="btn-sm" id="manualNextPage">다음 ▶</button>
+        </div>
       </div>
     </div>
 

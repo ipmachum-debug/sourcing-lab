@@ -2129,6 +2129,71 @@ header h1 {
    검색수요 탭 (v6.3)
    ============================================================ */
 
+/* 수집 탭 서브탭 네비게이션 */
+.demand-subtabs {
+  display: flex; gap: 2px; padding: 4px;
+  background: var(--gray-100); border-radius: 8px; margin-bottom: 12px;
+}
+.demand-subtab {
+  flex: 1; padding: 7px 8px; border: none; background: transparent;
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--gray-500);
+  border-radius: 6px; transition: all .15s;
+}
+.demand-subtab:hover { color: var(--gray-700); background: rgba(255,255,255,0.5); }
+.demand-subtab.active {
+  background: white; color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.demand-subtab-content { display: none; }
+.demand-subtab-content.active { display: block; }
+
+/* 수동 수집: 검색 바 */
+.manual-search-bar {
+  display: flex; gap: 6px; margin-bottom: 8px;
+}
+.manual-search-input {
+  flex: 1; padding: 7px 10px; border: 1px solid var(--gray-200);
+  border-radius: 6px; font-size: 12px; outline: none;
+  transition: border-color .15s;
+}
+.manual-search-input:focus { border-color: var(--primary); }
+
+/* 수동 수집: 초성 필터 */
+.chosung-filter {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px;
+}
+.chosung-btn {
+  padding: 4px 7px; border: 1px solid var(--gray-200); background: white;
+  border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer;
+  color: var(--gray-500); transition: all .15s; min-width: 28px; text-align: center;
+}
+.chosung-btn:hover { border-color: var(--primary); color: var(--primary); }
+.chosung-btn.active {
+  background: var(--primary); color: white; border-color: var(--primary);
+}
+.chosung-btn .ch-count {
+  font-size: 8px; font-weight: 700; margin-left: 1px; opacity: 0.7;
+}
+.chosung-btn.disabled {
+  opacity: 0.3; cursor: default; pointer-events: none;
+}
+
+/* 수동 수집: 컨트롤 */
+.manual-collect-controls {
+  padding: 8px 10px; background: var(--gray-50);
+  border-radius: 8px; margin-bottom: 8px;
+}
+.manual-selected-count {
+  font-size: 11px; font-weight: 700; color: var(--primary);
+  min-width: 50px;
+}
+
+/* 수동 수집: 페이지네이션 */
+.manual-pagination {
+  display: flex; justify-content: center; align-items: center;
+  gap: 8px; padding: 8px 0; margin-top: 4px;
+}
+
 /* 배치 토글 스위치 */
 .demand-toggle-wrap { display: flex; align-items: center; gap: 6px; }
 .demand-toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
