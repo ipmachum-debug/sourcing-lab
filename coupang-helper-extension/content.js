@@ -2379,89 +2379,138 @@
     startBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       startBtn.disabled = true;
-      startBtn.textContent = '⏳ 준비 중...';
+      startBtn.textContent = '⏳ 서버 조회 중...';
 
       try {
-        // v8.5.2: 하루 5배치 제한 먼저 체크
-        const todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
-        if (todayRuns >= 5) {
-          startBtn.disabled = false;
-          startBtn.textContent = '🤖 자동 수집';
-          alert('오늘 배치 한도(5회)에 도달했습니다.\n하루 최대 5배치 × 100개 = 500개까지 수집 가능합니다.');
-          return;
-        }
+        // ── v8.5.3: 서버 적응형 스케줄러에서 배치 정보를 가져옴 ──
+        let serverBatch = null;
+        let batchKeywords = [];
+        let dailyStats = null;
+        let sessionLimits = null;
+        let totalActive = 0;
 
-        // 서버에서 감시 키워드 목록 가져오기
-        const kwResp = await chrome.runtime.sendMessage({
-          type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 }
-        });
-
-        let keywordList = [];
-        if (kwResp?.ok && kwResp.data) {
-          const data = kwResp.data;
-          const arr = Array.isArray(data) ? data : (data.items || data.keywords || []);
-          keywordList = arr.map(kw => kw.keyword || kw);
-        }
-        const totalRegisteredCount = keywordList.length;
-
-        if (keywordList.length === 0) {
-          startBtn.disabled = false;
-          startBtn.textContent = '🤖 자동 수집';
-          alert('감시 키워드가 없습니다.\n사이드패널 > 수집 탭에서 키워드를 등록하세요.');
-          return;
-        }
-
-        // v8.5.2: 이미 수집된 키워드 필터링
-        let alreadyCollectedCount = 0;
         try {
-          const ucResp = await chrome.runtime.sendMessage({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
-          if (ucResp?.ok && ucResp.data?.collectedKeywords?.length > 0) {
-            const collectedSet = new Set(ucResp.data.collectedKeywords);
-            const beforeLen = keywordList.length;
-            keywordList = keywordList.filter(kw => !collectedSet.has(kw));
-            alreadyCollectedCount = beforeLen - keywordList.length;
+          console.log('[SH] 서버 적응형 스케줄러 조회 중...');
+          const batchResp = await chrome.runtime.sendMessage({
+            type: 'HYBRID_BATCH_SELECTION', opts: { limit: 100 }
+          });
+          if (batchResp?.ok && batchResp.data) {
+            serverBatch = batchResp.data;
+            const serverKws = serverBatch.keywords || [];
+            batchKeywords = serverKws.map(k => k.keyword);
+            dailyStats = serverBatch.dailyStats || {};
+            sessionLimits = serverBatch.sessionLimits || {};
+            totalActive = serverBatch.totalActive || 0;
+            console.log('[SH] 서버 선별: ' + batchKeywords.length + '개 (활성 ' + totalActive + ', 배치 ' + (dailyStats.roundsToday || 0) + '/' + (dailyStats.maxRoundsPerDay || 5) + ', 그룹턴 ' + (dailyStats.currentGroupTurn || 0) + ')');
           }
-        } catch (_) {}
+        } catch (ex) {
+          console.warn('[SH] 서버 배치 선별 실패, 로컬 폴백:', ex.message);
+        }
 
-        if (keywordList.length === 0) {
+        // ── 서버 응답 기반 한도 체크 ──
+        if (dailyStats) {
+          if (dailyStats.roundsToday >= (dailyStats.maxRoundsPerDay || 5)) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🤖 자동 수집';
+            alert('오늘 배치 한도(' + (dailyStats.maxRoundsPerDay || 5) + '회)에 도달했습니다.\n오늘 수집: ' + (dailyStats.collectedToday || 0) + '/' + (dailyStats.dailyLimit || 500) + '개\n내일 다시 시도해주세요.');
+            return;
+          }
+          if ((dailyStats.remainingToday || 0) <= 0) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🤖 자동 수집';
+            alert('오늘 일일 수집 한도(' + (dailyStats.dailyLimit || 500) + '개)에 도달했습니다.\n내일 다시 시도해주세요.');
+            return;
+          }
+        } else {
+          const todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
+          if (todayRuns >= 5) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🤖 자동 수집';
+            alert('오늘 배치 한도(5회)에 도달했습니다.\n하루 최대 5배치 × 100개 = 500개까지 수집 가능합니다.');
+            return;
+          }
+        }
+
+        // ── 서버 선별 실패 시 로컬 폴백 ──
+        if (batchKeywords.length === 0) {
+          console.log('[SH] 서버 선별 결과 없음, 로컬 키워드 로드...');
+          const kwResp = await chrome.runtime.sendMessage({
+            type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 }
+          });
+          let keywordList = [];
+          if (kwResp?.ok && kwResp.data) {
+            const data = kwResp.data;
+            const arr = Array.isArray(data) ? data : (data.items || data.keywords || []);
+            keywordList = arr.map(kw => kw.keyword || kw);
+          }
+          if (keywordList.length === 0) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🤖 자동 수집';
+            alert('감시 키워드가 없습니다.\n사이드패널 > 수집 탭에서 키워드를 등록하세요.');
+            return;
+          }
+          batchKeywords = keywordList.slice(0, 100);
+          totalActive = keywordList.length;
+        }
+
+        if (batchKeywords.length === 0) {
           startBtn.disabled = false;
           startBtn.textContent = '🤖 자동 수집';
-          alert('오늘 모든 키워드가 이미 수집되었습니다!');
+          alert('수집할 키워드가 없습니다.\n모든 키워드가 수집 완료되었거나 만기 전입니다.');
           return;
         }
 
-        // v8.5.2: 배치 로직 — 이번 배치 최대 100개
-        const BATCH_SIZE = 100;
-        const batchKeywords = keywordList.slice(0, BATCH_SIZE);
-        const totalUncollected = keywordList.length;
-        const neededBatches = Math.ceil(totalUncollected / BATCH_SIZE);
-        const remainingBatches = 5 - todayRuns;
+        // ── 확인 다이얼로그 (서버 기반 정확한 정보) ──
+        const roundsToday = dailyStats?.roundsToday || 0;
+        const maxRounds = dailyStats?.maxRoundsPerDay || 5;
+        const collectedToday = dailyStats?.collectedToday || 0;
+        const dailyLimit = dailyStats?.dailyLimit || 500;
+        const remainingBatches = maxRounds - roundsToday;
+        const totalOverdue = serverBatch?.totalOverdue || 0;
         const estMin = Math.ceil(batchKeywords.length * 25 / 60);
+        const groupTurn = dailyStats?.currentGroupTurn || 0;
 
-        let confirmMsg = `📊 배치 수집\n\n🗂️ 전체 등록: ${totalRegisteredCount}개\n`;
-        if (alreadyCollectedCount > 0) confirmMsg += `✅ 오늘 수집 완료: ${alreadyCollectedCount}개\n`;
-        confirmMsg += `📋 미수집: ${totalUncollected}개\n\n── 이번 배치 ──\n`;
-        confirmMsg += `📦 수집 대상: ${batchKeywords.length}개 (1배치=최대100)\n`;
-        confirmMsg += `📅 남은 배치: ${remainingBatches}회 (5회 중 ${todayRuns}회 완료)\n`;
-        if (totalUncollected > BATCH_SIZE) confirmMsg += `🔄 전체 완료까지: ${neededBatches}배치 필요\n`;
-        confirmMsg += `⏱️ 예상: 약 ${estMin}분\n\n계속하시겠습니까?`;
+        let tierInfo = '';
+        if (serverBatch?.keywords) {
+          const reasons = {};
+          serverBatch.keywords.forEach(k => {
+            const r = k.selectionReason || '기타';
+            reasons[r] = (reasons[r] || 0) + 1;
+          });
+          const tierParts = [];
+          if (reasons['핀_키워드']) tierParts.push('📌 핀: ' + reasons['핀_키워드']);
+          if (reasons['신규_안정화']) tierParts.push('🆕 신규: ' + reasons['신규_안정화']);
+          const regularCount = batchKeywords.length - (reasons['핀_키워드'] || 0) - (reasons['신규_안정화'] || 0);
+          if (regularCount > 0) tierParts.push('📊 일반: ' + regularCount);
+          if (tierParts.length > 0) tierInfo = tierParts.join(' · ');
+        }
+
+        let confirmMsg = '📊 자동 배치 수집\n\n';
+        confirmMsg += '🗂️ 활성 키워드: ' + totalActive + '개\n';
+        if (totalOverdue > 0) confirmMsg += '⏰ 만기 도래: ' + totalOverdue + '개\n';
+        confirmMsg += '✅ 오늘 수집: ' + collectedToday + '/' + dailyLimit + '개\n';
+        confirmMsg += '📅 배치: ' + (roundsToday + 1) + '/' + maxRounds + '회차 (남은: ' + (remainingBatches - 1) + '회)\n';
+        confirmMsg += '🔄 그룹 턴: ' + groupTurn + '/5\n\n';
+        confirmMsg += '── 이번 배치 ──\n';
+        confirmMsg += '📦 수집 대상: ' + batchKeywords.length + '개\n';
+        if (tierInfo) confirmMsg += '   ' + tierInfo + '\n';
+        confirmMsg += '⏱️ 예상: 약 ' + estMin + '분\n\n';
+        confirmMsg += '계속하시겠습니까?';
 
         if (!confirm(confirmMsg)) {
           startBtn.disabled = false;
           startBtn.textContent = '🤖 자동 수집';
           return;
         }
-
         const resp = await chrome.runtime.sendMessage({
           type: 'START_AUTO_COLLECT',
-          payload: { limit: batchKeywords.length, collectDetail: false, keywords: batchKeywords, roundSize: BATCH_SIZE }
+          payload: { limit: batchKeywords.length, collectDetail: false, keywords: batchKeywords, roundSize: 100 }
         });
-
         if (resp?.ok) {
-          showBatchRunning(keywordList.length);
-          startBatchPolling(keywordList.length);
+          showBatchRunning(batchKeywords.length);
+          startBatchPolling(batchKeywords.length);
         } else {
           startBtn.disabled = false;
           startBtn.textContent = '🤖 자동 수집';
