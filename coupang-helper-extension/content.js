@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v8.4.0
+   Coupang Sourcing Helper — Content Script v8.5.0
    "시장 인사이트 대시보드" — 경쟁분석 + 배송유형 + 분포차트
 
    원칙:
@@ -49,7 +49,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '8.4.0';
+  const VER = '8.5.0';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;
@@ -138,91 +138,152 @@
       position: fixed !important;
       top: 60px !important;
       right: 10px !important;
-      width: 360px !important;
+      width: 340px !important;
       max-height: calc(100vh - 80px) !important;
       z-index: 2147483640 !important;
       font-family: -apple-system, 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
-      font-size: 12px !important;
+      font-size: 13px !important;
       color: #1e293b !important;
-      background: rgba(255,255,255,0.92) !important;
-      backdrop-filter: blur(20px) !important;
-      -webkit-backdrop-filter: blur(20px) !important;
-      border-radius: 16px !important;
-      box-shadow: 0 12px 48px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.06) !important;
+      background: #ffffff !important;
+      border-radius: 14px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06) !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
-      border: 1px solid rgba(99,102,241,0.08) !important;
+      border: 1px solid #e2e8f0 !important;
       user-select: none !important;
-      transition: opacity 0.2s, box-shadow 0.3s !important;
+      transition: all 0.25s ease !important;
     }
-    #sh-panel:hover { box-shadow: 0 16px 56px rgba(99,102,241,0.18), 0 2px 8px rgba(0,0,0,0.08) !important; }
+    #sh-panel:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.16), 0 2px 6px rgba(0,0,0,0.08) !important; }
+
+    /* 미니바 모드: 키워드 + 핵심 지표 보이는 작은 바 */
+    #sh-panel.sh-minibar {
+      width: 220px !important; max-height: 40px !important;
+      border-radius: 20px !important; cursor: pointer !important;
+      overflow: hidden !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
+    }
+    #sh-panel.sh-minibar .sh-hd {
+      padding: 8px 14px !important; border-radius: 20px !important;
+    }
+    #sh-panel.sh-minibar .sh-hc .qr { font-size: 11px !important; max-width: 100px !important; }
+    #sh-panel.sh-minibar .sh-hc .ver,
+    #sh-panel.sh-minibar .sh-hc .cnt { display: none !important; }
+    #sh-panel.sh-minibar .sh-body,
+    #sh-panel.sh-minibar .sh-batch,
+    #sh-panel.sh-minibar .sh-foot,
+    #sh-panel.sh-minibar .sh-hbtns { display: none !important; }
+
+    /* 레거시 sh-min 호환 */
     #sh-panel.sh-min {
       width: 44px !important; max-height: 44px !important;
       border-radius: 22px !important; cursor: pointer !important;
-      backdrop-filter: blur(12px) !important;
     }
     #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-batch, #sh-panel.sh-min .sh-foot { display: none !important; }
     #sh-panel.sh-drag { opacity: 0.85 !important; cursor: grabbing !important; }
 
-    /* 헤더 */
+    /* 헤더 — 깔끔한 다크 */
     .sh-hd {
-      background: linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%) !important;
+      background: #1e293b !important;
       color: #fff !important;
       padding: 10px 14px !important;
       display: flex !important; align-items: center !important; justify-content: space-between !important;
       cursor: grab !important; flex-shrink: 0 !important;
-      border-radius: 16px 16px 0 0 !important;
     }
     #sh-panel.sh-min .sh-hd { border-radius: 22px !important; padding: 10px !important; justify-content: center !important; }
     .sh-hd .logo { font-size: 15px !important; font-weight: 800 !important; }
     .sh-hc { display: flex !important; align-items: center !important; gap: 6px !important; flex:1 !important; }
-    .sh-hc .ver { font-size: 8px !important; opacity: .7 !important; background: rgba(255,255,255,.15) !important; padding: 1px 5px !important; border-radius: 3px !important; }
-    .sh-hc .qr { font-size: 11px !important; background: rgba(255,255,255,.2) !important; padding: 2px 8px !important; border-radius: 6px !important; max-width: 130px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; font-weight: 600 !important; }
-    .sh-hc .cnt { font-size: 10px !important; background: rgba(255,255,255,.25) !important; padding: 2px 6px !important; border-radius: 5px !important; font-weight: 700 !important; }
-    .sh-hbtns { display: flex !important; gap: 3px !important; }
-    .sh-hb { width: 22px !important; height: 22px !important; display: flex !important; align-items: center !important; justify-content: center !important; border: none !important; background: rgba(255,255,255,.15) !important; color: #fff !important; border-radius: 6px !important; cursor: pointer !important; font-size: 12px !important; padding: 0 !important; transition: background .15s !important; }
-    .sh-hb:hover { background: rgba(255,255,255,.32) !important; }
+    .sh-hc .ver { font-size: 8px !important; opacity: .6 !important; background: rgba(255,255,255,.12) !important; padding: 1px 5px !important; border-radius: 3px !important; }
+    .sh-hc .qr { font-size: 12px !important; background: rgba(255,255,255,.15) !important; padding: 3px 10px !important; border-radius: 6px !important; max-width: 130px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; font-weight: 700 !important; }
+    .sh-hc .cnt { font-size: 10px !important; background: rgba(99,102,241,.8) !important; padding: 2px 7px !important; border-radius: 10px !important; font-weight: 700 !important; }
+    .sh-hbtns { display: flex !important; gap: 4px !important; }
+    .sh-hb { width: 24px !important; height: 24px !important; display: flex !important; align-items: center !important; justify-content: center !important; border: none !important; background: rgba(255,255,255,.1) !important; color: #fff !important; border-radius: 6px !important; cursor: pointer !important; font-size: 13px !important; padding: 0 !important; transition: background .15s !important; }
+    .sh-hb:hover { background: rgba(255,255,255,.25) !important; }
 
     /* 바디 */
-    .sh-body { overflow-y: auto !important; flex: 1 !important; }
+    .sh-body { overflow-y: auto !important; flex: 1 !important; padding: 0 !important; }
     .sh-body::-webkit-scrollbar { width: 3px !important; }
-    .sh-body::-webkit-scrollbar-thumb { background: #c7d2fe !important; border-radius: 3px !important; }
+    .sh-body::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 3px !important; }
 
-    /* 섹션 */
-    .sh-sec { padding: 14px !important; border-bottom: 1px solid rgba(99,102,241,0.06) !important; }
+    /* 섹션 카드 */
+    .sh-sec { padding: 12px 14px !important; border-bottom: 1px solid #f1f5f9 !important; }
     .sh-sec:last-child { border-bottom: none !important; }
     .sh-sec-title {
-      font-size: 10px !important; font-weight: 700 !important; color: #6366f1 !important;
-      letter-spacing: .3px !important; margin-bottom: 10px !important;
+      font-size: 11px !important; font-weight: 700 !important; color: #475569 !important;
+      letter-spacing: .2px !important; margin-bottom: 10px !important;
       display: flex !important; align-items: center !important; gap: 5px !important;
     }
 
-    /* 핵심 통계 2x2 그리드 */
-    .sh-stats { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
-    .sh-st {
-      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-      border-radius: 10px !important; padding: 10px 12px !important;
-      display: flex !important; flex-direction: column !important; align-items: center !important;
-      border: 1px solid rgba(99,102,241,0.06) !important;
-      transition: transform 0.15s, box-shadow 0.15s !important;
+    /* 검색량 히어로 섹션 */
+    .sh-hero {
+      padding: 14px !important;
+      background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%) !important;
+      border-bottom: 1px solid #c7d2fe !important;
     }
-    .sh-st:hover { transform: translateY(-1px) !important; box-shadow: 0 4px 12px rgba(99,102,241,0.08) !important; }
-    .sh-st-v { font-size: 16px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
-    .sh-st-v.accent { color: #6366f1 !important; }
-    .sh-st-v.red { color: #dc2626 !important; }
-    .sh-st-v.green { color: #16a34a !important; }
-    .sh-st-v.amber { color: #d97706 !important; }
-    .sh-st-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 3px !important; }
+    .sh-hero-title {
+      font-size: 11px !important; font-weight: 700 !important; color: #4338ca !important;
+      display: flex !important; align-items: center !important; gap: 5px !important;
+      margin-bottom: 10px !important;
+    }
+    .sh-hero-grid {
+      display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important;
+    }
+    .sh-hero-card {
+      background: #fff !important; border-radius: 10px !important; padding: 10px 12px !important;
+      text-align: center !important; border: 1px solid rgba(99,102,241,0.1) !important;
+    }
+    .sh-hero-val {
+      font-size: 20px !important; font-weight: 800 !important; color: #4338ca !important;
+      line-height: 1.2 !important;
+    }
+    .sh-hero-val.orange { color: #ea580c !important; }
+    .sh-hero-lbl {
+      font-size: 9px !important; color: #6366f1 !important; margin-top: 2px !important; font-weight: 600 !important;
+    }
+    .sh-hero-detail {
+      margin-top: 8px !important; padding: 8px 10px !important; background: #fff !important;
+      border-radius: 8px !important; border: 1px solid rgba(99,102,241,0.08) !important;
+    }
+    .sh-hero-row {
+      display: flex !important; justify-content: space-between !important; align-items: center !important;
+      padding: 3px 0 !important;
+    }
+    .sh-hero-row-lbl { font-size: 10px !important; color: #6366f1 !important; }
+    .sh-hero-row-val { font-size: 10px !important; font-weight: 700 !important; color: #1e293b !important; }
+    .sh-hero-badge {
+      display: inline-block !important; font-size: 8px !important; padding: 1px 6px !important;
+      border-radius: 4px !important; font-weight: 700 !important; margin-left: 6px !important;
+    }
+    .sh-hero-badge.hybrid { background: #4338ca !important; color: #fff !important; }
+    .sh-hero-badge.simple { background: #94a3b8 !important; color: #fff !important; }
+    .sh-hero-badge.collecting { background: #f59e0b !important; color: #fff !important; }
+    .sh-hero-badge.na { background: #64748b !important; color: #fff !important; }
+
+    /* 경쟁 + 시장 통계 그리드 (3열) */
+    .sh-kpi-grid {
+      display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important;
+    }
+    .sh-kpi {
+      background: #f8fafc !important; border-radius: 8px !important; padding: 8px 6px !important;
+      text-align: center !important; border: 1px solid #f1f5f9 !important;
+    }
+    .sh-kpi-v {
+      font-size: 15px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important;
+    }
+    .sh-kpi-v.primary { color: #4338ca !important; }
+    .sh-kpi-v.danger { color: #dc2626 !important; }
+    .sh-kpi-v.success { color: #16a34a !important; }
+    .sh-kpi-v.warning { color: #d97706 !important; }
+    .sh-kpi-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 2px !important; }
 
     /* 세부 통계 행 */
     .sh-detail-row {
       display: flex !important; justify-content: space-between !important; align-items: center !important;
-      padding: 5px 0 !important; border-bottom: 1px solid rgba(0,0,0,0.03) !important;
+      padding: 4px 0 !important; border-bottom: 1px solid #f8fafc !important;
     }
     .sh-detail-row:last-child { border-bottom: none !important; }
-    .sh-detail-lbl { font-size: 10px !important; color: #64748b !important; }
-    .sh-detail-val { font-size: 10px !important; font-weight: 700 !important; color: #1e293b !important; }
+    .sh-detail-lbl { font-size: 11px !important; color: #64748b !important; }
+    .sh-detail-val { font-size: 11px !important; font-weight: 700 !important; color: #1e293b !important; }
 
     /* 경쟁도 게이지 */
     .sh-gauge-wrap { position: relative !important; margin-top: 6px !important; }
@@ -237,24 +298,24 @@
       background: #1e293b !important; border-radius: 2px !important; transition: left .5s ease !important;
       box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
     }
-    .sh-gauge-labels { display: flex !important; justify-content: space-between !important; margin-top: 4px !important; font-size: 8px !important; color: #94a3b8 !important; }
+    .sh-gauge-labels { display: flex !important; justify-content: space-between !important; margin-top: 4px !important; font-size: 9px !important; color: #94a3b8 !important; }
 
     /* 배송 분포 (수평 바) */
-    .sh-delivery-bars { display: flex !important; flex-direction: column !important; gap: 4px !important; }
+    .sh-delivery-bars { display: flex !important; flex-direction: column !important; gap: 5px !important; }
     .sh-dbar-row { display: flex !important; align-items: center !important; gap: 6px !important; }
-    .sh-dbar-lbl { font-size: 9px !important; color: #64748b !important; width: 62px !important; text-align: right !important; flex-shrink: 0 !important; }
-    .sh-dbar-track { flex: 1 !important; height: 14px !important; background: #f1f5f9 !important; border-radius: 7px !important; overflow: hidden !important; position: relative !important; }
-    .sh-dbar-fill { height: 100% !important; border-radius: 7px !important; transition: width .4s ease !important; min-width: 1px !important; }
-    .sh-dbar-pct { font-size: 9px !important; font-weight: 700 !important; color: #475569 !important; width: 32px !important; text-align: right !important; flex-shrink: 0 !important; }
+    .sh-dbar-lbl { font-size: 10px !important; color: #64748b !important; width: 64px !important; text-align: right !important; flex-shrink: 0 !important; }
+    .sh-dbar-track { flex: 1 !important; height: 16px !important; background: #f1f5f9 !important; border-radius: 8px !important; overflow: hidden !important; position: relative !important; }
+    .sh-dbar-fill { height: 100% !important; border-radius: 8px !important; transition: width .4s ease !important; min-width: 1px !important; }
+    .sh-dbar-pct { font-size: 10px !important; font-weight: 700 !important; color: #475569 !important; width: 34px !important; text-align: right !important; flex-shrink: 0 !important; }
 
     /* 미니 차트 */
     .sh-charts { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
     .sh-chart {
-      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+      background: #f8fafc !important;
       border-radius: 10px !important; padding: 10px !important;
-      border: 1px solid rgba(99,102,241,0.06) !important;
+      border: 1px solid #f1f5f9 !important;
     }
-    .sh-chart-title { font-size: 9px !important; font-weight: 600 !important; color: #64748b !important; margin-bottom: 6px !important; }
+    .sh-chart-title { font-size: 10px !important; font-weight: 600 !important; color: #64748b !important; margin-bottom: 6px !important; }
     .sh-bars { display: flex !important; align-items: flex-end !important; gap: 3px !important; height: 52px !important; padding-top: 12px !important; }
     .sh-bar {
       flex: 1 !important; background: #c7d2fe !important; border-radius: 3px 3px 0 0 !important;
@@ -270,29 +331,29 @@
 
     /* 배치 수집 바 */
     .sh-batch {
-      padding: 8px 12px !important; flex-shrink: 0 !important;
-      border-top: 1px solid rgba(99,102,241,0.08) !important;
-      background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.06) 100%) !important;
+      padding: 8px 14px !important; flex-shrink: 0 !important;
+      border-top: 1px solid #e2e8f0 !important;
+      background: #f8fafc !important;
     }
     .sh-batch-row {
       display: flex !important; align-items: center !important; gap: 6px !important;
     }
     .sh-batch-btn {
-      padding: 5px 10px !important; border: none !important; border-radius: 6px !important;
-      font-size: 10px !important; font-weight: 700 !important; cursor: pointer !important;
+      padding: 6px 12px !important; border: none !important; border-radius: 8px !important;
+      font-size: 11px !important; font-weight: 700 !important; cursor: pointer !important;
       transition: all .15s !important; white-space: nowrap !important;
     }
     .sh-batch-start {
-      background: #6366f1 !important; color: #fff !important; flex: 1 !important;
+      background: #4338ca !important; color: #fff !important; flex: 1 !important;
     }
-    .sh-batch-start:hover { background: #4f46e5 !important; }
+    .sh-batch-start:hover { background: #3730a3 !important; }
     .sh-batch-start:disabled { background: #94a3b8 !important; cursor: default !important; }
     .sh-batch-stop {
       background: #dc2626 !important; color: #fff !important;
     }
     .sh-batch-stop:hover { background: #b91c1c !important; }
     .sh-batch-status {
-      font-size: 9px !important; color: #64748b !important; margin-top: 4px !important;
+      font-size: 10px !important; color: #64748b !important; margin-top: 4px !important;
       display: flex !important; align-items: center !important; gap: 4px !important;
     }
     .sh-batch-progress {
@@ -301,16 +362,16 @@
     }
     .sh-batch-fill {
       height: 100% !important; border-radius: 3px !important;
-      background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;
+      background: linear-gradient(90deg, #4338ca, #6366f1) !important;
       transition: width .3s !important;
     }
     .sh-batch-fill.done { background: #22c55e !important; }
     .sh-batch-text {
-      font-size: 9px !important; font-weight: 700 !important; color: #475569 !important;
+      font-size: 10px !important; font-weight: 700 !important; color: #475569 !important;
       white-space: nowrap !important;
     }
     .sh-batch-kw {
-      font-size: 8px !important; color: #8b5cf6 !important; font-weight: 600 !important;
+      font-size: 9px !important; color: #6366f1 !important; font-weight: 600 !important;
       margin-top: 2px !important; white-space: nowrap !important; overflow: hidden !important;
       text-overflow: ellipsis !important;
     }
@@ -318,13 +379,29 @@
     /* 풋터 */
     .sh-foot {
       padding: 6px 14px !important;
-      background: linear-gradient(135deg, rgba(99,102,241,0.04) 0%, rgba(139,92,246,0.04) 100%) !important;
-      border-top: 1px solid rgba(99,102,241,0.06) !important;
-      font-size: 9px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
+      background: #f8fafc !important;
+      border-top: 1px solid #f1f5f9 !important;
+      font-size: 10px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
     }
-    .sh-foot a { color: #6366f1 !important; text-decoration: none !important; font-weight: 600 !important; }
+    .sh-foot a { color: #4338ca !important; text-decoration: none !important; font-weight: 600 !important; }
 
-    @media (max-width: 1200px) { #sh-panel { width: 320px !important; } }
+    /* 성숙도 프로그레스 */
+    .sh-maturity-box {
+      margin-top: 8px !important; padding: 8px 10px !important; background: #fff !important;
+      border-radius: 8px !important; border: 1px dashed rgba(99,102,241,0.15) !important;
+    }
+    .sh-maturity-title {
+      font-size: 9px !important; color: #4338ca !important; font-weight: 700 !important; margin-bottom: 4px !important;
+    }
+    .sh-maturity-bar-row {
+      display: flex !important; align-items: center !important; gap: 4px !important; margin-bottom: 3px !important;
+    }
+    .sh-maturity-lbl { font-size: 8px !important; color: #64748b !important; width: 30px !important; text-align: right !important; }
+    .sh-maturity-track { flex: 1 !important; height: 4px !important; background: #e2e8f0 !important; border-radius: 2px !important; overflow: hidden !important; }
+    .sh-maturity-fill { height: 100% !important; border-radius: 2px !important; transition: width .3s !important; }
+    .sh-maturity-num { font-size: 8px !important; color: #94a3b8 !important; width: 40px !important; }
+
+    @media (max-width: 1200px) { #sh-panel { width: 310px !important; } }
   `;
   document.head.appendChild(css);
 
@@ -1856,7 +1933,7 @@
         </div>
         <div class="sh-hbtns">
           <button class="sh-hb" id="sh-ref" title="새로고침">↻</button>
-          <button class="sh-hb" id="sh-min" title="접기">—</button>
+          <button class="sh-hb" id="sh-min" title="미니바로 접기">—</button>
         </div>
       </div>
       <div class="sh-body" id="sh-body"></div>
@@ -1881,9 +1958,9 @@
     document.getElementById('sh-min').addEventListener('click', (e) => {
       e.stopPropagation();
       isMin = !isMin;
-      panel.classList.toggle('sh-min', isMin);
+      panel.classList.toggle('sh-minibar', isMin);
     });
-    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-min'); } });
+    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-minibar'); } });
     document.getElementById('sh-ref').addEventListener('click', (e) => { e.stopPropagation(); doScan(true); });
 
     // 배치 수집 버튼
@@ -1967,24 +2044,22 @@
       const isUnauth = errMsg === 'UNAUTHORIZED' || errMsg.includes('401');
       if (isUnauth) {
         el.innerHTML = `
-          <div class="sh-sec-title">🔍 검색량</div>
-          <div style="text-align:center !important;padding:8px !important;color:#94a3b8 !important;font-size:10px !important;">
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge na">로그인 필요</span></div>
+          <div style="text-align:center !important;padding:10px !important;color:#94a3b8 !important;font-size:11px !important;">
             서버 로그인 후 조회 가능
           </div>`;
       } else {
         el.innerHTML = `
-          <div class="sh-sec-title">🔍 검색량
-            <span style="background:#f59e0b !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">수집 중</span>
-          </div>
-          <div style="text-align:center !important;padding:8px 6px !important;color:#64748b !important;font-size:10px !important;">
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">수집 중</span></div>
+          <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
             네이버 검색량 데이터 수집 중...
           </div>
           <div style="padding:4px 8px !important;">
             <div style="height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-              <div style="width:15% !important;height:100% !important;background:linear-gradient(90deg,#f59e0b,#f97316) !important;border-radius:2px !important;"></div>
+              <div style="width:15% !important;height:100% !important;background:linear-gradient(90deg,#f59e0b,#f97316) !important;border-radius:2px !important;animation:none !important;"></div>
             </div>
           </div>
-          <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+          <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
             데이터가 축적되면 자동으로 표시됩니다
           </div>`;
       }
@@ -1995,43 +2070,35 @@
     const hasNaver = marketData.searchVolume && Number(marketData.searchVolume.totalSearch || 0) > 0;
     const hasEstimate = marketData.searchVolumeEstimate && marketData.searchVolumeEstimate.estimatedMonthlySearch > 0;
     if (!hasNaver && !hasEstimate) {
-      // ★ v8.4.4: 네이버에 아예 등록되지 않은 키워드 구분
       const isNaverNotFound = marketData._naverNotFound === true;
       if (isNaverNotFound) {
         el.innerHTML = `
-          <div class="sh-sec-title">🔍 검색량
-            <span style="background:#64748b !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">네이버 미등록</span>
-          </div>
-          <div style="text-align:center !important;padding:8px 6px !important;color:#94a3b8 !important;font-size:10px !important;">
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge na">네이버 미등록</span></div>
+          <div style="text-align:center !important;padding:10px !important;color:#94a3b8 !important;font-size:11px !important;">
             네이버에 등록되지 않은 키워드입니다
           </div>
-          <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
-            검색량 추정이 불가능합니다. 유사 키워드를 시도해 보세요.
+          <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+            유사 키워드를 시도해 보세요
           </div>`;
         return;
       }
-      // 추정 엔진은 있지만 입력 데이터가 0인 경우
       const est = marketData.searchVolumeEstimate;
       const progress = est?.maturityProgress;
       el.innerHTML = `
-        <div class="sh-sec-title">🔍 검색량
-          <span style="background:#94a3b8 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">수집 중</span>
-        </div>
-        <div style="text-align:center !important;padding:8px 6px !important;color:#64748b !important;font-size:10px !important;">
+        <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">수집 중</span></div>
+        <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
           네이버 검색량 데이터 수집 대기 중
         </div>
         ${progress ? `
-        <div style="padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
-          <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:3px !important;">
-            데이터 축적: ${progress.days.current}일 / ${progress.days.required}일
-          </div>
-          <div style="display:flex !important;gap:4px !important;align-items:center !important;">
-            <div style="flex:1 !important;height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-              <div style="width:${Math.min(100, Math.round(progress.days.current / progress.days.required * 100))}% !important;height:100% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;border-radius:2px !important;"></div>
+        <div class="sh-maturity-box">
+          <div class="sh-maturity-title">데이터 축적: ${progress.days.current}일 / ${progress.days.required}일</div>
+          <div class="sh-maturity-bar-row">
+            <div class="sh-maturity-track">
+              <div class="sh-maturity-fill" style="width:${Math.min(100, Math.round(progress.days.current / progress.days.required * 100))}% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;"></div>
             </div>
           </div>
         </div>` : ''}
-        <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+        <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
           데이터가 축적되면 자동으로 검색량이 표시됩니다
         </div>`;
       return;
@@ -2042,23 +2109,20 @@
     const totalNaver = sv.totalSearch || 0;
     const compIdx = sv.competitionIndex || '-';
 
-    // 추정 모델 결과 사용 (있으면), 없으면 단순 계산
     const coupangEst = est ? est.estimatedMonthlySearch : Math.round(totalNaver * COUPANG_RATIO);
     const model = est?.model || 'simple';
-    const maturity = est?.maturity || 'immature';
+    const isHybrid = model === 'hybrid';
     const confidence = est?.confidence || 0;
     const progress = est?.maturityProgress;
 
-    // 모델 뱃지
-    const isHybrid = model === 'hybrid';
     const modelBadge = isHybrid
-      ? '<span style="background:#6366f1 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">HYBRID v1</span>'
-      : '<span style="background:#94a3b8 !important;color:#fff !important;font-size:8px !important;padding:1px 5px !important;border-radius:3px !important;font-weight:700 !important;margin-left:4px !important;">SIMPLE</span>';
+      ? '<span class="sh-hero-badge hybrid">HYBRID</span>'
+      : '<span class="sh-hero-badge simple">SIMPLE</span>';
 
-    // 경쟁 비율 (상품수 / 추정 검색량)
     const snapshot = marketData.snapshot;
     const totalProducts = snapshot?.totalProductCount || 0;
     const compRatio = coupangEst > 0 ? (totalProducts / coupangEst).toFixed(1) : '-';
+    const compRatioColor = compRatio !== '-' && parseFloat(compRatio) > 50 ? '#dc2626' : parseFloat(compRatio) > 20 ? '#d97706' : '#16a34a';
 
     // 성숙도 프로그레스
     let maturityHtml = '';
@@ -2068,59 +2132,60 @@
       const matchPct = Math.min(100, Math.round((progress.matchRate.current / progress.matchRate.required) * 100));
       const overallPct = Math.round((daysPct + deltaPct + matchPct) / 3);
 
-      const bar = (label, pct, cur, req, unit) => `
-        <div style="display:flex !important;align-items:center !important;gap:4px !important;margin-bottom:2px !important;">
-          <span style="font-size:7px !important;color:#64748b !important;width:32px !important;text-align:right !important;">${label}</span>
-          <div style="flex:1 !important;height:3px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-            <div style="width:${pct}% !important;height:100% !important;background:${pct >= 100 ? '#22c55e' : 'linear-gradient(90deg,#6366f1,#8b5cf6)'} !important;border-radius:2px !important;"></div>
-          </div>
-          <span style="font-size:7px !important;color:#94a3b8 !important;width:38px !important;">${cur}/${req}${unit}</span>
-        </div>`;
-
       maturityHtml = `
-        <div style="margin-top:6px !important;padding:5px 8px !important;background:rgba(99,102,241,0.04) !important;border-radius:6px !important;border:1px dashed rgba(99,102,241,0.12) !important;">
-          <div style="font-size:8px !important;color:#6366f1 !important;font-weight:600 !important;margin-bottom:4px !important;">
-            Hybrid 전환까지 ${overallPct}%
+        <div class="sh-maturity-box">
+          <div class="sh-maturity-title">Hybrid 전환까지 ${overallPct}%</div>
+          <div class="sh-maturity-bar-row">
+            <span class="sh-maturity-lbl">축적</span>
+            <div class="sh-maturity-track"><div class="sh-maturity-fill" style="width:${daysPct}% !important;background:${daysPct >= 100 ? '#22c55e' : '#6366f1'} !important;"></div></div>
+            <span class="sh-maturity-num">${progress.days.current}/${progress.days.required}일</span>
           </div>
-          ${bar('축적일', daysPct, progress.days.current, progress.days.required, '일')}
-          ${bar('델타', deltaPct, progress.deltas.current, progress.deltas.required, '개')}
-          ${bar('정합', matchPct, Math.round(progress.matchRate.current * 100), Math.round(progress.matchRate.required * 100), '%')}
+          <div class="sh-maturity-bar-row">
+            <span class="sh-maturity-lbl">델타</span>
+            <div class="sh-maturity-track"><div class="sh-maturity-fill" style="width:${deltaPct}% !important;background:${deltaPct >= 100 ? '#22c55e' : '#6366f1'} !important;"></div></div>
+            <span class="sh-maturity-num">${progress.deltas.current}/${progress.deltas.required}개</span>
+          </div>
+          <div class="sh-maturity-bar-row">
+            <span class="sh-maturity-lbl">정합</span>
+            <div class="sh-maturity-track"><div class="sh-maturity-fill" style="width:${matchPct}% !important;background:${matchPct >= 100 ? '#22c55e' : '#6366f1'} !important;"></div></div>
+            <span class="sh-maturity-num">${Math.round(progress.matchRate.current * 100)}/${Math.round(progress.matchRate.required * 100)}%</span>
+          </div>
         </div>`;
     }
 
     el.innerHTML = `
-      <div class="sh-sec-title">🔍 검색량 (월간) ${modelBadge}</div>
-      <div class="sh-stats">
-        <div class="sh-st">
-          <span class="sh-st-v accent">${coupangEst ? coupangEst.toLocaleString() : '-'}</span>
-          <span class="sh-st-l">쿠팡 추정</span>
+      <div class="sh-hero-title">🔍 월간 검색량 ${modelBadge}</div>
+      <div class="sh-hero-grid">
+        <div class="sh-hero-card">
+          <div class="sh-hero-val">${coupangEst ? coupangEst.toLocaleString() : '-'}</div>
+          <div class="sh-hero-lbl">쿠팡 추정</div>
         </div>
-        <div class="sh-st">
-          <span class="sh-st-v" style="font-size:14px !important;">${totalNaver ? totalNaver.toLocaleString() : '-'}</span>
-          <span class="sh-st-l">네이버 검색량</span>
+        <div class="sh-hero-card">
+          <div class="sh-hero-val orange">${totalNaver ? totalNaver.toLocaleString() : '-'}</div>
+          <div class="sh-hero-lbl">네이버 검색량</div>
         </div>
       </div>
-      <div style="margin-top:8px !important; padding:6px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
-        <div class="sh-detail-row">
-          <span class="sh-detail-lbl">PC / 모바일</span>
-          <span class="sh-detail-val">${(sv.pcSearch || 0).toLocaleString()} / ${(sv.mobileSearch || 0).toLocaleString()}</span>
+      <div class="sh-hero-detail">
+        <div class="sh-hero-row">
+          <span class="sh-hero-row-lbl">PC / 모바일</span>
+          <span class="sh-hero-row-val">${(sv.pcSearch || 0).toLocaleString()} / ${(sv.mobileSearch || 0).toLocaleString()}</span>
         </div>
-        <div class="sh-detail-row">
-          <span class="sh-detail-lbl">경쟁 비율</span>
-          <span class="sh-detail-val" style="color:${compRatio !== '-' && parseFloat(compRatio) > 50 ? '#dc2626' : parseFloat(compRatio) > 20 ? '#d97706' : '#16a34a'} !important;">${compRatio !== '-' ? compRatio + ' : 1' : '-'}</span>
+        <div class="sh-hero-row">
+          <span class="sh-hero-row-lbl">경쟁 비율</span>
+          <span class="sh-hero-row-val" style="color:${compRatioColor} !important;">${compRatio !== '-' ? compRatio + ' : 1' : '-'}</span>
         </div>
-        <div class="sh-detail-row">
-          <span class="sh-detail-lbl">네이버 경쟁</span>
-          <span class="sh-detail-val">${compIdx}</span>
+        <div class="sh-hero-row">
+          <span class="sh-hero-row-lbl">네이버 경쟁</span>
+          <span class="sh-hero-row-val">${compIdx}</span>
         </div>
         ${isHybrid ? `
-        <div class="sh-detail-row">
-          <span class="sh-detail-lbl">신뢰도</span>
-          <span class="sh-detail-val" style="color:#6366f1 !important;">${Math.round(confidence * 100)}%</span>
+        <div class="sh-hero-row">
+          <span class="sh-hero-row-lbl">신뢰도</span>
+          <span class="sh-hero-row-val" style="color:#4338ca !important;">${Math.round(confidence * 100)}%</span>
         </div>` : ''}
       </div>
       ${maturityHtml}
-      <div style="font-size:8px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:right !important;">
+      <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:6px !important;text-align:right !important;">
         ${isHybrid ? '네이버 50% + 리뷰역산 35% + 보정 15%' : '네이버 × ' + COUPANG_RATIO} | ${sv.yearMonth || ''}
       </div>`;
   }
@@ -2167,30 +2232,45 @@
     const revBuckets = makeHistogram(reviews, 5);
 
     body.innerHTML = `
-      <!-- 핵심 통계 (2x2) -->
+      <!-- ★ 검색량 히어로 (최상단, 가장 중요한 데이터) -->
+      <div class="sh-hero" id="sh-sv-section">
+        <div class="sh-hero-title">🔍 검색량</div>
+        <div style="text-align:center !important;padding:10px !important;color:#a5b4fc !important;font-size:11px !important;">
+          조회 중...
+        </div>
+      </div>
+
+      <!-- 핵심 KPI (3열 컴팩트) -->
       <div class="sh-sec">
         <div class="sh-sec-title">📊 시장 개요 (${items.length}개 분석)</div>
-        <div class="sh-stats">
-          <div class="sh-st">
-            <span class="sh-st-v accent">${items.length}</span>
-            <span class="sh-st-l">상품수</span>
+        <div class="sh-kpi-grid">
+          <div class="sh-kpi">
+            <div class="sh-kpi-v primary">${items.length}</div>
+            <div class="sh-kpi-l">상품수</div>
           </div>
-          <div class="sh-st">
-            <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '<small style="font-size:10px !important;font-weight:600 !important;">원</small>' : '-'}</span>
-            <span class="sh-st-l">평균가</span>
+          <div class="sh-kpi">
+            <div class="sh-kpi-v danger">${avgPrice ? avgPrice.toLocaleString() + '<small style="font-size:9px !important;">원</small>' : '-'}</div>
+            <div class="sh-kpi-l">평균가</div>
           </div>
-          <div class="sh-st">
-            <span class="sh-st-v">${avgRating !== '-' ? '★ ' + avgRating : '-'}</span>
-            <span class="sh-st-l">평균평점</span>
+          <div class="sh-kpi">
+            <div class="sh-kpi-v">${avgRating !== '-' ? '★ ' + avgRating : '-'}</div>
+            <div class="sh-kpi-l">평균평점</div>
           </div>
-          <div class="sh-st">
-            <span class="sh-st-v amber">${totalReviews.toLocaleString()}</span>
-            <span class="sh-st-l">총 리뷰수</span>
+          <div class="sh-kpi">
+            <div class="sh-kpi-v warning">${totalReviews.toLocaleString()}</div>
+            <div class="sh-kpi-l">총 리뷰</div>
+          </div>
+          <div class="sh-kpi">
+            <div class="sh-kpi-v" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100Pct}%</div>
+            <div class="sh-kpi-l">리뷰100+</div>
+          </div>
+          <div class="sh-kpi">
+            <div class="sh-kpi-v" style="color:#64748b !important;">${adCnt}</div>
+            <div class="sh-kpi-l">광고</div>
           </div>
         </div>
-
-        <!-- 세부 통계 -->
-        <div style="margin-top:10px !important; padding:8px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
+        <!-- 세부 -->
+        <div style="margin-top:8px !important; padding:6px 10px !important; background:#f8fafc !important; border-radius:8px !important;">
           <div class="sh-detail-row">
             <span class="sh-detail-lbl">가격 범위</span>
             <span class="sh-detail-val">${minPrice ? minPrice.toLocaleString() : '0'} ~ ${maxPrice ? maxPrice.toLocaleString() : '0'}원</span>
@@ -2203,22 +2283,6 @@
             <span class="sh-detail-lbl">최다 리뷰</span>
             <span class="sh-detail-val">${maxReview ? maxReview.toLocaleString() + '개' : '-'}</span>
           </div>
-          <div class="sh-detail-row">
-            <span class="sh-detail-lbl">리뷰 100+</span>
-            <span class="sh-detail-val" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100}개 (${reviewOver100Pct}%)</span>
-          </div>
-          <div class="sh-detail-row">
-            <span class="sh-detail-lbl">광고 비율</span>
-            <span class="sh-detail-val">${adCnt}개 (${items.length ? Math.round(adCnt / items.length * 100) : 0}%)</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 검색량 (비동기 로딩) -->
-      <div class="sh-sec" id="sh-sv-section">
-        <div class="sh-sec-title">🔍 검색량</div>
-        <div style="text-align:center !important;padding:6px !important;color:#c7d2fe !important;font-size:10px !important;">
-          조회 중...
         </div>
       </div>
 
@@ -2226,7 +2290,7 @@
       <div class="sh-sec">
         <div class="sh-sec-title">
           ⚔️ 경쟁 강도
-          <span style="margin-left:auto !important;font-size:11px !important;font-weight:800 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label}</span>
+          <span style="margin-left:auto !important;font-size:12px !important;font-weight:800 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label}</span>
         </div>
         <div class="sh-gauge-wrap">
           <div class="sh-gauge-bar">
