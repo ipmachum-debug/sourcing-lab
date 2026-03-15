@@ -789,8 +789,9 @@ export const demandRouter = router({
       };
     }),
 
-  // ===== ★ v7.5.0: 기존 데이터 정규화 재계산 (backfill) =====
-  // ext_keyword_daily_status의 기존 데이터를 정규화 엔진으로 재계산
+  // ===== [DEPRECATED 2026-03-15] ext_keyword_daily_status 기반 정규화 재계산 =====
+  // 이 프로시저는 구 ext_keyword_daily_status 테이블 대상. 사용 금지.
+  // 정확한 재계산은 rebuildDailyStats (ext_keyword_daily_stats 기반) 사용할 것.
   rebuildNormalizedMetrics: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1).max(255).optional(),
@@ -942,6 +943,43 @@ export const demandRouter = router({
       }
 
       return { success: true, rebuilt, keywords: allRows.length };
+    }),
+
+  // ===== ★ P2: demand_score=0인 과거 데이터 일괄 백필 =====
+  backfillDemandScores: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      const userId = ctx.user!.id;
+
+      // demand_score=0인 키워드만 추출
+      const zeroKws = await db.selectDistinct({
+        query: extKeywordDailyStats.query,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          sql`${extKeywordDailyStats.demandScore} = 0`,
+          sql`${extKeywordDailyStats.reviewGrowth} > 0`,
+        ));
+
+      if (!zeroKws.length) return { success: true, rebuilt: 0, keywords: 0 };
+
+      let rebuilt = 0;
+      for (const row of zeroKws) {
+        try {
+          const result = await rebuildKeywordDailyStatsForKeyword(
+            db, userId, row.query,
+            { windowDays: 90 },
+          );
+          if (result.success) rebuilt++;
+        } catch (err) {
+          console.error(`[backfillDemandScores] "${row.query}" error:`, err);
+        }
+      }
+
+      return { success: true, rebuilt, keywords: zeroKws.length };
     }),
 
   // ===== legacy: 하위 호환 (이전 rebuildNormalizedMetrics는 ext_keyword_daily_status 대상) =====

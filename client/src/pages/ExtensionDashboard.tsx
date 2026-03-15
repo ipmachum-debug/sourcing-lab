@@ -1100,7 +1100,7 @@ export default function ExtensionDashboard() {
                     { label: "추정 총 판매량", value: (keywordStatsOverview.data.totalSalesEstimate ?? 0).toLocaleString(), color: "text-green-600" },
                     { label: "총 리뷰 증가", value: (keywordStatsOverview.data.totalReviewGrowth ?? 0).toLocaleString(), color: "text-blue-600" },
                     { label: "평균가", value: formatPrice(keywordStatsOverview.data.avgPrice), color: "text-amber-600" },
-                    { label: "미수집", value: autoCollectInfo.data?.neverCollected ?? 0, color: "text-gray-500" },
+                    { label: "신규(미배치)", value: autoCollectInfo.data?.neverCollected ?? 0, color: "text-gray-500" },
                   ].map((s, i) => (
                     <Card key={i}><CardContent className="pt-3 pb-3 text-center">
                       <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
@@ -1131,7 +1131,7 @@ export default function ExtensionDashboard() {
                     <button
                       className={`px-3 py-1.5 text-xs rounded-lg font-medium transition flex items-center gap-1 ${kwTabMode === "uncollected" ? "bg-red-600 text-white shadow-sm" : "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"}`}
                       onClick={() => { setKwTabMode("uncollected"); uncollectedKws.refetch(); }}>
-                      미수집
+                      오늘 미수집
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${kwTabMode === "uncollected" ? "bg-white/20" : "bg-red-100 text-red-700"}`}>
                         {uncollectedKws.data?.uncollectedCount}
                       </span>
@@ -1179,7 +1179,7 @@ export default function ExtensionDashboard() {
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="text-[11px] text-red-800">
                         <p className="font-semibold mb-0.5">
-                          오늘 미수집 키워드 {uncollectedKws.data.uncollectedCount}개
+                          오늘 수집 안 된 키워드 {uncollectedKws.data.uncollectedCount}개
                           <span className="font-normal text-red-600 ml-1">
                             (전체 {uncollectedKws.data.total}개 중 {uncollectedKws.data.collectedCount}개 수집완료)
                           </span>

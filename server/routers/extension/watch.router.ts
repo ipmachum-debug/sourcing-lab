@@ -5,14 +5,14 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import {
-  extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
+  extSearchEvents, extWatchKeywords,
   extSearchSnapshots, extKeywordDailyStats, extBatchState,
 } from "../../../drizzle/schema";
 import { eq, and, desc, sql, like, asc, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { N } from "./_helpers";
 import {
-  selectBatchKeywords, computeDailyAggregation, runDailyBatch,
+  selectBatchKeywords, runDailyBatch,
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
   syncWatchKeywordsToMaster, advanceBatchState,
@@ -129,82 +129,11 @@ export const watchRouter = router({
         });
       }
 
-      // 3. 일일 상태 비동기 업데이트
+      // 3. [DEPRECATED] ext_keyword_daily_status 쓰기 제거 (2026-03-15)
+      // 구 sum-diff 방식의 ext_keyword_daily_status에 393배 오차 데이터가 쌓이던 문제 해결.
+      // 정확한 per-product delta 엔진(ext_keyword_daily_stats)은 아래 step 4~5에서 처리됨.
+      // batchCollector.ts의 ext_keyword_daily_status 사용은 별도 마이그레이션 예정.
       const todayStr = now.toISOString().slice(0, 10);
-      computeDailyAggregation(userId, input.keyword, todayStr).then(async (agg) => {
-        if (!agg) return;
-        const [existingStatus] = await db.select({ id: extKeywordDailyStatus.id })
-          .from(extKeywordDailyStatus)
-          .where(and(
-            eq(extKeywordDailyStatus.userId, userId),
-            eq(extKeywordDailyStatus.keyword, input.keyword),
-            eq(extKeywordDailyStatus.statDate, todayStr),
-          ))
-          .limit(1);
-
-        const INT_MAX = 2000000000;
-        const statusData = {
-          totalItems: agg.totalItems,
-          avgPrice: Math.min(agg.avgPrice, INT_MAX),
-          minPrice: Math.min(agg.minPrice, INT_MAX),
-          maxPrice: Math.min(agg.maxPrice, INT_MAX),
-          avgRating: agg.avgRating.toFixed(1),
-          avgReview: agg.avgReview,
-          totalReviewSum: agg.totalReviewSum,
-          medianReview: agg.medianReview,
-          adCount: agg.adCount,
-          adRatio: agg.adRatio.toFixed(2),
-          rocketCount: agg.rocketCount,
-          rocketRatio: agg.rocketRatio.toFixed(2),
-          highReviewCount: agg.highReviewCount,
-          newProductCount: agg.newProductCount,
-          reviewGrowth: agg.reviewGrowth,
-          priceChange: agg.priceChange,
-          itemCountChange: agg.itemCountChange,
-          estimatedDailySales: agg.estimatedDailySales,
-          salesScore: agg.salesScore,
-          demandScore: agg.demandScore,
-          competitionScore: agg.competitionScore,
-          competitionLevel: agg.competitionLevel,
-          dataQualityScore: agg.dataQualityScore,
-          priceParseRate: agg.priceParseRate,
-          ratingParseRate: agg.ratingParseRate,
-          reviewParseRate: agg.reviewParseRate,
-          // ★ v7.5.0: 정규화 필드
-          baseProductCount: agg.baseProductCount,
-          normalizedReviewSum: agg.normalizedReviewSum,
-          coverageRatio: agg.coverageRatio.toFixed(4),
-          reviewDeltaObserved: agg.reviewDeltaObserved,
-          reviewDeltaUsed: agg.reviewDeltaUsed,
-          salesEstimateMa7: agg.salesEstimateMa7,
-          salesEstimateMa30: agg.salesEstimateMa30,
-          isProvisional: agg.isProvisional,
-          provisionalReason: agg.provisionalReason,
-          dataStatus: agg.dataStatus,
-        };
-
-        if (existingStatus) {
-          await db.update(extKeywordDailyStatus).set(statusData)
-            .where(eq(extKeywordDailyStatus.id, existingStatus.id));
-        } else {
-          try {
-            await db.insert(extKeywordDailyStatus).values({
-              userId, keyword: input.keyword, statDate: todayStr, source: input.source, ...statusData,
-            });
-          } catch (dupErr: any) {
-            if (dupErr?.cause?.code === "ER_DUP_ENTRY" || dupErr?.code === "ER_DUP_ENTRY") {
-              await db.update(extKeywordDailyStatus).set(statusData)
-                .where(and(
-                  eq(extKeywordDailyStatus.userId, userId),
-                  eq(extKeywordDailyStatus.keyword, input.keyword),
-                  eq(extKeywordDailyStatus.statDate, todayStr),
-                ));
-            } else {
-              throw dupErr;
-            }
-          }
-        }
-      }).catch((err) => console.error("[saveSearchEvent] daily status error:", err));
 
       // 4. ★ 스냅샷 테이블 자동 동기화 (ext_keyword_daily_stats의 데이터 소스)
       // → 반드시 daily_stats 계산보다 먼저 실행해야 함
@@ -407,7 +336,7 @@ export const watchRouter = router({
       return { success: true };
     }),
 
-  // ===== 키워드 일별 상태 이력 조회 =====
+  // ===== 키워드 일별 상태 이력 조회 (ext_keyword_daily_stats 기반, 2026-03-15 전환) =====
   getKeywordDailyStatusHistory: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1),
@@ -422,35 +351,36 @@ export const watchRouter = router({
       const startDate = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1000);
       const startDateStr = startDate.toISOString().slice(0, 10);
 
+      // ★ ext_keyword_daily_stats (per-product delta, 정확) 기반으로 전환
       const rows = await db.select()
-        .from(extKeywordDailyStatus)
+        .from(extKeywordDailyStats)
         .where(and(
-          eq(extKeywordDailyStatus.userId, ctx.user!.id),
-          eq(extKeywordDailyStatus.keyword, input.keyword),
-          gte(extKeywordDailyStatus.statDate, startDateStr),
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          eq(extKeywordDailyStats.query, input.keyword),
+          gte(extKeywordDailyStats.statDate, startDateStr),
         ))
-        .orderBy(asc(extKeywordDailyStatus.statDate));
+        .orderBy(asc(extKeywordDailyStats.statDate));
 
       return rows.map(r => ({
         statDate: r.statDate,
-        totalItems: N(r.totalItems),
+        totalItems: N(r.productCount),
         avgPrice: N(r.avgPrice),
-        minPrice: N(r.minPrice),
-        maxPrice: N(r.maxPrice),
+        minPrice: 0,
+        maxPrice: 0,
         avgRating: N(r.avgRating),
         avgReview: N(r.avgReview),
         totalReviewSum: N(r.totalReviewSum),
         reviewGrowth: N(r.reviewGrowth),
         priceChange: N(r.priceChange),
-        estimatedDailySales: N(r.estimatedDailySales),
-        salesScore: N(r.salesScore),
+        estimatedDailySales: N(r.salesEstimate),
+        salesScore: 0,
         demandScore: N(r.demandScore),
         competitionScore: N(r.competitionScore),
         competitionLevel: r.competitionLevel,
-        dataQualityScore: N(r.dataQualityScore),
+        dataQualityScore: 0,
         adCount: N(r.adCount),
         rocketCount: N(r.rocketCount),
-        source: r.source,
+        source: "daily_stats",
       }));
     }),
 

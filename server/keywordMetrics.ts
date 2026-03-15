@@ -1,9 +1,13 @@
 /**
  * ============================================================
- * Keyword Metrics Engine — EMA 스무딩 + 판매 추정 + 급등 탐지
+ * [DEPRECATED 2026-03-15] Keyword Metrics Engine
  * ============================================================
  *
- * ext_keyword_daily_status 일별 스냅샷을 기반으로:
+ * ⚠ 이 모듈은 구 ext_keyword_daily_status 테이블 기반이며, 현재 미사용 (0행).
+ * 정확한 통계는 ext_keyword_daily_stats (per-product delta) 기반의
+ * demand.router.ts → rebuildDailyStats 를 사용하세요.
+ *
+ * 원래 설계: ext_keyword_daily_status 일별 스냅샷을 기반으로:
  *   1. review_delta 계산 (전일 대비 리뷰 증가량)
  *   2. 카테고리 계수 × 가격/성숙도/광고 보정 → sales_estimate
  *   3. EMA7 / EMA30 스무딩
