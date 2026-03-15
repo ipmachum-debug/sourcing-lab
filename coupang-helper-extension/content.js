@@ -162,7 +162,7 @@
       border-radius: 22px !important; cursor: pointer !important;
       backdrop-filter: blur(12px) !important;
     }
-    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-foot { display: none !important; }
+    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-batch, #sh-panel.sh-min .sh-foot { display: none !important; }
     #sh-panel.sh-drag { opacity: 0.85 !important; cursor: grabbing !important; }
 
     /* 헤더 */
@@ -267,6 +267,53 @@
 
     /* 하이라이트 */
     .sh-hl { outline: 3px solid #6366f1 !important; outline-offset: -2px !important; transition: outline .15s !important; }
+
+    /* 배치 수집 바 */
+    .sh-batch {
+      padding: 8px 12px !important; flex-shrink: 0 !important;
+      border-top: 1px solid rgba(99,102,241,0.08) !important;
+      background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.06) 100%) !important;
+    }
+    .sh-batch-row {
+      display: flex !important; align-items: center !important; gap: 6px !important;
+    }
+    .sh-batch-btn {
+      padding: 5px 10px !important; border: none !important; border-radius: 6px !important;
+      font-size: 10px !important; font-weight: 700 !important; cursor: pointer !important;
+      transition: all .15s !important; white-space: nowrap !important;
+    }
+    .sh-batch-start {
+      background: #6366f1 !important; color: #fff !important; flex: 1 !important;
+    }
+    .sh-batch-start:hover { background: #4f46e5 !important; }
+    .sh-batch-start:disabled { background: #94a3b8 !important; cursor: default !important; }
+    .sh-batch-stop {
+      background: #dc2626 !important; color: #fff !important;
+    }
+    .sh-batch-stop:hover { background: #b91c1c !important; }
+    .sh-batch-status {
+      font-size: 9px !important; color: #64748b !important; margin-top: 4px !important;
+      display: flex !important; align-items: center !important; gap: 4px !important;
+    }
+    .sh-batch-progress {
+      flex: 1 !important; height: 6px !important; background: #e2e8f0 !important;
+      border-radius: 3px !important; overflow: hidden !important;
+    }
+    .sh-batch-fill {
+      height: 100% !important; border-radius: 3px !important;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;
+      transition: width .3s !important;
+    }
+    .sh-batch-fill.done { background: #22c55e !important; }
+    .sh-batch-text {
+      font-size: 9px !important; font-weight: 700 !important; color: #475569 !important;
+      white-space: nowrap !important;
+    }
+    .sh-batch-kw {
+      font-size: 8px !important; color: #8b5cf6 !important; font-weight: 600 !important;
+      margin-top: 2px !important; white-space: nowrap !important; overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
 
     /* 풋터 */
     .sh-foot {
@@ -1813,6 +1860,19 @@
         </div>
       </div>
       <div class="sh-body" id="sh-body"></div>
+      <div class="sh-batch" id="sh-batch">
+        <div class="sh-batch-row">
+          <button class="sh-batch-btn sh-batch-start" id="sh-batch-start">🤖 자동 수집</button>
+          <button class="sh-batch-btn sh-batch-stop" id="sh-batch-stop" style="display:none;">⏹ 중단</button>
+        </div>
+        <div id="sh-batch-info" style="display:none;">
+          <div class="sh-batch-status">
+            <div class="sh-batch-progress"><div class="sh-batch-fill" id="sh-batch-fill"></div></div>
+            <span class="sh-batch-text" id="sh-batch-text">0/0</span>
+          </div>
+          <div class="sh-batch-kw" id="sh-batch-kw"></div>
+        </div>
+      </div>
       <div class="sh-foot">🐢 소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
     `;
     document.body.appendChild(panel);
@@ -1825,6 +1885,9 @@
     });
     panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-min'); } });
     document.getElementById('sh-ref').addEventListener('click', (e) => { e.stopPropagation(); doScan(true); });
+
+    // 배치 수집 버튼
+    initBatchControls();
   }
 
   function initDrag() {
@@ -2223,6 +2286,166 @@
     if (q) {
       fetchMarketData(q).then(data => renderSearchVolume(data));
     }
+  }
+
+  // ============================================================
+  //  배치 수집 컨트롤 (플로팅 패널)
+  // ============================================================
+  let batchPollId = null;
+
+  function initBatchControls() {
+    const startBtn = document.getElementById('sh-batch-start');
+    const stopBtn = document.getElementById('sh-batch-stop');
+    if (!startBtn || !stopBtn) return;
+
+    startBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      startBtn.disabled = true;
+      startBtn.textContent = '⏳ 준비 중...';
+
+      try {
+        // 서버에서 감시 키워드 목록 가져오기
+        const kwResp = await chrome.runtime.sendMessage({
+          type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 }
+        });
+
+        let keywordList = [];
+        if (kwResp?.ok && kwResp.data?.length) {
+          keywordList = kwResp.data.map(kw => kw.keyword);
+        }
+
+        if (keywordList.length === 0) {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          alert('감시 키워드가 없습니다.\n사이드패널 > 수집 탭에서 키워드를 등록하세요.');
+          return;
+        }
+
+        const estMin = Math.ceil(keywordList.length * 20 / 60);
+        if (!confirm(`${keywordList.length}개 키워드 자동 수집을 시작합니다.\n⏱️ 예상: 약 ${estMin}분\n\n계속하시겠습니까?`)) {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          return;
+        }
+
+        const resp = await chrome.runtime.sendMessage({
+          type: 'START_AUTO_COLLECT',
+          payload: { limit: keywordList.length, collectDetail: false, keywords: keywordList, roundSize: keywordList.length }
+        });
+
+        if (resp?.ok) {
+          showBatchRunning(keywordList.length);
+          startBatchPolling(keywordList.length);
+        } else {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          alert('수집 시작 실패: ' + (resp?.error || '알 수 없는 오류'));
+        }
+      } catch (err) {
+        console.error('[SH] batch start error:', err);
+        startBtn.disabled = false;
+        startBtn.textContent = '🤖 자동 수집';
+      }
+    });
+
+    stopBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm('수집을 중단하시겠습니까?')) {
+        await chrome.runtime.sendMessage({ type: 'STOP_AUTO_COLLECT' });
+        stopBatchPolling();
+        resetBatchUI();
+      }
+    });
+
+    // 패널 생성 시 이미 진행 중인 배치가 있는지 확인
+    checkExistingBatch();
+  }
+
+  async function checkExistingBatch() {
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'GET_COLLECTOR_STATE' });
+      if (resp?.ok && resp.data?.running) {
+        const total = resp.data.totalQueued || 0;
+        showBatchRunning(total);
+        updateBatchProgress(resp.data, total);
+        startBatchPolling(total);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function showBatchRunning(total) {
+    const startBtn = document.getElementById('sh-batch-start');
+    const stopBtn = document.getElementById('sh-batch-stop');
+    const info = document.getElementById('sh-batch-info');
+    if (startBtn) { startBtn.style.display = 'none'; }
+    if (stopBtn) stopBtn.style.display = '';
+    if (info) info.style.display = '';
+  }
+
+  function resetBatchUI() {
+    const startBtn = document.getElementById('sh-batch-start');
+    const stopBtn = document.getElementById('sh-batch-stop');
+    const info = document.getElementById('sh-batch-info');
+    if (startBtn) { startBtn.style.display = ''; startBtn.disabled = false; startBtn.textContent = '🤖 자동 수집'; }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (info) info.style.display = 'none';
+  }
+
+  function updateBatchProgress(state, totalQueued) {
+    const done = (state.successCount || 0) + (state.failCount || 0) + (state.skipCount || 0);
+    const total = totalQueued || state.totalQueued || 1;
+    const pct = Math.min(100, Math.round((done / total) * 100));
+
+    const fill = document.getElementById('sh-batch-fill');
+    const text = document.getElementById('sh-batch-text');
+    const kwEl = document.getElementById('sh-batch-kw');
+
+    if (fill) {
+      fill.style.width = pct + '%';
+      fill.classList.toggle('done', pct >= 100);
+    }
+    if (text) text.textContent = `${done}/${total} (${pct}%)`;
+    if (kwEl) {
+      const current = state.currentKeyword || '';
+      const failInfo = state.failCount > 0 ? ` · ❌${state.failCount}` : '';
+      kwEl.textContent = current ? `수집 중: ${current}${failInfo}` : `완료${failInfo}`;
+    }
+  }
+
+  function startBatchPolling(totalQueued) {
+    stopBatchPolling();
+    batchPollId = setInterval(async () => {
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_COLLECTOR_STATE' });
+        if (!resp?.ok) return;
+        const state = resp.data;
+        updateBatchProgress(state, totalQueued);
+
+        if (!state.running && state.status !== 'PAUSED') {
+          stopBatchPolling();
+          // 완료 시 잠시 보여주고 리셋
+          const fill = document.getElementById('sh-batch-fill');
+          if (fill) { fill.style.width = '100%'; fill.classList.add('done'); }
+          const text = document.getElementById('sh-batch-text');
+          if (text) {
+            const done = (state.successCount || 0) + (state.failCount || 0) + (state.skipCount || 0);
+            text.textContent = `완료! ${done}개 처리`;
+          }
+          const kwEl = document.getElementById('sh-batch-kw');
+          if (kwEl) kwEl.textContent = `✅ ${state.successCount || 0}성공 · ❌${state.failCount || 0}실패 · ⏭${state.skipCount || 0}스킵`;
+
+          // 3초 후 UI 리셋
+          setTimeout(() => resetBatchUI(), 5000);
+
+          // 일일 배치 통계 업데이트 트리거
+          chrome.runtime.sendMessage({ type: 'HYBRID_RUN_DAILY_BATCH' });
+        }
+      } catch (e) { /* ignore */ }
+    }, 3000);
+  }
+
+  function stopBatchPolling() {
+    if (batchPollId) { clearInterval(batchPollId); batchPollId = null; }
   }
 
   // ============================================================
