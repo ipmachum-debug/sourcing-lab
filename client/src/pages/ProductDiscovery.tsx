@@ -55,6 +55,15 @@ function verdictLabel(verdict: string) {
   }
 }
 
+function deliveryLabel(dt: string | null | undefined): string {
+  if (!dt) return "일반판매";
+  const d = dt.toLowerCase();
+  if (d.includes("seller") || d.includes("판매자")) return "판매자로켓";
+  if (d.includes("growth") || d.includes("그로스")) return "로켓그로스";
+  if (d === "normaldelivery" || d === "standard" || d === "free" || d === "") return "일반판매";
+  return "일반판매";
+}
+
 function statusLabel(status: string) {
   switch (status) {
     case "pending": return <Badge variant="outline" className="text-xs"><Clock className="w-3 h-3 mr-1" />대기</Badge>;
@@ -385,7 +394,7 @@ export default function ProductDiscovery() {
                                     <span className="font-semibold text-foreground">{formatNum(tp.price)}원</span>
                                     <span>리뷰 {formatNum(tp.reviewCount)}</span>
                                     {Number(tp.rating) > 0 && <span>{Number(tp.rating).toFixed(1)}점</span>}
-                                    {tp.isRocket && <span className="text-blue-500">로켓</span>}
+                                    <span className="text-blue-500">{deliveryLabel(tp.deliveryType)}</span>
                                     {tp.searchRank > 0 && <span>#{tp.searchRank}</span>}
                                     {tp.estimatedMonthlySales > 0 && <span className="text-green-600">월{formatNum(tp.estimatedMonthlySales)}개</span>}
                                   </div>
@@ -553,7 +562,7 @@ function ProductCard({ product: p, onSelect }: { product: any; onSelect: (p: any
               <span>{formatNum(p.price)}원</span>
               <span>리뷰 {formatNum(p.reviewCount)}</span>
               {p.rating > 0 && <span>{Number(p.rating).toFixed(1)}점</span>}
-              {p.isRocket && <Badge variant="outline" className="text-[10px] py-0">로켓</Badge>}
+              <Badge variant="outline" className="text-[10px] py-0">{deliveryLabel(p.deliveryType)}</Badge>
               {p.searchRank > 0 && <span>#{p.searchRank}</span>}
             </div>
           </div>
@@ -671,7 +680,7 @@ function ProductDetailDialog({
               <div><span className="text-muted-foreground">평점:</span> {Number(p.rating).toFixed(1)}</div>
               <div><span className="text-muted-foreground">순위:</span> #{p.searchRank || "-"}</div>
               {p.sellerName && <div><span className="text-muted-foreground">판매자:</span> {p.sellerName}</div>}
-              {p.deliveryType && <div><span className="text-muted-foreground">배송:</span> {p.deliveryType}</div>}
+              <div><span className="text-muted-foreground">배송:</span> {deliveryLabel(p.deliveryType)}</div>
               {p.estimatedMonthlySales > 0 && (
                 <div><span className="text-muted-foreground">예상 월매출:</span> {formatNum(p.estimatedMonthlySales)}개</div>
               )}

@@ -24,6 +24,27 @@ import { N } from "./_helpers";
 import { invokeLLM } from "../../_core/llm";
 
 // ============================================================
+//  쿠팡 purchaseCount 문자열 → 월간 구매수 숫자 변환
+//  예: "한 달간 6,000명 이상 구매했어요" → 6000
+//      "1,000+명이 이 상품을 구매" → 1000
+//      "1만+ 구매" → 10000
+// ============================================================
+function parsePurchaseCount(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const s = raw.replace(/,/g, "").replace(/\s+/g, "");
+  // "N만" 패턴
+  const manMatch = s.match(/(\d+(?:\.\d+)?)\s*만/);
+  if (manMatch) return Math.round(parseFloat(manMatch[1]) * 10000);
+  // "N천" 패턴
+  const cheonMatch = s.match(/(\d+(?:\.\d+)?)\s*천/);
+  if (cheonMatch) return Math.round(parseFloat(cheonMatch[1]) * 1000);
+  // 일반 숫자 패턴
+  const numMatch = s.match(/(\d+)/);
+  if (numMatch) return parseInt(numMatch[1], 10);
+  return 0;
+}
+
+// ============================================================
 //  1차 필터링: 검색 결과에서 유망 상품 선별
 // ============================================================
 function filterCandidates(
@@ -33,12 +54,24 @@ function filterCandidates(
   // 광고 제외
   const nonAd = items.filter((it: any) => !it.isAd);
 
+  // 로켓배송(쿠팡 자체 판매) 제외 — 판매자로켓/일반배송만 소싱 대상
+  // deliveryType: rocketDelivery, rocketFresh = 쿠팡 직매입 (제외)
+  // deliveryType: sellerRocketDelivery, rocketGrowth, normalDelivery = 3P 판매자 (유지)
+  const sourceable = nonAd.filter((it: any) => {
+    const dt = (it.deliveryType || "").toLowerCase();
+    // 쿠팡 직매입 배송 유형 제외
+    if (dt === "rocketdelivery" || dt === "rocketfresh" || dt === "rocket_delivery" || dt === "rocket_fresh") return false;
+    // isRocket이 true이지만 판매자로켓/로켓그로스가 아닌 경우 제외
+    if (it.isRocket && !dt.includes("seller") && !dt.includes("growth") && dt !== "normaldelivery" && dt !== "") return false;
+    return true;
+  });
+
   // 기본 통계
-  const avgPrice = nonAd.reduce((s: number, it: any) => s + (it.price || 0), 0) / (nonAd.length || 1);
-  const avgReview = nonAd.reduce((s: number, it: any) => s + (it.reviewCount || 0), 0) / (nonAd.length || 1);
+  const avgPrice = sourceable.reduce((s: number, it: any) => s + (it.price || 0), 0) / (sourceable.length || 1);
+  const avgReview = sourceable.reduce((s: number, it: any) => s + (it.reviewCount || 0), 0) / (sourceable.length || 1);
 
   // 점수 계산: 진입 가능성이 높은 상품 우선
-  const scored = nonAd.map((it: any, idx: number) => {
+  const scored = sourceable.map((it: any, idx: number) => {
     let score = 0;
     const price = it.price || 0;
     const review = it.reviewCount || 0;
@@ -60,8 +93,10 @@ function filterCandidates(
     if (price >= 5000 && price <= 50000) score += 20;
     else if (price > 50000 && price <= 100000) score += 10;
 
-    // 로켓배송 아닌 상품 = 독점이 아님 = 진입 가능
-    if (!it.isRocket) score += 10;
+    // 판매자로켓 = 풀필먼트 사용 가능, 일반배송보다 유리
+    const dt = (it.deliveryType || "").toLowerCase();
+    if (dt.includes("seller") || dt.includes("growth")) score += 15;
+    else score += 10; // 일반배송
 
     // 상위 랭크 가산 (1~10위)
     if (rank <= 5) score += 15;
@@ -79,6 +114,8 @@ function filterCandidates(
     criteria: {
       totalItems: items.length,
       nonAdItems: nonAd.length,
+      sourceableItems: sourceable.length,
+      rocketExcluded: nonAd.length - sourceable.length,
       avgPrice: Math.round(avgPrice),
       avgReview: Math.round(avgReview),
       selectedCount: filtered.length,
@@ -129,6 +166,8 @@ async function analyzeProductsWithAI(
       reviewCount: d.reviewCount || searchItem?.reviewCount || 0,
       sellerName: d.sellerName || "",
       deliveryType: d.deliveryType || d.delivery || searchItem?.deliveryType || "",
+      purchaseCount: d.purchaseCount || searchItem?.purchaseCount || "",
+      parsedMonthlySales: parsePurchaseCount(d.purchaseCount || searchItem?.purchaseCount),
       categoryPath: d.categoryPath || "",
       optionCount: d.optionCount || (d.optionSummary?.length || 0),
       searchRank: d.rank || searchItem?.rank || searchItem?._rank || 0,
@@ -153,9 +192,15 @@ async function analyzeProductsWithAI(
 1. 시장 진입 가능성 — 리뷰 1000개 이하의 틈새 시장인지
 2. 수익성 — 가격대가 마진 확보에 적합한지 (원가 30~40% 기준)
 3. 소싱 난이도 — 중국(1688/알리)에서 유사 상품을 구할 수 있는지
-4. 경쟁 강도 — 로켓배송, 광고 비율, 리뷰 양극화
+4. 경쟁 강도 — 광고 비율, 리뷰 양극화
 5. 트렌드 — 리뷰 증가 속도, 품절 여부, 가격 변동
 6. 차별화 여지 — 옵션, 패키징, 세트 구성으로 차별화 가능한지
+
+중요:
+- 분석 대상은 판매자로켓 또는 일반판매 제품만 포함됩니다 (쿠팡 직매입 로켓배송은 이미 제외됨).
+- "purchaseCount"는 쿠팡이 상품 페이지에 표시하는 실제 월간 구매수입니다 (예: "한 달간 6,000명 이상 구매했어요").
+- "parsedMonthlySales"는 purchaseCount에서 파싱된 월간 구매 숫자입니다.
+- estimatedMonthlySales에는 parsedMonthlySales 값을 우선 사용하고, 없으면 리뷰 기반으로 추정하세요.
 
 반드시 한국어로 응답하세요.
 각 상품에 대해 구체적 수치와 함께 근거를 제시하세요.`;
@@ -302,13 +347,21 @@ function ruleBasedAnalysis(
       reasons.push({ type: "positive", category: "trend", text: `검색 ${rank}위 — 상위 노출 상품` });
     }
 
-    // 로켓배송
-    if (searchItem?.isRocket || d.isRocket) {
-      risks.push({ level: "medium", text: "로켓배송 상품 — 쿠팡 직매입과 경쟁" });
+    // 배송 유형 (filterCandidates에서 로켓배송 이미 제외됨)
+    const dt = (d.deliveryType || searchItem?.deliveryType || "").toLowerCase();
+    if (dt.includes("seller") || dt.includes("growth")) {
+      score += 15;
+      opportunities.push({ text: "판매자로켓 — 풀필먼트 활용 가능" });
     } else {
       score += 10;
-      opportunities.push({ text: "로켓배송 아님 — 3P 판매자 시장" });
+      opportunities.push({ text: "일반판매 — 3P 판매자 시장" });
     }
+
+    // 월매출 예상: 쿠팡 제공 구매수 데이터 우선 사용
+    const coupangPurchase = parsePurchaseCount(d.purchaseCount || searchItem?.purchaseCount);
+    const monthlySales = coupangPurchase > 0
+      ? coupangPurchase   // 쿠팡 "한 달간 N명 이상 구매" 데이터 직접 사용
+      : Math.round(review * 0.5);  // 폴백: 리뷰 기반 추정
 
     const grade = score >= 80 ? "S" : score >= 60 ? "A" : score >= 40 ? "B" : score >= 20 ? "C" : "D";
     const verdict = score >= 70 ? "strong_buy" : score >= 50 ? "buy" : score >= 30 ? "watch" : "pass";
@@ -321,7 +374,7 @@ function ruleBasedAnalysis(
       reasons,
       risks,
       opportunities,
-      estimatedMonthlySales: Math.round(review * 0.5),
+      estimatedMonthlySales: monthlySales,
       estimatedMarginPercent: price >= 10000 ? 30 : price >= 5000 ? 20 : 10,
       sourcingTip: `1688에서 "${keyword}" 관련 제품 검색`,
       differentiationIdea: "세트 구성 또는 패키지 차별화 검토",
