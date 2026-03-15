@@ -54,6 +54,7 @@ export default function KeywordTable({
             <th className="p-2 text-center">평균가</th>
             <th className="p-2 text-center">리뷰증가</th>
             <th className="p-2 text-center">판매추정</th>
+            <th className="p-2 text-center">검색량</th>
             <th className="p-2 text-center">경쟁도</th>
             <th className="p-2 text-center">수요</th>
             <th className="p-2 text-center">종합</th>
@@ -118,6 +119,13 @@ export default function KeywordTable({
                       )}
                     </div>
                   </div>
+                </td>
+                <td className="p-2 text-center">
+                  {kw.monthlySearchVolume != null ? (
+                    <span className="font-medium text-purple-600">{kw.monthlySearchVolume.toLocaleString()}</span>
+                  ) : (
+                    <span className="text-gray-300 text-[9px]">-</span>
+                  )}
                 </td>
                 <td className="p-2 text-center">
                   <Badge className={`text-[9px] ${

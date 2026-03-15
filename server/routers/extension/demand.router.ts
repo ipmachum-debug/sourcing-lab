@@ -96,7 +96,7 @@ export const demandRouter = router({
   listKeywordStats: protectedProcedure
     .input(z.object({
       limit: z.number().int().min(1).max(1000).default(500),
-      sortBy: z.enum(["keyword_score", "demand_score", "review_growth", "sales_estimate", "competition_score", "avg_price", "query"]).default("keyword_score"),
+      sortBy: z.enum(["keyword_score", "demand_score", "review_growth", "sales_estimate", "competition_score", "avg_price", "query", "monthly_search_volume"]).default("keyword_score"),
       sortDir: z.enum(["asc", "desc"]).default("desc"),
       search: z.string().optional(),
     }).default({ limit: 500, sortBy: "keyword_score", sortDir: "desc" }))
@@ -138,7 +138,25 @@ export const demandRouter = router({
         ));
       const pinMap = new Map(pinRows.map(p => [p.keyword, p]));
 
-      // 핀 상태 합치기
+      // 검색량 데이터 조회 (최신 월, 키워드별)
+      const svRows = await db.select({
+        keyword: keywordSearchVolumeHistory.keyword,
+        totalSearch: keywordSearchVolumeHistory.totalSearch,
+        yearMonth: keywordSearchVolumeHistory.yearMonth,
+      })
+        .from(keywordSearchVolumeHistory)
+        .where(and(
+          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+          eq(keywordSearchVolumeHistory.source, "naver"),
+          sql`(${keywordSearchVolumeHistory.keyword}, ${keywordSearchVolumeHistory.yearMonth}) IN (
+            SELECT keyword, MAX(year_month) FROM keyword_search_volume_history
+            WHERE user_id = ${ctx.user!.id} AND source = 'naver'
+            GROUP BY keyword
+          )`,
+        ));
+      const svMap = new Map(svRows.map(sv => [sv.keyword, N(sv.totalSearch)]));
+
+      // 핀 상태 + 검색량 합치기
       const enriched = rows.map((r: any) => {
         const pin = pinMap.get(r.query);
         return {
@@ -146,6 +164,7 @@ export const demandRouter = router({
           isPinned: pin ? !!pin.isPinned : false,
           pinOrder: pin ? Number(pin.pinOrder) || 0 : 0,
           watchId: pin?.watchId || null,
+          monthlySearchVolume: svMap.get(r.query) ?? null,
         };
       });
 
@@ -158,6 +177,7 @@ export const demandRouter = router({
         competition_score: "competitionScore",
         avg_price: "avgPrice",
         query: "query",
+        monthly_search_volume: "monthlySearchVolume",
       };
       const sortField = sortFieldMap[input?.sortBy || "keyword_score"] || "keywordScore";
       const sortDir = input?.sortDir || "desc";
