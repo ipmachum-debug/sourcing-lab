@@ -2720,7 +2720,7 @@ async function showKeywordDetail(keyword) {
         '<div class="demand-detail-item"><div class="demand-detail-val">' + latest.competitionScore + '</div><div class="demand-detail-lbl">경쟁도</div></div>' +
         '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.competitionLevel || '-') + '</div><div class="demand-detail-lbl">경쟁레벨</div></div>' +
         '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.reviewGrowth || 0) + '</div><div class="demand-detail-lbl">리뷰증가</div></div>' +
-        '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.dataQualityScore || 0) + '%</div><div class="demand-detail-lbl">데이터품질</div></div>' +
+        '<div class="demand-detail-item"><div class="demand-detail-val">' + (latest.demandScore || 0) + '</div><div class="demand-detail-lbl">수요점수</div></div>' +
       '</div>';
 
       if (history.length >= 2) {
@@ -2729,11 +2729,12 @@ async function showKeywordDetail(keyword) {
         recent.forEach(function(day) {
           var rgClass = day.reviewGrowth > 0 ? 'demand-trend-up' : day.reviewGrowth < 0 ? 'demand-trend-down' : 'demand-trend-flat';
           var pcClass = day.priceChange > 0 ? 'demand-trend-up' : day.priceChange < 0 ? 'demand-trend-down' : 'demand-trend-flat';
+          var sales = day.estimatedDailySales || 0;
           html += '<div class="demand-trend-row">' +
             '<span>' + (day.statDate ? day.statDate.slice(5) : '-') + '</span>' +
             '<span>상품' + day.totalItems + '</span>' +
-            '<span>평균' + formatDemandPrice(day.avgPrice) + '</span>' +
             '<span class="' + rgClass + '">리뷰' + (day.reviewGrowth > 0 ? '+' : '') + day.reviewGrowth + '</span>' +
+            '<span>' + (sales > 0 ? '판매~' + sales.toLocaleString() : '-') + '</span>' +
             '<span class="' + pcClass + '">가격' + (day.priceChange > 0 ? '+' : '') + formatDemandPrice(day.priceChange) + '</span>' +
           '</div>';
         });
