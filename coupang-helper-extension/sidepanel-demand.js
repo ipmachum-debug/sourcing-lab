@@ -105,6 +105,99 @@ async function loadDemandDashboard() {
       }
     }
   } catch (e) { console.error('[Demand] uncollected badge:', e); }
+
+  // v8.5.1: 오늘의 배치 요약 표시
+  updateTodayBatchSummary();
+  // v8.5.1: 실시간 수집 상태 체크
+  updateLiveBatchStatus();
+}
+
+// v8.5.1: 오늘의 배치 요약 (5배치/일 제한 표시)
+async function updateTodayBatchSummary() {
+  try {
+    var stored = await chrome.storage.local.get(['todayBatchRuns', 'todayValidCount', 'todayBatchDate']);
+    var today = new Date().toISOString().slice(0, 10);
+    var runs = 0;
+    var validCount = 0;
+    if (stored.todayBatchDate === today) {
+      runs = stored.todayBatchRuns || 0;
+      validCount = stored.todayValidCount || 0;
+    }
+    var summaryEl = document.querySelector('#todayBatchSummary');
+    if (summaryEl) {
+      summaryEl.style.display = '';
+      document.querySelector('#todayBatchCount').textContent = runs;
+      document.querySelector('#todayValidKeywords').textContent = validCount;
+      // 5배치 제한 시 경고 색상
+      if (runs >= 5) {
+        document.querySelector('#todayBatchCount').style.color = '#dc2626';
+      } else {
+        document.querySelector('#todayBatchCount').style.color = '#475569';
+      }
+    }
+  } catch (e) { console.error('[Demand] todayBatch:', e); }
+}
+
+// v8.5.1: 실시간 배치 상태 업데이트
+var liveBatchPollingId = null;
+async function updateLiveBatchStatus() {
+  try {
+    var resp = await sendMsg({ type: 'GET_COLLECTOR_STATE' });
+    if (!resp || !resp.ok || !resp.data) return;
+    var state = resp.data;
+    var livePanel = document.querySelector('#liveBatchStatusPanel');
+    if (!livePanel) return;
+
+    if (state.running || state.paused) {
+      livePanel.style.display = '';
+      var done = (state.successCount || 0) + (state.failCount || 0) + (state.skipCount || 0);
+      var total = state.totalQueued || 0;
+      var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+      // 배치 번호 계산
+      var stored = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+      var today = new Date().toISOString().slice(0, 10);
+      var batchNum = (stored.todayBatchDate === today ? (stored.todayBatchRuns || 0) : 0) + 1;
+      document.querySelector('#liveBatchRunCount').textContent = batchNum + '배치';
+
+      document.querySelector('#liveBatchCurrent').textContent = done + '/' + total;
+      document.querySelector('#liveBatchTotal').textContent = total + '개';
+      document.querySelector('#liveBatchSuccess').textContent = state.successCount || 0;
+      document.querySelector('#liveBatchFail').textContent = state.failCount || 0;
+      document.querySelector('#liveBatchProgressFill').style.width = pct + '%';
+      document.querySelector('#liveBatchProgressText').textContent = done + '/' + total + ' (' + pct + '%)';
+
+      var kwEl = document.querySelector('#liveBatchCurrentKw');
+      if (kwEl) {
+        if (state.currentKeyword) {
+          kwEl.textContent = '\u25b6 \"' + state.currentKeyword + '\" 수집 중...';
+        } else if (state.status === 'WAITING_NEXT') {
+          kwEl.textContent = '\u23f3 다음 키워드 대기중... (' + state.queueLength + '개 남음)';
+        } else {
+          kwEl.textContent = '';
+        }
+      }
+
+      // 배지 업데이트
+      var badge = document.querySelector('#autoCollectStatusBadge');
+      if (badge && state.running) {
+        badge.textContent = '수집중 ' + done + '/' + total;
+        badge.className = 'competition-badge level-medium';
+      }
+
+      // 폴링 시작
+      if (!liveBatchPollingId) {
+        liveBatchPollingId = setInterval(updateLiveBatchStatus, 2000);
+      }
+    } else {
+      livePanel.style.display = 'none';
+      // 폴링 중단
+      if (liveBatchPollingId) {
+        clearInterval(liveBatchPollingId);
+        liveBatchPollingId = null;
+      }
+    }
+  } catch (e) { /* ignore */ }
 }
 
 async function loadDemandKeywords() {
@@ -112,12 +205,19 @@ async function loadDemandKeywords() {
   const sortBy = sortSel ? sortSel.value : 'compositeScore';
   try {
     const resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: sortBy, limit: 200 } });
-    if (!resp || !resp.ok || !resp.data || !resp.data.length) {
+    // v8.5.1: data 형식 유연하게 처리
+    var keywords = null;
+    if (resp && resp.ok && resp.data) {
+      if (Array.isArray(resp.data)) keywords = resp.data;
+      else if (resp.data.items && Array.isArray(resp.data.items)) keywords = resp.data.items;
+      else if (resp.data.keywords && Array.isArray(resp.data.keywords)) keywords = resp.data.keywords;
+    }
+    if (!keywords || !keywords.length) {
       document.querySelector('#demandEmpty').style.display = '';
       document.querySelector('#demandKwHeader').style.display = 'none';
       return;
     }
-    demandKeywords = resp.data;
+    demandKeywords = keywords;
     document.querySelector('#demandEmpty').style.display = 'none';
     document.querySelector('#demandKwHeader').style.display = 'flex';
     document.querySelector('#demandBatchControls').style.display = '';
@@ -457,9 +557,16 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
     console.log('[수집] demandKeywords 비어있음, 서버에서 직접 키워드 조회...');
     try {
       var kwResp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 } });
-      if (kwResp && kwResp.ok && kwResp.data && kwResp.data.length > 0) {
-        demandKeywords = kwResp.data;
-        keywordList = kwResp.data.map(function(kw) { return kw.keyword; });
+      // v8.5.1: data 형식 유연하게 처리
+      var kwData = null;
+      if (kwResp && kwResp.ok && kwResp.data) {
+        if (Array.isArray(kwResp.data)) kwData = kwResp.data;
+        else if (kwResp.data.items) kwData = kwResp.data.items;
+        else if (kwResp.data.keywords) kwData = kwResp.data.keywords;
+      }
+      if (kwData && kwData.length > 0) {
+        demandKeywords = kwData;
+        keywordList = kwData.map(function(kw) { return kw.keyword; });
         console.log('[수집] 서버에서 ' + keywordList.length + '개 키워드 로드 완료');
       }
     } catch(e) { console.error('[수집] 서버 키워드 조회 실패:', e); }
@@ -498,6 +605,33 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
         alert('수집 시작 실패: ' + (errMsg1 || '알 수 없는 오류'));
       }
     }
+    return;
+  }
+
+  // v8.5.1: 하루 5배치 제한 체크
+  var todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+  var todayStr = new Date().toISOString().slice(0, 10);
+  var todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
+  if (todayRuns >= 5) {
+    alert('오늘 배치 한도(5회)에 도달했습니다.\n내일 다시 시도해주세요.');
+    return;
+  }
+
+  // v8.5.1: 이미 수집된 키워드 필터링 (오늘 수집된 키워드 제외)
+  try {
+    var ucResp2 = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
+    if (ucResp2 && ucResp2.ok && ucResp2.data && ucResp2.data.collectedKeywords && ucResp2.data.collectedKeywords.length > 0) {
+      var collectedSet = new Set(ucResp2.data.collectedKeywords);
+      var beforeLen = keywordList.length;
+      keywordList = keywordList.filter(function(kw) { return !collectedSet.has(kw); });
+      if (beforeLen !== keywordList.length) {
+        console.log('[수집] 이미 수집된 키워드 ' + (beforeLen - keywordList.length) + '개 제외, 남은: ' + keywordList.length + '개');
+      }
+    }
+  } catch(e) { console.warn('[수집] 수집완료 키워드 필터링 실패:', e); }
+
+  if (keywordList.length === 0) {
+    alert('오늘 모든 키워드가 이미 수집되었습니다!');
     return;
   }
 
@@ -572,7 +706,18 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
           document.querySelector('#batchProgressText').textContent = '✅ 완료! 성공:' + state.successCount + ' 실패:' + state.failCount;
           batchRunning = false;
           try { await sendMsg({ type: 'HYBRID_RUN_DAILY_BATCH' }); } catch(_){}
-          await chrome.storage.local.set({ lastDailyBatchRun: new Date().toISOString(), batchOffset: 0 });
+          // v8.5.1: 오늘의 배치 카운트 업데이트
+          var td = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate', 'todayValidCount']);
+          var tdStr = new Date().toISOString().slice(0, 10);
+          var tdRuns = (td.todayBatchDate === tdStr) ? (td.todayBatchRuns || 0) : 0;
+          var tdValid = (td.todayBatchDate === tdStr) ? (td.todayValidCount || 0) : 0;
+          await chrome.storage.local.set({
+            lastDailyBatchRun: new Date().toISOString(),
+            batchOffset: 0,
+            todayBatchRuns: tdRuns + 1,
+            todayValidCount: tdValid + (state.successCount || 0),
+            todayBatchDate: tdStr
+          });
           setTimeout(function() { loadDemandDashboard(); loadDemandKeywords(); }, 1000);
           setTimeout(function() { document.querySelector('#batchProgressBar').style.display = 'none'; }, 8000);
         }
@@ -692,21 +837,40 @@ async function loadManualKeywords() {
     return;
   }
   try {
+    console.log('[Manual] 키워드 목록 로드 시작...');
     var resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'keyword', limit: 1000 } });
-    if (!resp || !resp.ok || !resp.data || !resp.data.length) {
+    console.log('[Manual] 응답:', resp ? ('ok=' + resp.ok + ' data=' + (resp.data ? (Array.isArray(resp.data) ? resp.data.length + '개' : typeof resp.data) : 'null')) : 'null');
+    
+    // v8.5.1: data가 배열이 아닌 경우 처리 (tRPC 응답 형식 차이)
+    var keywords = null;
+    if (resp && resp.ok && resp.data) {
+      if (Array.isArray(resp.data)) {
+        keywords = resp.data;
+      } else if (resp.data.items && Array.isArray(resp.data.items)) {
+        keywords = resp.data.items;
+      } else if (resp.data.keywords && Array.isArray(resp.data.keywords)) {
+        keywords = resp.data.keywords;
+      }
+    }
+    
+    if (!keywords || !keywords.length) {
       document.querySelector('#manualEmpty').style.display = '';
+      document.querySelector('#manualEmpty').textContent = '감시 키워드가 없습니다. 쿠팡에서 검색하면 자동으로 키워드가 등록됩니다.';
       document.querySelector('#manualKwTotalCount').textContent = '0';
       manualAllKeywords = [];
       filterManualKeywords();
       return;
     }
-    manualAllKeywords = resp.data;
+    manualAllKeywords = keywords;
     document.querySelector('#manualEmpty').style.display = 'none';
     document.querySelector('#manualKwTotalCount').textContent = manualAllKeywords.length;
     updateChosungCounts();
     filterManualKeywords();
+    console.log('[Manual] ' + manualAllKeywords.length + '개 키워드 로드 완료');
   } catch (e) {
     console.error('[Manual] load error:', e);
+    document.querySelector('#manualEmpty').textContent = '키워드 로드 실패: ' + e.message;
+    document.querySelector('#manualEmpty').style.display = '';
   }
 }
 
