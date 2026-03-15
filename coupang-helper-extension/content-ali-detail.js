@@ -505,7 +505,7 @@
     if (!panel) createPanel();
     if (!detail) {
       panel.innerHTML = `
-        <div class="sh-d-hd"><span class="logo">🐢 Ali 분석</span><span class="ver">v${VER}</span></div>
+        <div class="sh-d-hd"><span class="logo">Ali 분석</span><span class="ver">v${VER}</span></div>
         <div class="sh-d-body" style="padding:30px !important;text-align:center !important;color:#94a3b8 !important;">파싱 중...</div>
       `;
       return;
@@ -524,7 +524,7 @@
 
     panel.innerHTML = `
       <div class="sh-d-hd">
-        <span class="logo">🐢 Ali 분석</span>
+        <span class="logo">Ali 분석</span>
         <div class="sh-d-hbtns">
           <button class="sh-d-hb" id="sh-d-ref" title="새로고침">↻</button>
           <button class="sh-d-hb" id="sh-d-min" title="접기">—</button>
@@ -599,7 +599,7 @@
         </div>
       </div>
 
-      <div class="sh-d-foot">🐢 소싱 헬퍼 · 참고용 분석 (저장 안 됨)</div>
+      <div class="sh-d-foot">소싱 헬퍼 · 참고용 분석 (저장 안 됨)</div>
     `;
 
     // 이벤트
