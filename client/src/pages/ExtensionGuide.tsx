@@ -13,9 +13,9 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.5.0";
+const EXTENSION_VERSION = "8.5.3";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
-const EXTENSION_FILE_SIZE = "184KB";
+const EXTENSION_FILE_SIZE = "688KB";
 
 function AccordionSection({
   icon: Icon,
@@ -834,7 +834,7 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v8.5.0",
+                    version: "v8.5.3",
                     date: "2026-03-15",
                     badge: "Latest",
                     changes: [
