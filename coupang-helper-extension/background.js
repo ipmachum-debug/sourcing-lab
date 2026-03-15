@@ -37,6 +37,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
   // 하이브리드 일일 배치 알람 (매 24시간마다)
   chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
+  // v8.6: 예약 자동수집 알람 (매 2시간마다)
+  chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
   // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
 
@@ -61,6 +63,15 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (!existing) {
     chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
     console.log('[Discovery] 폴링 알람 재생성');
+  }
+  // v8.6: 예약 수집 알람 보장
+  const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
+  if (scheduleEnabled) {
+    const schedAlarm = await chrome.alarms.get('scheduledAutoCollect').catch(() => null);
+    if (!schedAlarm) {
+      chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+      console.log('[Schedule] 예약 수집 알람 재생성');
+    }
   }
   // 10초 후 즉시 체크
   setTimeout(async () => {
@@ -92,6 +103,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // v8.1: AI 제품 발견 자동 폴링
   if (alarm.name === 'discoveryPolling') {
     await discoveryAutoCheck();
+  }
+  // v8.6: 예약 자동수집 (2시간마다)
+  if (alarm.name === 'scheduledAutoCollect') {
+    await runScheduledAutoCollect();
   }
 });
 
@@ -908,6 +923,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.6: 예약 수집 토글
+    case 'SCHEDULE_TOGGLE': {
+      (async () => {
+        const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
+        const newVal = !scheduleEnabled;
+        await chrome.storage.local.set({ scheduleEnabled: newVal });
+        if (newVal) {
+          chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+        } else {
+          chrome.alarms.clear('scheduledAutoCollect');
+        }
+        console.log('[Schedule] 예약 수집 ' + (newVal ? '활성화' : '비활성화'));
+        sendResponse({ ok: true, enabled: newVal });
+      })();
+      return true;
+    }
+
+    case 'SCHEDULE_STATUS': {
+      (async () => {
+        const st = await chrome.storage.local.get(['scheduleEnabled', 'scheduleLastRun', 'scheduleNextRound']);
+        sendResponse({ ok: true, enabled: !!st.scheduleEnabled, lastRun: st.scheduleLastRun || null });
+      })();
+      return true;
+    }
+
     // v7.2: 강제 수집기 리셋 (사이드패널에서 'Already running' 에러 시 사용)
     case 'FORCE_RESET_COLLECTOR': {
       resetCollector();
@@ -1676,6 +1716,143 @@ async function autoRunDailyBatch() {
   } catch (e) {
     console.error('[SH] 일일 배치 실패:', e.message);
   }
+}
+
+// ============================================================
+//  v8.6: 예약 자동수집 (2시간마다 다회차 자동 수집)
+//
+//  - 키워드 ≤500개: ceil(total/100)회차 수집
+//  - 키워드 >500개: 5회차(100×5) 수집
+//  - 회차 간 2~4분 쿨다운
+//  - 수집 완료 후 자동 통계 처리
+// ============================================================
+
+async function runScheduledAutoCollect() {
+  // 1) 예약 활성 체크
+  const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
+  if (!scheduleEnabled) {
+    console.log('[Schedule] 예약 수집 비활성 — 스킵');
+    return;
+  }
+
+  // 2) 서버 로그인 체크
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) {
+    console.log('[Schedule] 서버 미로그인 — 스킵');
+    return;
+  }
+
+  // 3) 쿠팡 탭 열려있는지 확인
+  const coupangTabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+  if (!coupangTabs || coupangTabs.length === 0) {
+    console.log('[Schedule] 쿠팡 탭 미열림 — 스킵');
+    return;
+  }
+
+  // 4) 수집기가 이미 실행 중이면 스킵
+  if (collector.running) {
+    console.log('[Schedule] 수집기 실행 중 — 스킵');
+    return;
+  }
+
+  // 5) 서버에서 전체 키워드 수 + 오늘 수집 상태 조회
+  let totalActive = 0;
+  let roundsToday = 0;
+  let maxRounds = 5;
+  try {
+    const dashResp = await apiClient.hybridCollectionDashboard();
+    const dashData = dashResp?.result?.data;
+    if (dashData) {
+      totalActive = (dashData.watchKeywords && dashData.watchKeywords.active) || 0;
+      if (dashData.batchEngine) {
+        roundsToday = dashData.batchEngine.roundsToday || 0;
+        maxRounds = dashData.batchEngine.maxRoundsPerDay || 5;
+      }
+    }
+  } catch (e) {
+    console.error('[Schedule] 대시보드 조회 실패:', e.message);
+    return;
+  }
+
+  if (totalActive === 0) {
+    console.log('[Schedule] 활성 키워드 없음 — 스킵');
+    return;
+  }
+
+  // 6) 필요한 회차 계산
+  const neededRounds = Math.min(Math.ceil(totalActive / 100), maxRounds);
+  const remainingRounds = Math.max(0, neededRounds - roundsToday);
+
+  if (remainingRounds <= 0) {
+    console.log(`[Schedule] 오늘 수집 완료 (${roundsToday}/${maxRounds}회차) — 스킵`);
+    return;
+  }
+
+  console.log(`[Schedule] 예약 자동수집 시작 — ${remainingRounds}회차 예정 (활성: ${totalActive}개, 오늘: ${roundsToday}/${maxRounds})`);
+  await chrome.storage.local.set({ scheduleLastRun: new Date().toISOString() });
+
+  // 7) 다회차 순차 수집
+  for (let round = 0; round < remainingRounds; round++) {
+    if (collector.running) {
+      console.log(`[Schedule] 회차 ${round + 1} — 수집기 실행 중, 대기...`);
+      await waitForCollectorDone(180000); // 최대 3분 대기
+    }
+
+    // 서버에서 이번 회차 키워드 선별
+    let batchKeywords = [];
+    try {
+      const batchResp = await apiClient.getBatchKeywordSelection({ limit: 100 });
+      const batchData = batchResp?.result?.data;
+      if (batchData && batchData.keywords && batchData.keywords.length > 0) {
+        batchKeywords = batchData.keywords.map(function(k) { return k.keyword; });
+      }
+    } catch (e) {
+      console.error(`[Schedule] 회차 ${round + 1} 키워드 선별 실패:`, e.message);
+      break;
+    }
+
+    if (batchKeywords.length === 0) {
+      console.log(`[Schedule] 회차 ${round + 1} — 수집할 키워드 없음, 중단`);
+      break;
+    }
+
+    console.log(`[Schedule] 회차 ${round + 1}/${remainingRounds} 시작 — ${batchKeywords.length}개 키워드`);
+
+    // 자동수집 시작
+    try {
+      await startAutoCollect({ limit: batchKeywords.length, collectDetail: false, keywords: batchKeywords, roundSize: 100 });
+      // 수집 완료 대기 (최대 80분)
+      await waitForCollectorDone(80 * 60 * 1000);
+      console.log(`[Schedule] 회차 ${round + 1} 완료 — 성공: ${collector.successCount}, 실패: ${collector.failCount}`);
+    } catch (e) {
+      console.error(`[Schedule] 회차 ${round + 1} 수집 오류:`, e.message);
+      break;
+    }
+
+    // 다음 회차 전 쿨다운 (2~4분 랜덤)
+    if (round < remainingRounds - 1) {
+      const cooldown = 120000 + Math.random() * 120000; // 2~4분
+      console.log(`[Schedule] 쿨다운 ${Math.round(cooldown / 1000)}초...`);
+      await new Promise(resolve => setTimeout(resolve, cooldown));
+    }
+  }
+
+  console.log('[Schedule] 예약 자동수집 완료');
+}
+
+// 수집기 완료 대기 헬퍼
+function waitForCollectorDone(timeoutMs) {
+  return new Promise(function(resolve) {
+    var elapsed = 0;
+    var interval = 3000;
+    var check = setInterval(function() {
+      elapsed += interval;
+      if (!collector.running || elapsed >= timeoutMs) {
+        clearInterval(check);
+        resolve();
+      }
+    }, interval);
+  });
 }
 
 
