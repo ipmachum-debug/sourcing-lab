@@ -1,6 +1,7 @@
 /**
- * 키워드 메트릭 & 알림 라우터
- * — 그래프용 차트 데이터, 메트릭 재계산, 알림 관리
+ * [DEPRECATED 2026-03-15] 키워드 메트릭 & 알림 라우터
+ * ⚠ 구 ext_keyword_metrics / ext_keyword_alerts 테이블 기반 (현재 0행).
+ * 정확한 통계는 ext_keyword_daily_stats 기반의 demand.router.ts 사용.
  */
 
 import { protectedProcedure, router } from "../_core/trpc";

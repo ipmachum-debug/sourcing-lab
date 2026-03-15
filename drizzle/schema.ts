@@ -798,6 +798,11 @@ export const extWatchKeywords = mysqlTable("ext_watch_keywords", {
   adaptiveIntervalHours: int("adaptive_interval_hours"),
   volatilityScore: int("volatility_score").notNull().default(0),
   priorityScore: int("priority_score").default(0),
+  // 핀(고정) 키워드 — 배치 수집 시 최우선 수집 대상
+  isPinned: boolean("is_pinned").notNull().default(false),
+  pinOrder: int("pin_order").notNull().default(0),
+  // 라운드로빈 그룹 번호 (id % GROUP_COUNT로 자동 배정)
+  groupNo: int("group_no").notNull().default(0),
   // 키워드 마스터 연결 + 감시 상태
   keywordMasterId: int("keyword_master_id"),
   watchReason: varchar("watch_reason", { length: 100 }),
@@ -1267,3 +1272,24 @@ export const extDiscoveryProducts = mysqlTable("ext_discovery_products", {
 
 export type ExtDiscoveryProduct = typeof extDiscoveryProducts.$inferSelect;
 export type InsertExtDiscoveryProduct = typeof extDiscoveryProducts.$inferInsert;
+
+// ==================== Extension: 배치 수집 상태 (ext_batch_state) ====================
+// 유저별 배치 수집 상태 — 라운드로빈 그룹 이월, 일일 수집 카운트 추적
+export const extBatchState = mysqlTable("ext_batch_state", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  // 라운드로빈 그룹 턴 (다음 배치에서 우선 처리할 그룹 번호)
+  currentGroupTurn: int("current_group_turn").notNull().default(0),
+  // 오늘 총 수집 키워드 수
+  totalCollectedToday: int("total_collected_today").notNull().default(0),
+  // 오늘 배치 실행 횟수
+  roundsToday: int("rounds_today").notNull().default(0),
+  // 마지막 배치 완료 시각
+  lastBatchCompletedAt: timestamp("last_batch_completed_at", tsOpts),
+  // 오늘 날짜 (리셋 기준)
+  stateDate: varchar("state_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ExtBatchState = typeof extBatchState.$inferSelect;

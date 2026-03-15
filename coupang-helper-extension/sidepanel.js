@@ -2607,6 +2607,19 @@ async function loadDemandDashboard() {
       badge.className = 'competition-badge level-easy';
     }
   } catch (e) { console.error('[Demand] dashboard:', e); }
+
+  // v8.4.6: 미수집 키워드 건수 뱃지 업데이트
+  try {
+    var ucResp = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
+    var ucBadge = document.querySelector('#uncollectedBadge');
+    if (ucResp && ucResp.ok && ucResp.data) {
+      var ucCount = ucResp.data.uncollectedCount || 0;
+      if (ucBadge) {
+        ucBadge.textContent = ucCount;
+        ucBadge.style.display = ucCount > 0 ? 'inline' : 'none';
+      }
+    }
+  } catch (e) { console.error('[Demand] uncollected badge:', e); }
 }
 
 async function loadDemandKeywords() {
@@ -2931,7 +2944,22 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
 
   // 키워드 목록 준비 (서버의 검색수요 키워드 사용)
   var keywordList = [];
-  if (mode === 'selected' && selectedKeywordIds.size > 0) {
+  if (mode === 'uncollected') {
+    // v8.4.6: 미수집 키워드만 서버에서 가져와서 수집
+    try {
+      var ucResp = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
+      if (ucResp && ucResp.ok && ucResp.data && ucResp.data.uncollectedKeywords) {
+        keywordList = ucResp.data.uncollectedKeywords;
+        console.log('[수집] 미수집 키워드 ' + keywordList.length + '개 로드 (전체 ' + ucResp.data.total + '개 중 ' + ucResp.data.collectedCount + '개 수집완료)');
+        // 미수집 키워드 우선수집 예약 (next_collect_at 리셋)
+        await sendMsg({ type: 'HYBRID_BOOST_UNCOLLECTED' });
+      }
+    } catch(e) { console.error('[수집] 미수집 키워드 조회 실패:', e); }
+    if (keywordList.length === 0) {
+      alert('미수집 키워드가 없습니다! 오늘 모든 키워드가 이미 수집되었습니다.');
+      return;
+    }
+  } else if (mode === 'selected' && selectedKeywordIds.size > 0) {
     var selectedKws = demandKeywords.filter(function(kw) { return selectedKeywordIds.has(kw.id); });
     keywordList = selectedKws.map(function(kw) { return kw.keyword; });
   } else {
@@ -2939,7 +2967,7 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
   }
 
   // v7.1.1: demandKeywords가 비어있으면 서버에서 직접 가져옴
-  if (keywordList.length === 0 && mode !== 'selected') {
+  if (keywordList.length === 0 && mode !== 'selected' && mode !== 'uncollected') {
     console.log('[수집] demandKeywords 비어있음, 서버에서 직접 키워드 조회...');
     try {
       var kwResp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 } });

@@ -67,23 +67,50 @@ const defaultForm: FormData = {
   referenceUrl: "",
 };
 
-function calcPreviewScore(f: FormData) {
+interface MarketDataState {
+  keywordScore?: number;
+  competitionScore?: number;
+  demandScore?: number;
+  salesEstimate?: number;
+  reviewGrowth?: number;
+}
+
+function calcPreviewScore(f: FormData, market?: MarketDataState) {
   let s = 0;
-  if (f.keyword1) s += 5; if (f.keyword2) s += 5; if (f.keyword3) s += 5;
-  const comp: Record<string, number> = { low: 20, medium: 12, high: 6, very_high: 2 };
-  s += comp[f.competitionLevel] || 12;
-  const diff: Record<string, number> = { high: 20, medium: 12, low: 4 };
-  s += diff[f.differentiationLevel] || 12;
-  if (f.thumbnailMemo.length > 5) s += 5;
-  if (f.detailPoint.length > 5) s += 5;
-  if (f.finalOpinion.length > 5) s += 5;
+
+  // A. 시장 기회 (50점)
+  if (market) {
+    const ks = Math.max(0, Math.min(100, market.keywordScore ?? 0));
+    s += Math.round((ks / 100) * 20);
+    const ds = Math.max(0, Math.min(100, market.demandScore ?? 0));
+    s += Math.round((ds / 100) * 10);
+    const cs = Math.max(0, Math.min(100, market.competitionScore ?? 50));
+    if (cs <= 30) s += 10;
+    else if (cs <= 50) s += 8;
+    else if (cs <= 70) s += 6;
+    else if (cs <= 85) s += 4;
+    else s += 2;
+    const se = Math.max(0, market.salesEstimate ?? 0);
+    if (se > 0) s += Math.min(10, Math.round(Math.log10(se + 1) * 2.7));
+  }
+
+  // B. 분석 완성도 (30점)
+  if (f.keyword1) s += 3; if (f.keyword2) s += 3; if (f.keyword3) s += 3;
+  if (f.thumbnailMemo.length > 5) s += 4;
+  if (f.detailPoint.length > 5) s += 4;
+  if (f.finalOpinion.length > 5) s += 4;
+  if (f.developmentNote.length > 5) s += 4;
+  if (f.targetCustomer) s += 1;
+  if (f.giftIdea) s += 1;
+  if (f.category) s += 1;
+  if (f.coupangUrl || f.referenceUrl) s += 1;
+  if (f.keyword1 && f.keyword2 && f.keyword3) s += 1;
+
+  // C. 차별화 전략 (20점)
+  const diff: Record<string, number> = { high: 12, medium: 7, low: 3 };
+  s += diff[f.differentiationLevel] || 7;
   if (f.improvementNote.length > 5) s += 8;
-  if (f.developmentNote.length > 5) s += 7;
-  if (f.targetCustomer) s += 3;
-  if (f.giftIdea) s += 3;
-  if (f.category) s += 3;
-  if (f.coupangUrl || f.referenceUrl) s += 3;
-  if (f.keyword1 && f.keyword2 && f.keyword3) s += 3;
+
   return Math.min(s, 100);
 }
 
@@ -96,9 +123,9 @@ function gradeOf(score: number) {
 }
 
 function getScoreColor(score: number) {
-  if (score >= 85) return "from-pink-500 to-rose-500";
-  if (score >= 70) return "from-purple-500 to-fuchsia-500";
-  if (score >= 55) return "from-amber-400 to-orange-400";
+  if (score >= 70) return "from-pink-500 to-rose-500";
+  if (score >= 55) return "from-purple-500 to-fuchsia-500";
+  if (score >= 35) return "from-amber-400 to-orange-400";
   return "from-gray-400 to-gray-500";
 }
 
@@ -114,6 +141,7 @@ export interface SourcingFormModalProps {
 
 export default function SourcingFormModal({ open, onClose, prefillData, editProduct, onSuccess }: SourcingFormModalProps) {
   const [form, setForm] = useState<FormData>(defaultForm);
+  const [marketData, setMarketData] = useState<MarketDataState | undefined>(undefined);
   const [isGenerating, setIsGenerating] = useState(false);
   const utils = trpc.useUtils();
 
@@ -199,6 +227,18 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
   useEffect(() => {
     if (open && prefillData && !editProduct) {
       setForm(defaultForm);
+      // 시장 데이터 캐치 (키워드 소스에서 전달된 경우)
+      if (prefillData.keywordScore != null || prefillData.demandScore != null) {
+        setMarketData({
+          keywordScore: prefillData.keywordScore,
+          competitionScore: prefillData.competitionScore,
+          demandScore: prefillData.demandScore,
+          salesEstimate: prefillData.salesEstimate,
+          reviewGrowth: prefillData.reviewGrowth,
+        });
+      } else {
+        setMarketData(undefined);
+      }
       setIsGenerating(true);
       generateMut.mutate(prefillData as any);
     } else if (open && editProduct) {
@@ -229,7 +269,7 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
     }
   }, [open, prefillData, editProduct]);
 
-  const score = calcPreviewScore(form);
+  const score = calcPreviewScore(form, marketData);
   const grade = gradeOf(score);
   const set = (k: keyof FormData, v: string) => setForm(prev => ({ ...prev, [k]: v }));
 
@@ -241,7 +281,16 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
     if (editProduct) {
       updateMut.mutate({ id: editProduct.id, ...form });
     } else {
-      createMut.mutate(form);
+      createMut.mutate({
+        ...form,
+        ...(marketData ? {
+          marketKeywordScore: marketData.keywordScore,
+          marketCompetitionScore: marketData.competitionScore,
+          marketDemandScore: marketData.demandScore,
+          marketSalesEstimate: marketData.salesEstimate,
+          marketReviewGrowth: marketData.reviewGrowth,
+        } : {}),
+      });
     }
   };
 
@@ -341,10 +390,10 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                     <Select value={form.competitionLevel} onValueChange={v => set("competitionLevel", v)}>
                       <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="low">낮음 (20점)</SelectItem>
-                        <SelectItem value="medium">보통 (12점)</SelectItem>
-                        <SelectItem value="high">높음 (6점)</SelectItem>
-                        <SelectItem value="very_high">매우높음 (2점)</SelectItem>
+                        <SelectItem value="low">낮음</SelectItem>
+                        <SelectItem value="medium">보통</SelectItem>
+                        <SelectItem value="high">높음</SelectItem>
+                        <SelectItem value="very_high">매우높음</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -353,9 +402,9 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                     <Select value={form.differentiationLevel} onValueChange={v => set("differentiationLevel", v)}>
                       <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="high">높음 (20점)</SelectItem>
-                        <SelectItem value="medium">보통 (12점)</SelectItem>
-                        <SelectItem value="low">낮음 (4점)</SelectItem>
+                        <SelectItem value="high">높음 (12점)</SelectItem>
+                        <SelectItem value="medium">보통 (7점)</SelectItem>
+                        <SelectItem value="low">낮음 (3점)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -449,11 +498,26 @@ export default function SourcingFormModal({ open, onClose, prefillData, editProd
                 {/* Score breakdown */}
                 <div className="text-[10px] space-y-1.5 text-muted-foreground">
                   {[
-                    { label: "키워드", value: [form.keyword1, form.keyword2, form.keyword3].filter(Boolean).length * 5, max: 15 },
-                    { label: "경쟁도", value: { low: 20, medium: 12, high: 6, very_high: 2 }[form.competitionLevel] || 0, max: 20 },
-                    { label: "차별화", value: { high: 20, medium: 12, low: 4 }[form.differentiationLevel] || 0, max: 20 },
-                    { label: "메모", value: [form.thumbnailMemo, form.detailPoint, form.finalOpinion].filter(v => v.length > 5).length * 5, max: 15 },
-                    { label: "개발노트", value: (form.improvementNote.length > 5 ? 8 : 0) + (form.developmentNote.length > 5 ? 7 : 0), max: 15 },
+                    { label: "시장 기회", value: (() => {
+                      if (!marketData) return 0;
+                      const ks = Math.max(0, Math.min(100, marketData.keywordScore ?? 0));
+                      const ds = Math.max(0, Math.min(100, marketData.demandScore ?? 0));
+                      const cs = Math.max(0, Math.min(100, marketData.competitionScore ?? 50));
+                      const se = Math.max(0, marketData.salesEstimate ?? 0);
+                      const compTier = cs <= 30 ? 10 : cs <= 50 ? 8 : cs <= 70 ? 6 : cs <= 85 ? 4 : 2;
+                      return Math.round((ks / 100) * 20)
+                        + Math.round((ds / 100) * 10)
+                        + compTier
+                        + (se > 0 ? Math.min(10, Math.round(Math.log10(se + 1) * 2.7)) : 0);
+                    })(), max: 50 },
+                    { label: "분석 완성도", value:
+                      [form.keyword1, form.keyword2, form.keyword3].filter(Boolean).length * 3
+                      + [form.thumbnailMemo, form.detailPoint, form.finalOpinion, form.developmentNote].filter(v => v.length > 5).length * 4
+                      + (form.targetCustomer ? 1 : 0) + (form.giftIdea ? 1 : 0) + (form.category ? 1 : 0)
+                      + (form.coupangUrl || form.referenceUrl ? 1 : 0)
+                      + (form.keyword1 && form.keyword2 && form.keyword3 ? 1 : 0),
+                    max: 30 },
+                    { label: "차별화 전략", value: ({ high: 12, medium: 7, low: 3 }[form.differentiationLevel] || 7) + (form.improvementNote.length > 5 ? 8 : 0), max: 20 },
                   ].map(item => (
                     <div key={item.label}>
                       <div className="flex justify-between mb-0.5">
