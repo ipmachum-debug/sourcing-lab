@@ -1,7 +1,7 @@
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { products, weeklyReviews, dailySales, coupangAccounts, cpDailySales, cpDailySettlements, coupangSyncJobs } from "../../drizzle/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { products, weeklyReviews, dailySales, coupangAccounts, cpDailySales, cpDailySettlements, coupangSyncJobs, extSearchSnapshots, extKeywordDailyStats, extCandidates } from "../../drizzle/schema";
+import { eq, desc, sql, and, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 /** Drizzle-ORM returns decimal/SUM results as string — always coerce to number */
@@ -290,6 +290,123 @@ export const dashboardRouter = router({
           label: `${year}년 ${month}월`,
         },
         lastSync: lastSync || null,
+      };
+    }),
+
+  /** 통합 대시보드 개요 — 소싱 파이프라인 + 시장 분석 + 확장프로그램 통계 */
+  overview: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const userId = ctx.user.id;
+
+      // 소싱 파이프라인 (전체 상태별 건수)
+      const [pipeline] = await db.select({
+        total: sql<number>`COUNT(*)`,
+        draft: sql<number>`SUM(CASE WHEN status='draft' THEN 1 ELSE 0 END)`,
+        reviewing: sql<number>`SUM(CASE WHEN status='reviewing' THEN 1 ELSE 0 END)`,
+        testCandidate: sql<number>`SUM(CASE WHEN status='test_candidate' THEN 1 ELSE 0 END)`,
+        testing: sql<number>`SUM(CASE WHEN status='testing' THEN 1 ELSE 0 END)`,
+        selected: sql<number>`SUM(CASE WHEN status='selected' THEN 1 ELSE 0 END)`,
+        hold: sql<number>`SUM(CASE WHEN status='hold' THEN 1 ELSE 0 END)`,
+        dropped: sql<number>`SUM(CASE WHEN status='dropped' THEN 1 ELSE 0 END)`,
+      }).from(products).where(eq(products.userId, userId));
+
+      // 등급 분포
+      const grades = await db.select({
+        grade: products.scoreGrade,
+        count: sql<number>`COUNT(*)`,
+      }).from(products)
+        .where(eq(products.userId, userId))
+        .groupBy(products.scoreGrade);
+
+      // 최근 7일 등록 추세
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+      const sevenDaysStr = sevenDaysAgo.toISOString().split("T")[0];
+
+      const dailyTrend = await db.select({
+        date: products.recordDate,
+        count: sql<number>`COUNT(*)`,
+      }).from(products)
+        .where(and(
+          eq(products.userId, userId),
+          sql`${products.recordDate} >= ${sevenDaysStr}`,
+        ))
+        .groupBy(products.recordDate)
+        .orderBy(products.recordDate);
+
+      // 확장프로그램 — 수집된 키워드/스냅샷 통계
+      const [extStats] = await db.select({
+        totalSnapshots: sql<number>`COUNT(*)`,
+        uniqueQueries: sql<number>`COUNT(DISTINCT ${extSearchSnapshots.query})`,
+      }).from(extSearchSnapshots)
+        .where(eq(extSearchSnapshots.userId, userId));
+
+      // 확장프로그램 — 후보 상품 통계
+      const [candStats] = await db.select({
+        total: sql<number>`COUNT(*)`,
+        newCount: sql<number>`SUM(CASE WHEN status='new' THEN 1 ELSE 0 END)`,
+        reviewing: sql<number>`SUM(CASE WHEN status='reviewing' THEN 1 ELSE 0 END)`,
+        selected: sql<number>`SUM(CASE WHEN status='selected' THEN 1 ELSE 0 END)`,
+      }).from(extCandidates)
+        .where(eq(extCandidates.userId, userId));
+
+      // 확장프로그램 — 트렌딩 키워드 (최근 7일 수요점수 높은 순)
+      const trendingKeywords = await db.select({
+        query: extKeywordDailyStats.query,
+        keywordScore: extKeywordDailyStats.keywordScore,
+        demandScore: extKeywordDailyStats.demandScore,
+        competitionScore: extKeywordDailyStats.competitionScore,
+        salesEstimate: extKeywordDailyStats.salesEstimate,
+        spikeLevel: extKeywordDailyStats.spikeLevel,
+      }).from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          sql`${extKeywordDailyStats.statDate} >= ${sevenDaysStr}`,
+        ))
+        .orderBy(desc(extKeywordDailyStats.keywordScore))
+        .limit(8);
+
+      // dedup: 같은 키워드가 여러 날짜에 있을 수 있으므로 가장 높은 점수만 유지
+      const kwSeen = new Set<string>();
+      const uniqueTrending = trendingKeywords.filter(k => {
+        if (kwSeen.has(k.query)) return false;
+        kwSeen.add(k.query);
+        return true;
+      }).slice(0, 5);
+
+      return {
+        pipeline: {
+          total: N(pipeline?.total),
+          draft: N(pipeline?.draft),
+          reviewing: N(pipeline?.reviewing),
+          testCandidate: N(pipeline?.testCandidate),
+          testing: N(pipeline?.testing),
+          selected: N(pipeline?.selected),
+          hold: N(pipeline?.hold),
+          dropped: N(pipeline?.dropped),
+        },
+        grades: grades.map(g => ({ grade: g.grade || "D", count: N(g.count) })),
+        dailyTrend: dailyTrend.map(d => ({ date: d.date, count: N(d.count) })),
+        extension: {
+          totalSnapshots: N(extStats?.totalSnapshots),
+          uniqueQueries: N(extStats?.uniqueQueries),
+          candidates: {
+            total: N(candStats?.total),
+            new: N(candStats?.newCount),
+            reviewing: N(candStats?.reviewing),
+            selected: N(candStats?.selected),
+          },
+        },
+        trendingKeywords: uniqueTrending.map(k => ({
+          query: k.query,
+          keywordScore: N(k.keywordScore),
+          demandScore: N(k.demandScore),
+          competitionScore: N(k.competitionScore),
+          salesEstimate: N(k.salesEstimate),
+          spikeLevel: k.spikeLevel,
+        })),
       };
     }),
 });

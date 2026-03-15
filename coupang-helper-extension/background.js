@@ -709,6 +709,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.4.6: 미수집 키워드 목록 조회
+    case 'HYBRID_GET_UNCOLLECTED_KEYWORDS': {
+      apiClient.getUncollectedKeywords().then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
+    // v8.4.6: 미수집 키워드 우선수집 예약
+    case 'HYBRID_BOOST_UNCOLLECTED': {
+      apiClient.boostUncollectedPriority().then((resp) => {
+        sendResponse({ ok: true, data: resp?.result?.data });
+      }).catch(e => {
+        sendResponse({ ok: false, error: e.message });
+      });
+      return true;
+    }
+
     case 'HYBRID_UPDATE_WATCH_KEYWORD': {
       apiClient.updateWatchKeyword(message.data).then((resp) => {
         sendResponse({ ok: true, data: resp?.result?.data });

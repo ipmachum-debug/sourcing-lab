@@ -5,17 +5,17 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import {
-  extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
-  extSearchSnapshots, extKeywordDailyStats,
+  extSearchEvents, extWatchKeywords,
+  extSearchSnapshots, extKeywordDailyStats, extBatchState,
 } from "../../../drizzle/schema";
 import { eq, and, desc, sql, like, asc, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { N } from "./_helpers";
 import {
-  selectBatchKeywords, computeDailyAggregation, runDailyBatch,
+  selectBatchKeywords, runDailyBatch,
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
-  syncWatchKeywordsToMaster,
+  syncWatchKeywordsToMaster, advanceBatchState,
 } from "../../batchCollector";
 import { autoComputeKeywordDailyStat, autoMatchTrackedProducts } from "./_autoHelpers";
 
@@ -125,85 +125,15 @@ export const watchRouter = router({
           nextCollectAt: nextCollectStr,
           adaptiveIntervalHours: 24,
           volatilityScore: 0,
+          groupNo: Math.floor(Math.random() * 5),
         });
       }
 
-      // 3. 일일 상태 비동기 업데이트
+      // 3. [DEPRECATED] ext_keyword_daily_status 쓰기 제거 (2026-03-15)
+      // 구 sum-diff 방식의 ext_keyword_daily_status에 393배 오차 데이터가 쌓이던 문제 해결.
+      // 정확한 per-product delta 엔진(ext_keyword_daily_stats)은 아래 step 4~5에서 처리됨.
+      // batchCollector.ts의 ext_keyword_daily_status 사용은 별도 마이그레이션 예정.
       const todayStr = now.toISOString().slice(0, 10);
-      computeDailyAggregation(userId, input.keyword, todayStr).then(async (agg) => {
-        if (!agg) return;
-        const [existingStatus] = await db.select({ id: extKeywordDailyStatus.id })
-          .from(extKeywordDailyStatus)
-          .where(and(
-            eq(extKeywordDailyStatus.userId, userId),
-            eq(extKeywordDailyStatus.keyword, input.keyword),
-            eq(extKeywordDailyStatus.statDate, todayStr),
-          ))
-          .limit(1);
-
-        const INT_MAX = 2000000000;
-        const statusData = {
-          totalItems: agg.totalItems,
-          avgPrice: Math.min(agg.avgPrice, INT_MAX),
-          minPrice: Math.min(agg.minPrice, INT_MAX),
-          maxPrice: Math.min(agg.maxPrice, INT_MAX),
-          avgRating: agg.avgRating.toFixed(1),
-          avgReview: agg.avgReview,
-          totalReviewSum: agg.totalReviewSum,
-          medianReview: agg.medianReview,
-          adCount: agg.adCount,
-          adRatio: agg.adRatio.toFixed(2),
-          rocketCount: agg.rocketCount,
-          rocketRatio: agg.rocketRatio.toFixed(2),
-          highReviewCount: agg.highReviewCount,
-          newProductCount: agg.newProductCount,
-          reviewGrowth: agg.reviewGrowth,
-          priceChange: agg.priceChange,
-          itemCountChange: agg.itemCountChange,
-          estimatedDailySales: agg.estimatedDailySales,
-          salesScore: agg.salesScore,
-          demandScore: agg.demandScore,
-          competitionScore: agg.competitionScore,
-          competitionLevel: agg.competitionLevel,
-          dataQualityScore: agg.dataQualityScore,
-          priceParseRate: agg.priceParseRate,
-          ratingParseRate: agg.ratingParseRate,
-          reviewParseRate: agg.reviewParseRate,
-          // ★ v7.5.0: 정규화 필드
-          baseProductCount: agg.baseProductCount,
-          normalizedReviewSum: agg.normalizedReviewSum,
-          coverageRatio: agg.coverageRatio.toFixed(4),
-          reviewDeltaObserved: agg.reviewDeltaObserved,
-          reviewDeltaUsed: agg.reviewDeltaUsed,
-          salesEstimateMa7: agg.salesEstimateMa7,
-          salesEstimateMa30: agg.salesEstimateMa30,
-          isProvisional: agg.isProvisional,
-          provisionalReason: agg.provisionalReason,
-          dataStatus: agg.dataStatus,
-        };
-
-        if (existingStatus) {
-          await db.update(extKeywordDailyStatus).set(statusData)
-            .where(eq(extKeywordDailyStatus.id, existingStatus.id));
-        } else {
-          try {
-            await db.insert(extKeywordDailyStatus).values({
-              userId, keyword: input.keyword, statDate: todayStr, source: input.source, ...statusData,
-            });
-          } catch (dupErr: any) {
-            if (dupErr?.cause?.code === "ER_DUP_ENTRY" || dupErr?.code === "ER_DUP_ENTRY") {
-              await db.update(extKeywordDailyStatus).set(statusData)
-                .where(and(
-                  eq(extKeywordDailyStatus.userId, userId),
-                  eq(extKeywordDailyStatus.keyword, input.keyword),
-                  eq(extKeywordDailyStatus.statDate, todayStr),
-                ));
-            } else {
-              throw dupErr;
-            }
-          }
-        }
-      }).catch((err) => console.error("[saveSearchEvent] daily status error:", err));
 
       // 4. ★ 스냅샷 테이블 자동 동기화 (ext_keyword_daily_stats의 데이터 소스)
       // → 반드시 daily_stats 계산보다 먼저 실행해야 함
@@ -349,7 +279,10 @@ export const watchRouter = router({
           reviewGrowth1d: N(r.reviewGrowth1d),
           reviewGrowth7d: N(r.reviewGrowth7d),
           priceChange1d: N(r.priceChange1d),
-          compositeScore: N(r.compositeScore),
+          // ★ v8.4.5: compositeScore를 daily_stats의 keywordScore로 동기화
+          compositeScore: ds?.keywordScore || N(r.compositeScore),
+          isPinned: !!r.isPinned,
+          pinOrder: N(r.pinOrder),
           keywordScore: ds?.keywordScore || N(r.compositeScore),
           demandScore: ds?.demandScore || 0,
           dailyReviewGrowth: ds?.reviewGrowth || 0,
@@ -359,8 +292,8 @@ export const watchRouter = router({
         };
       });
 
-      // keywordScore 정렬
-      if (input.sortBy === "keywordScore") {
+      // ★ v8.4.5: compositeScore/keywordScore 정렬 시 daily_stats 기반 재정렬
+      if (input.sortBy === "keywordScore" || input.sortBy === "compositeScore") {
         result.sort((a, b) => b.keywordScore - a.keywordScore);
       }
 
@@ -403,7 +336,7 @@ export const watchRouter = router({
       return { success: true };
     }),
 
-  // ===== 키워드 일별 상태 이력 조회 =====
+  // ===== 키워드 일별 상태 이력 조회 (ext_keyword_daily_stats 기반, 2026-03-15 전환) =====
   getKeywordDailyStatusHistory: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1),
@@ -418,35 +351,36 @@ export const watchRouter = router({
       const startDate = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1000);
       const startDateStr = startDate.toISOString().slice(0, 10);
 
+      // ★ ext_keyword_daily_stats (per-product delta, 정확) 기반으로 전환
       const rows = await db.select()
-        .from(extKeywordDailyStatus)
+        .from(extKeywordDailyStats)
         .where(and(
-          eq(extKeywordDailyStatus.userId, ctx.user!.id),
-          eq(extKeywordDailyStatus.keyword, input.keyword),
-          gte(extKeywordDailyStatus.statDate, startDateStr),
+          eq(extKeywordDailyStats.userId, ctx.user!.id),
+          eq(extKeywordDailyStats.query, input.keyword),
+          gte(extKeywordDailyStats.statDate, startDateStr),
         ))
-        .orderBy(asc(extKeywordDailyStatus.statDate));
+        .orderBy(asc(extKeywordDailyStats.statDate));
 
       return rows.map(r => ({
         statDate: r.statDate,
-        totalItems: N(r.totalItems),
+        totalItems: N(r.productCount),
         avgPrice: N(r.avgPrice),
-        minPrice: N(r.minPrice),
-        maxPrice: N(r.maxPrice),
+        minPrice: 0,
+        maxPrice: 0,
         avgRating: N(r.avgRating),
         avgReview: N(r.avgReview),
         totalReviewSum: N(r.totalReviewSum),
         reviewGrowth: N(r.reviewGrowth),
         priceChange: N(r.priceChange),
-        estimatedDailySales: N(r.estimatedDailySales),
-        salesScore: N(r.salesScore),
+        estimatedDailySales: N(r.salesEstimate),
+        salesScore: 0,
         demandScore: N(r.demandScore),
         competitionScore: N(r.competitionScore),
         competitionLevel: r.competitionLevel,
-        dataQualityScore: N(r.dataQualityScore),
+        dataQualityScore: 0,
         adCount: N(r.adCount),
         rocketCount: N(r.rocketCount),
-        source: r.source,
+        source: "daily_stats",
       }));
     }),
 
@@ -469,7 +403,9 @@ export const watchRouter = router({
 
   // ===== 배치 수집 대상 키워드 조회 =====
   getBatchKeywordSelection: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(200).default(20) }))
+    .input(z.object({
+      limit: z.number().int().min(1).max(100).default(100),
+    }))
     .query(async ({ ctx, input }) => {
       return await selectBatchKeywords(ctx.user!.id, input.limit);
     }),
@@ -666,6 +602,32 @@ export const watchRouter = router({
   //  v6.4: 자동 순회 수집기 (Auto-Collect) API
   // ===================================================================
 
+  // ===== 키워드 핀(고정) 토글 =====
+  togglePinKeyword: protectedProcedure
+    .input(z.object({
+      keywordId: z.number().int(),
+      isPinned: z.boolean(),
+      pinOrder: z.number().int().min(0).max(999).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const update: any = { isPinned: input.isPinned };
+      if (input.pinOrder !== undefined) update.pinOrder = input.pinOrder;
+      // 핀 해제 시 pinOrder 초기화
+      if (!input.isPinned) update.pinOrder = 0;
+
+      await db.update(extWatchKeywords)
+        .set(update)
+        .where(and(
+          eq(extWatchKeywords.id, input.keywordId),
+          eq(extWatchKeywords.userId, ctx.user!.id),
+        ));
+
+      return { success: true, keywordId: input.keywordId, isPinned: input.isPinned };
+    }),
+
   // ===== 키워드 수집 완료 마킹 =====
   markKeywordCollected: protectedProcedure
     .input(z.object({ keyword: z.string().min(1) }))
@@ -773,6 +735,7 @@ export const watchRouter = router({
               isActive: true,
               totalSearchCount: 1,
               collectIntervalHours: 24,
+              groupNo: Math.floor(Math.random() * 5),
             });
             syncCount++;
           }
@@ -784,6 +747,11 @@ export const watchRouter = router({
 
       // 4. ext_watch_keywords → keyword_master 동기화 (니치파인더 데이터 연동)
       const nicheSync = await syncWatchKeywordsToMaster(userId);
+
+      // 5. 배치 상태 전진 (그룹 턴 이월 + 일일 카운트 증가)
+      await advanceBatchState(userId, input.successCount).catch(err =>
+        console.error("[autoCollectComplete] 배치 상태 업데이트 오류:", err.message)
+      );
 
       console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}, nicheSynced=${nicheSync.synced}, nicheMetrics=${nicheSync.metricsCreated}`);
       return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount, nicheSynced: nicheSync.synced, nicheMetricsCreated: nicheSync.metricsCreated };
@@ -886,6 +854,45 @@ export const watchRouter = router({
         .from(extKeywordDailyStats)
         .where(eq(extKeywordDailyStats.userId, userId));
 
+      // ===== v2 배치 엔진 상태 =====
+      const [batchState] = await db.select()
+        .from(extBatchState)
+        .where(eq(extBatchState.userId, userId))
+        .limit(1);
+
+      // 핀 키워드 수
+      const [pinStats] = await db.select({
+        pinnedCount: sql<number>`SUM(CASE WHEN is_pinned = 1 THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      // 신규 7일 이내 키워드 수
+      const [newStats] = await db.select({
+        newCount: sql<number>`SUM(CASE WHEN created_at >= ${sevenDaysAgoStr} THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      // overdue 키워드 수 (nextCollectAt이 현재보다 이전)
+      const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
+      const [overdueStats] = await db.select({
+        overdueCount: sql<number>`SUM(CASE WHEN next_collect_at IS NOT NULL AND next_collect_at <= ${nowStr} THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, userId),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      const isBatchDateToday = batchState?.stateDate === todayStr;
+
       return {
         collectedToday: N(todayStats?.collectedToday),
         totalActive: N(queueStats?.totalActive),
@@ -894,6 +901,20 @@ export const watchRouter = router({
         sourceDist: sourceDist.map(s => ({ source: s.source, count: N(s.count) })),
         lastCollectedAt: lastCollected?.lastAt || null,
         lastStatsUpdatedAt: lastDailyStat?.lastAt || null,
+        // v2 배치 엔진 상태
+        batchEngine: {
+          currentGroupTurn: batchState?.currentGroupTurn ?? 0,
+          totalCollectedToday: isBatchDateToday ? N(batchState?.totalCollectedToday) : 0,
+          roundsToday: isBatchDateToday ? N(batchState?.roundsToday) : 0,
+          lastBatchCompletedAt: batchState?.lastBatchCompletedAt || null,
+          dailyLimit: 500,
+          maxRoundsPerDay: 5,
+          batchPerRound: 100,
+          groupCount: 5,
+        },
+        pinnedCount: N(pinStats?.pinnedCount),
+        newKeywordCount: N(newStats?.newCount),
+        overdueCount: N(overdueStats?.overdueCount),
       };
     }),
 });

@@ -244,6 +244,15 @@ class ApiClient {
     return this._call('extension.autoCollectComplete', data, 'mutation');
   }
 
+  // ===== v8.4.6: 미수집 키워드 관리 =====
+  async getUncollectedKeywords() {
+    return this._call('extension.getUncollectedKeywords', undefined, 'query');
+  }
+
+  async boostUncollectedPriority() {
+    return this._call('extension.boostUncollectedPriority', undefined, 'mutation');
+  }
+
   // ===== v6.5: 상세 페이지 확장 파싱 데이터 =====
   async saveDetailSnapshot(data) {
     return this._call('extension.saveDetailSnapshot', data, 'mutation');

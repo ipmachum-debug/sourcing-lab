@@ -8,8 +8,9 @@ import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import {
   extKeywordDailyStats, extSearchSnapshots, extCandidates, extWatchKeywords,
-  extKeywordDailyStatus,
+  extKeywordDailyStatus, keywordSearchVolumeHistory,
 } from "../../../drizzle/schema";
+import { estimateSearchVolume } from "../../lib/searchVolumeEstimator";
 import { eq, and, desc, sql, asc, gte, like } from "drizzle-orm";
 import { computeAndUpdateMA } from "../../batchCollector";
 import { TRPCError } from "@trpc/server";
@@ -94,11 +95,11 @@ export const demandRouter = router({
   // 키워드별 최신 일별 통계 요약 (대시보드 전체 키워드 목록)
   listKeywordStats: protectedProcedure
     .input(z.object({
-      limit: z.number().int().min(1).max(500).default(100),
+      limit: z.number().int().min(1).max(1000).default(500),
       sortBy: z.enum(["keyword_score", "demand_score", "review_growth", "sales_estimate", "competition_score", "avg_price", "query"]).default("keyword_score"),
       sortDir: z.enum(["asc", "desc"]).default("desc"),
       search: z.string().optional(),
-    }).default({ limit: 100, sortBy: "keyword_score", sortDir: "desc" }))
+    }).default({ limit: 500, sortBy: "keyword_score", sortDir: "desc" }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -123,6 +124,31 @@ export const demandRouter = router({
         ))
         .limit(input?.limit || 100);
 
+      // 핀 상태 조회 (ext_watch_keywords에서)
+      const pinRows = await db.select({
+        keyword: extWatchKeywords.keyword,
+        isPinned: extWatchKeywords.isPinned,
+        pinOrder: extWatchKeywords.pinOrder,
+        watchId: extWatchKeywords.id,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, ctx.user!.id),
+          eq(extWatchKeywords.isActive, true),
+        ));
+      const pinMap = new Map(pinRows.map(p => [p.keyword, p]));
+
+      // 핀 상태 합치기
+      const enriched = rows.map((r: any) => {
+        const pin = pinMap.get(r.query);
+        return {
+          ...r,
+          isPinned: pin ? !!pin.isPinned : false,
+          pinOrder: pin ? Number(pin.pinOrder) || 0 : 0,
+          watchId: pin?.watchId || null,
+        };
+      });
+
       // 정렬 (snake_case sortBy → camelCase Drizzle 프로퍼티 매핑)
       const sortFieldMap: Record<string, string> = {
         keyword_score: "keywordScore",
@@ -135,7 +161,10 @@ export const demandRouter = router({
       };
       const sortField = sortFieldMap[input?.sortBy || "keyword_score"] || "keywordScore";
       const sortDir = input?.sortDir || "desc";
-      rows.sort((a: any, b: any) => {
+      enriched.sort((a: any, b: any) => {
+        // 핀 키워드 항상 최상단
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        if (a.isPinned && b.isPinned && a.pinOrder !== b.pinOrder) return a.pinOrder - b.pinOrder;
         const av = sortField === "query" ? (a.query || "") : Number(a[sortField] || 0);
         const bv = sortField === "query" ? (b.query || "") : Number(b[sortField] || 0);
         if (sortField === "query") {
@@ -144,7 +173,7 @@ export const demandRouter = router({
         return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
       });
 
-      return rows;
+      return enriched;
     }),
 
   // 키워드별 통계 전체 요약 (대시보드 헤더)
@@ -200,6 +229,11 @@ export const demandRouter = router({
       await db.delete(extKeywordDailyStats)
         .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, input.query)));
 
+      // 감시 키워드 삭제 (is_active = false 처리)
+      await db.update(extWatchKeywords)
+        .set({ isActive: false })
+        .where(and(eq(extWatchKeywords.userId, ctx.user!.id), eq(extWatchKeywords.keyword, input.query)));
+
       return { success: true, query: input.query };
     }),
 
@@ -215,9 +249,297 @@ export const demandRouter = router({
           .where(and(eq(extSearchSnapshots.userId, ctx.user!.id), eq(extSearchSnapshots.query, query)));
         await db.delete(extKeywordDailyStats)
           .where(and(eq(extKeywordDailyStats.userId, ctx.user!.id), eq(extKeywordDailyStats.query, query)));
+        // 감시 키워드 삭제 (is_active = false 처리)
+        await db.update(extWatchKeywords)
+          .set({ isActive: false })
+          .where(and(eq(extWatchKeywords.userId, ctx.user!.id), eq(extWatchKeywords.keyword, query)));
       }
 
       return { success: true, count: input.queries.length };
+    }),
+
+  // ===== 시장 개요 (최신 스냅샷 기반) =====
+  // 크롤링 데이터에서 시장 개요를 가져옴. 일일 1회 기준, 품질이 나쁘면 이전 데이터 유지.
+  getLatestMarketOverview: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(255),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      // 최근 7일간 스냅샷을 최신순으로 가져옴 (품질 비교용)
+      const recentSnaps = await db.select()
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, userId),
+          eq(extSearchSnapshots.query, input.query),
+        ))
+        .orderBy(desc(extSearchSnapshots.createdAt))
+        .limit(10);
+
+      if (!recentSnaps.length) return null;
+
+      // 품질 판단 함수: 상품수 5개 이상, 평균가 > 0
+      const isGoodQuality = (snap: any) => {
+        const items = N(snap.totalItems);
+        const price = N(snap.avgPrice);
+        return items >= 5 && price > 0;
+      };
+
+      // 최신 데이터부터 품질 좋은 스냅샷 선택
+      const bestSnap = recentSnaps.find(isGoodQuality) || recentSnaps[0];
+
+      // 오늘 날짜 (KST)
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const todayStr = now.toISOString().slice(0, 10);
+      const snapDate = bestSnap.createdAt
+        ? new Date(bestSnap.createdAt).toISOString().slice(0, 10)
+        : todayStr;
+
+      // itemsJson에서 추가 통계 계산
+      let medianPrice = N(bestSnap.medianPrice);
+      let maxReview = N(bestSnap.maxReviewCount);
+      let rocketCount = N(bestSnap.rocketCount);
+      let totalReviewSum = N(bestSnap.totalReviewSum);
+
+      if (!medianPrice && bestSnap.itemsJson) {
+        try {
+          const items: any[] = JSON.parse(bestSnap.itemsJson);
+          const prices = items.map(i => Number(i.price) || 0).filter(p => p > 0).sort((a, b) => a - b);
+          if (prices.length > 0) medianPrice = prices[Math.floor(prices.length / 2)];
+          if (!maxReview) {
+            const reviews = items.map(i => Number(i.reviewCount) || 0);
+            maxReview = Math.max(0, ...reviews);
+          }
+          if (!totalReviewSum) {
+            totalReviewSum = items.reduce((s, i) => s + (Number(i.reviewCount) || 0), 0);
+          }
+        } catch {}
+      }
+
+      const totalItems = N(bestSnap.totalItems);
+      const highReviewCount = N(bestSnap.highReviewCount);
+      const adCount = N(bestSnap.adCount);
+
+      return {
+        snapshotDate: snapDate,
+        isToday: snapDate === todayStr,
+        totalItems,
+        avgPrice: N(bestSnap.avgPrice),
+        avgRating: Number(bestSnap.avgRating || 0),
+        totalReviewSum,
+        minPrice: N(bestSnap.minPrice),
+        maxPrice: N(bestSnap.maxPrice),
+        medianPrice,
+        maxReviewCount: maxReview,
+        highReviewCount,
+        highReviewRatio: totalItems > 0 ? Math.round((highReviewCount / totalItems) * 100) : 0,
+        adCount,
+        adRatio: totalItems > 0 ? Math.round((adCount / totalItems) * 100) : 0,
+        rocketCount,
+        rocketRatio: totalItems > 0 ? Math.round((rocketCount / totalItems) * 100) : 0,
+        competitionScore: N(bestSnap.competitionScore),
+        competitionLevel: bestSnap.competitionLevel,
+      };
+    }),
+
+  // ===== 검색량 (월간) — 네이버 + 쿠팡 추정 =====
+  getKeywordSearchVolume: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(255),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+
+      // 네이버 검색량 (최신 월)
+      const [volume] = await db.select()
+        .from(keywordSearchVolumeHistory)
+        .where(and(
+          eq(keywordSearchVolumeHistory.userId, userId),
+          eq(keywordSearchVolumeHistory.keyword, input.query),
+          eq(keywordSearchVolumeHistory.source, "naver"),
+        ))
+        .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
+        .limit(1);
+
+      if (!volume) return null;
+
+      // 쿠팡 검색량 추정 (Simple or Hybrid)
+      let searchVolumeEstimate = null;
+      try {
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const dateStr = ninetyDaysAgo.toISOString().slice(0, 10);
+
+        const dailyStats = await db
+          .select({
+            statDate: extKeywordDailyStats.statDate,
+            reviewDeltaUsed: extKeywordDailyStats.reviewDeltaUsed,
+            coverageRatio: extKeywordDailyStats.coverageRatio,
+            dataStatus: extKeywordDailyStats.dataStatus,
+            isProvisional: extKeywordDailyStats.isProvisional,
+          })
+          .from(extKeywordDailyStats)
+          .where(and(
+            eq(extKeywordDailyStats.userId, userId),
+            eq(extKeywordDailyStats.query, input.query),
+            gte(extKeywordDailyStats.statDate, dateStr),
+          ))
+          .orderBy(asc(extKeywordDailyStats.statDate));
+
+        const reliableDeltas = dailyStats.filter(
+          d => d.dataStatus === "raw_valid" && !d.isProvisional && Number(d.reviewDeltaUsed ?? 0) >= 0,
+        );
+
+        const avgMatchRate = reliableDeltas.length > 0
+          ? reliableDeltas.reduce((s, d) => s + Number(d.coverageRatio ?? 0), 0) / reliableDeltas.length
+          : 0;
+        const avgDailyReviewGrowth = reliableDeltas.length > 0
+          ? reliableDeltas.reduce((s, d) => s + Number(d.reviewDeltaUsed ?? 0), 0) / reliableDeltas.length
+          : 0;
+
+        searchVolumeEstimate = estimateSearchVolume({
+          naverTotalSearch: Number(volume.totalSearch ?? 0),
+          avgDailyReviewGrowth,
+          avgMatchRate,
+          dataDays: dailyStats.length,
+          reliableDeltaCount: reliableDeltas.length,
+          autoCompleteCount: 0,
+        });
+      } catch {}
+
+      return {
+        pcSearch: N(volume.pcSearch),
+        mobileSearch: N(volume.mobileSearch),
+        totalSearch: N(volume.totalSearch),
+        competitionIndex: volume.competitionIndex || null,
+        yearMonth: volume.yearMonth,
+        coupangEstimate: searchVolumeEstimate?.estimatedMonthlySearch ?? Math.round(N(volume.totalSearch) * 0.33),
+        estimateModel: searchVolumeEstimate?.model ?? "simple",
+        estimateConfidence: searchVolumeEstimate?.confidence ?? 0.3,
+        competitionRatio: N(volume.totalSearch) > 0
+          ? Math.round((searchVolumeEstimate?.estimatedMonthlySearch ?? Math.round(N(volume.totalSearch) * 0.33)) / N(volume.totalSearch) * 10) / 10
+          : 0,
+      };
+    }),
+
+  // ===== 오늘 미수집 키워드 목록 =====
+  // 확장프로그램이 200개 제한이라 일부 키워드가 크롤링되지 않음
+  // 이 API로 미수집 키워드를 식별하여 선택적 수집 가능
+  getUncollectedKeywords: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // KST 기준 오늘 날짜
+      const nowKST = new Date();
+      nowKST.setHours(nowKST.getHours() + 9);
+      const todayStr = nowKST.toISOString().slice(0, 10);
+
+      // 1. 모든 활성 감시 키워드
+      const watchRows = await db.select({
+        keyword: extWatchKeywords.keyword,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, ctx.user!.id),
+          eq(extWatchKeywords.isActive, true),
+        ));
+      const allKeywords = watchRows.map(r => r.keyword);
+
+      // 2. 오늘 스냅샷이 있는 키워드
+      const collectedRows = await db.select({
+        query: extSearchSnapshots.query,
+      })
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, ctx.user!.id),
+          sql`DATE(CONVERT_TZ(${extSearchSnapshots.createdAt}, '+00:00', '+09:00')) = ${todayStr}`,
+        ));
+      const collectedSet = new Set(collectedRows.map(r => r.query));
+
+      // 3. 미수집 키워드 분류
+      const collected: string[] = [];
+      const uncollected: string[] = [];
+      for (const kw of allKeywords) {
+        if (collectedSet.has(kw)) {
+          collected.push(kw);
+        } else {
+          uncollected.push(kw);
+        }
+      }
+
+      return {
+        total: allKeywords.length,
+        collectedCount: collected.length,
+        uncollectedCount: uncollected.length,
+        uncollectedKeywords: uncollected.sort((a, b) => a.localeCompare(b, "ko")),
+        date: todayStr,
+      };
+    }),
+
+  // ===== 미수집 키워드 우선 수집 예약 =====
+  // next_collect_at을 NULL로 리셋하면 selectBatchKeywords에서 최우선 선택됨
+  boostUncollectedPriority: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // KST 기준 오늘 날짜
+      const nowKST = new Date();
+      nowKST.setHours(nowKST.getHours() + 9);
+      const todayStr = nowKST.toISOString().slice(0, 10);
+
+      // 오늘 스냅샷이 있는 키워드
+      const collectedRows = await db.select({
+        query: extSearchSnapshots.query,
+      })
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, ctx.user!.id),
+          sql`DATE(CONVERT_TZ(${extSearchSnapshots.createdAt}, '+00:00', '+09:00')) = ${todayStr}`,
+        ));
+      const collectedSet = new Set(collectedRows.map(r => r.query));
+
+      // 전체 활성 키워드 중 미수집 키워드의 next_collect_at을 NULL로 리셋
+      const watchRows = await db.select({
+        id: extWatchKeywords.id,
+        keyword: extWatchKeywords.keyword,
+      })
+        .from(extWatchKeywords)
+        .where(and(
+          eq(extWatchKeywords.userId, ctx.user!.id),
+          eq(extWatchKeywords.isActive, true),
+        ));
+
+      const uncollectedIds: number[] = [];
+      for (const w of watchRows) {
+        if (!collectedSet.has(w.keyword)) {
+          uncollectedIds.push(w.id);
+        }
+      }
+
+      if (uncollectedIds.length > 0) {
+        // next_collect_at을 NULL로 리셋 → selectBatchKeywords에서 최우선 선택
+        await db.update(extWatchKeywords)
+          .set({ nextCollectAt: null })
+          .where(and(
+            eq(extWatchKeywords.userId, ctx.user!.id),
+            sql`${extWatchKeywords.id} IN (${sql.join(uncollectedIds.map(id => sql`${id}`), sql`, `)})`,
+          ));
+      }
+
+      return {
+        boosted: uncollectedIds.length,
+        message: `${uncollectedIds.length}개 미수집 키워드가 다음 수집에서 우선 처리됩니다.`,
+      };
     }),
 
   // ===== AI 인사이트 — 축적 데이터 기반 분석 =====
@@ -476,8 +798,9 @@ export const demandRouter = router({
       };
     }),
 
-  // ===== ★ v7.5.0: 기존 데이터 정규화 재계산 (backfill) =====
-  // ext_keyword_daily_status의 기존 데이터를 정규화 엔진으로 재계산
+  // ===== [DEPRECATED 2026-03-15] ext_keyword_daily_status 기반 정규화 재계산 =====
+  // 이 프로시저는 구 ext_keyword_daily_status 테이블 대상. 사용 금지.
+  // 정확한 재계산은 rebuildDailyStats (ext_keyword_daily_stats 기반) 사용할 것.
   rebuildNormalizedMetrics: protectedProcedure
     .input(z.object({
       keyword: z.string().min(1).max(255).optional(),
@@ -629,6 +952,43 @@ export const demandRouter = router({
       }
 
       return { success: true, rebuilt, keywords: allRows.length };
+    }),
+
+  // ===== ★ P2: demand_score=0인 과거 데이터 일괄 백필 =====
+  backfillDemandScores: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      const userId = ctx.user!.id;
+
+      // demand_score=0인 키워드만 추출
+      const zeroKws = await db.selectDistinct({
+        query: extKeywordDailyStats.query,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          sql`${extKeywordDailyStats.demandScore} = 0`,
+          sql`${extKeywordDailyStats.reviewGrowth} > 0`,
+        ));
+
+      if (!zeroKws.length) return { success: true, rebuilt: 0, keywords: 0 };
+
+      let rebuilt = 0;
+      for (const row of zeroKws) {
+        try {
+          const result = await rebuildKeywordDailyStatsForKeyword(
+            db, userId, row.query,
+            { windowDays: 90 },
+          );
+          if (result.success) rebuilt++;
+        } catch (err) {
+          console.error(`[backfillDemandScores] "${row.query}" error:`, err);
+        }
+      }
+
+      return { success: true, rebuilt, keywords: zeroKws.length };
     }),
 
   // ===== legacy: 하위 호환 (이전 rebuildNormalizedMetrics는 ext_keyword_daily_status 대상) =====

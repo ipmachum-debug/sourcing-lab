@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -5,33 +6,69 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { FlaskConical, Play, Pause, X, Star, Sparkles } from "lucide-react";
+import { FlaskConical, Play, Pause, X, Star, RefreshCw, Loader2 } from "lucide-react";
 
 export default function TestCandidates() {
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
 
-  const { data, isLoading } = trpc.sourcing.list.useQuery({
-    status: "test_candidate",
+  const { data, isLoading, refetch } = trpc.sourcing.list.useQuery({
+    minScore: 70,
     limit: 100,
   });
 
   const changeStatus = trpc.sourcing.changeStatus.useMutation({
     onSuccess: () => {
-      toast.success("상태가 변경되었습니다! ✨");
+      toast.success("상태가 변경되었습니다!");
       utils.sourcing.list.invalidate();
     },
   });
 
+  const recalcMut = trpc.sourcing.recalculateScores.useMutation({
+    onSuccess: (res) => {
+      utils.sourcing.list.invalidate();
+      utils.sourcing.stats.invalidate();
+      if (res.promoted > 0) {
+        toast.success(`점수 재계산 완료! ${res.updated}개 갱신, ${res.promoted}개 테스트후보 승격`);
+      } else if (res.updated > 0) {
+        toast.success(`점수 재계산 완료! ${res.updated}/${res.total}개 갱신`);
+      } else {
+        toast.info("모든 상품 점수가 최신 상태입니다.");
+      }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // 페이지 진입 시 자동 재계산 (최초 1회)
+  useEffect(() => {
+    recalcMut.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <DashboardLayout>
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">
-            <span className="text-2xl">🧪</span>
-            테스트 후보
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">점수 85점 이상 자동 분류된 상품</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight gradient-text flex items-center gap-2">
+              <span className="text-2xl">🧪</span>
+              테스트 후보
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              점수 70점 이상 자동 분류 (시장 데이터 + 분석 완성도 기반)
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-pink-200 text-pink-600 hover:bg-pink-50"
+            onClick={() => recalcMut.mutate()}
+            disabled={recalcMut.isPending}
+          >
+            {recalcMut.isPending
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> 재계산중...</>
+              : <><RefreshCw className="h-3.5 w-3.5 mr-1" /> 점수 재계산</>}
+          </Button>
         </div>
 
         {isLoading ? (
@@ -62,6 +99,16 @@ export default function TestCandidates() {
                     {[p.keyword1, p.keyword2, p.keyword3].filter(Boolean).map((kw, i) => (
                       <Badge key={i} className="text-xs bg-pink-50 text-pink-600 border-pink-200">{kw}</Badge>
                     ))}
+                    {p.status && p.status !== "test_candidate" && (
+                      <Badge className={`text-[10px] ${
+                        p.status === "selected" ? "bg-green-100 text-green-700 border-green-200" :
+                        p.status === "testing" ? "bg-blue-100 text-blue-700 border-blue-200" :
+                        p.status === "reviewing" ? "bg-purple-100 text-purple-700 border-purple-200" :
+                        "bg-gray-100 text-gray-600 border-gray-200"
+                      }`}>
+                        {p.status === "selected" ? "채택됨" : p.status === "testing" ? "테스트중" : p.status === "reviewing" ? "검토중" : p.status}
+                      </Badge>
+                    )}
                   </div>
 
                   {p.finalOpinion && (
@@ -92,7 +139,8 @@ export default function TestCandidates() {
               <FlaskConical className="h-10 w-10 text-pink-300" />
             </div>
             <p className="font-medium text-lg">테스트 후보 상품이 없습니다</p>
-            <p className="text-sm mt-1 text-pink-400">85점 이상 상품이 자동으로 분류됩니다</p>
+            <p className="text-sm mt-1 text-pink-400">70점 이상 상품이 자동으로 분류됩니다</p>
+            <p className="text-xs mt-2 text-gray-400">검색수요 페이지에서 키워드를 소싱 등록하면 시장 데이터 기반으로 점수가 산출됩니다</p>
           </div>
         )}
       </div>
