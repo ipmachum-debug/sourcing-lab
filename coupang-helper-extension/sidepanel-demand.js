@@ -378,6 +378,51 @@ async function showKeywordDetail(keyword) {
   if (controls) controls.style.display = '';
 })();
 
+// v8.6: 예약 수집 토글 UI
+(function() {
+  var btn = document.querySelector('#scheduleToggleBtn');
+  var badge = document.querySelector('#scheduleBadge');
+  var nextInfo = document.querySelector('#scheduleNextInfo');
+
+  function updateScheduleUI(enabled) {
+    if (badge) {
+      badge.textContent = enabled ? '활성' : '비활성';
+      badge.style.background = enabled ? '#6366f1' : '#94a3b8';
+    }
+    if (btn) {
+      btn.textContent = enabled ? '해제' : '예약';
+      btn.style.background = enabled ? '#ef4444' : '#6366f1';
+    }
+    if (nextInfo) {
+      if (enabled) {
+        nextInfo.style.display = '';
+        nextInfo.textContent = '⏰ 2시간마다 자동수집 · 쿠팡 탭 열림 필요';
+      } else {
+        nextInfo.style.display = 'none';
+      }
+    }
+  }
+
+  // 초기 상태 로드
+  sendMsg({ type: 'SCHEDULE_STATUS' }).then(function(resp) {
+    if (resp && resp.ok) updateScheduleUI(resp.enabled);
+  }).catch(function() {});
+
+  // 토글 버튼 클릭
+  if (btn) {
+    btn.addEventListener('click', function() {
+      sendMsg({ type: 'SCHEDULE_TOGGLE' }).then(function(resp) {
+        if (resp && resp.ok) {
+          updateScheduleUI(resp.enabled);
+          if (resp.enabled) {
+            alert('예약 수집이 활성화되었습니다.\n2시간마다 자동으로 수집합니다.\n쿠팡 페이지가 열려 있어야 합니다.');
+          }
+        }
+      }).catch(function(e) { console.error('[Schedule] 토글 실패:', e); });
+    });
+  }
+})();
+
 // 배치 중지 (레거시 호환)
 (function() {
   var stopBtn = document.querySelector('#stopBatchBtn');
