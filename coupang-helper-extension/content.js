@@ -142,7 +142,7 @@
       max-height: calc(100vh - 80px) !important;
       z-index: 2147483640 !important;
       font-family: -apple-system, 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
-      font-size: 13px !important;
+      font-size: 12px !important;
       color: #1e293b !important;
       background: rgba(255,255,255,0.92) !important;
       backdrop-filter: blur(20px) !important;
@@ -157,13 +157,12 @@
       transition: opacity 0.2s, box-shadow 0.3s !important;
     }
     #sh-panel:hover { box-shadow: 0 16px 56px rgba(99,102,241,0.18), 0 2px 8px rgba(0,0,0,0.08) !important; }
-    /* legacy sh-min 호환 (sh-minibar로 대체됨) */
     #sh-panel.sh-min {
       width: 44px !important; max-height: 44px !important;
       border-radius: 22px !important; cursor: pointer !important;
       backdrop-filter: blur(12px) !important;
     }
-    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-tabs, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-foot { display: none !important; }
+    #sh-panel.sh-min .sh-hc, #sh-panel.sh-min .sh-body, #sh-panel.sh-min .sh-foot { display: none !important; }
     #sh-panel.sh-drag { opacity: 0.85 !important; cursor: grabbing !important; }
 
     /* 헤더 */
@@ -194,7 +193,7 @@
     .sh-sec { padding: 14px !important; border-bottom: 1px solid rgba(99,102,241,0.06) !important; }
     .sh-sec:last-child { border-bottom: none !important; }
     .sh-sec-title {
-      font-size: 11px !important; font-weight: 700 !important; color: #6366f1 !important;
+      font-size: 10px !important; font-weight: 700 !important; color: #6366f1 !important;
       letter-spacing: .3px !important; margin-bottom: 10px !important;
       display: flex !important; align-items: center !important; gap: 5px !important;
     }
@@ -209,12 +208,12 @@
       transition: transform 0.15s, box-shadow 0.15s !important;
     }
     .sh-st:hover { transform: translateY(-1px) !important; box-shadow: 0 4px 12px rgba(99,102,241,0.08) !important; }
-    .sh-st-v { font-size: 18px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
+    .sh-st-v { font-size: 16px !important; font-weight: 800 !important; color: #1e293b !important; line-height: 1.2 !important; }
     .sh-st-v.accent { color: #6366f1 !important; }
     .sh-st-v.red { color: #dc2626 !important; }
     .sh-st-v.green { color: #16a34a !important; }
     .sh-st-v.amber { color: #d97706 !important; }
-    .sh-st-l { font-size: 10px !important; color: #64748b !important; margin-top: 3px !important; }
+    .sh-st-l { font-size: 9px !important; color: #94a3b8 !important; margin-top: 3px !important; }
 
     /* 세부 통계 행 */
     .sh-detail-row {
@@ -222,8 +221,8 @@
       padding: 5px 0 !important; border-bottom: 1px solid rgba(0,0,0,0.03) !important;
     }
     .sh-detail-row:last-child { border-bottom: none !important; }
-    .sh-detail-lbl { font-size: 11px !important; color: #64748b !important; }
-    .sh-detail-val { font-size: 11px !important; font-weight: 700 !important; color: #1e293b !important; }
+    .sh-detail-lbl { font-size: 10px !important; color: #64748b !important; }
+    .sh-detail-val { font-size: 10px !important; font-weight: 700 !important; color: #1e293b !important; }
 
     /* 경쟁도 게이지 */
     .sh-gauge-wrap { position: relative !important; margin-top: 6px !important; }
@@ -243,10 +242,10 @@
     /* 배송 분포 (수평 바) */
     .sh-delivery-bars { display: flex !important; flex-direction: column !important; gap: 4px !important; }
     .sh-dbar-row { display: flex !important; align-items: center !important; gap: 6px !important; }
-    .sh-dbar-lbl { font-size: 10px !important; color: #64748b !important; width: 62px !important; text-align: right !important; flex-shrink: 0 !important; }
+    .sh-dbar-lbl { font-size: 9px !important; color: #64748b !important; width: 62px !important; text-align: right !important; flex-shrink: 0 !important; }
     .sh-dbar-track { flex: 1 !important; height: 14px !important; background: #f1f5f9 !important; border-radius: 7px !important; overflow: hidden !important; position: relative !important; }
     .sh-dbar-fill { height: 100% !important; border-radius: 7px !important; transition: width .4s ease !important; min-width: 1px !important; }
-    .sh-dbar-pct { font-size: 10px !important; font-weight: 700 !important; color: #475569 !important; width: 32px !important; text-align: right !important; flex-shrink: 0 !important; }
+    .sh-dbar-pct { font-size: 9px !important; font-weight: 700 !important; color: #475569 !important; width: 32px !important; text-align: right !important; flex-shrink: 0 !important; }
 
     /* 미니 차트 */
     .sh-charts { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
@@ -274,52 +273,9 @@
       padding: 6px 14px !important;
       background: linear-gradient(135deg, rgba(99,102,241,0.04) 0%, rgba(139,92,246,0.04) 100%) !important;
       border-top: 1px solid rgba(99,102,241,0.06) !important;
-      font-size: 10px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
+      font-size: 9px !important; color: #94a3b8 !important; text-align: center !important; flex-shrink: 0 !important;
     }
     .sh-foot a { color: #6366f1 !important; text-decoration: none !important; font-weight: 600 !important; }
-
-    /* 탭 네비게이션 */
-    .sh-tabs {
-      display: flex !important; padding: 0 10px !important; gap: 2px !important;
-      background: linear-gradient(180deg, rgba(99,102,241,0.06) 0%, transparent 100%) !important;
-      flex-shrink: 0 !important;
-    }
-    .sh-tab {
-      flex: 1 !important; padding: 8px 6px !important; border: none !important;
-      background: transparent !important; cursor: pointer !important;
-      font-size: 11px !important; font-weight: 600 !important; color: #94a3b8 !important;
-      border-bottom: 2px solid transparent !important;
-      transition: color .15s, border-color .15s !important;
-      display: flex !important; align-items: center !important; justify-content: center !important; gap: 4px !important;
-    }
-    .sh-tab:hover { color: #6366f1 !important; }
-    .sh-tab.active {
-      color: #6366f1 !important; border-bottom-color: #6366f1 !important;
-      font-weight: 700 !important;
-    }
-    .sh-tab .sh-tab-badge {
-      font-size: 8px !important; background: #e0e7ff !important; color: #6366f1 !important;
-      padding: 1px 5px !important; border-radius: 8px !important; font-weight: 700 !important;
-    }
-    .sh-tab.active .sh-tab-badge { background: #6366f1 !important; color: #fff !important; }
-
-    /* 미니바 모드 (확장) */
-    #sh-panel.sh-minibar {
-      width: 200px !important; max-height: 36px !important;
-      border-radius: 18px !important; cursor: pointer !important;
-      backdrop-filter: blur(12px) !important;
-      overflow: hidden !important;
-    }
-    #sh-panel.sh-minibar .sh-hd {
-      padding: 7px 12px !important; border-radius: 18px !important;
-    }
-    #sh-panel.sh-minibar .sh-hc .qr { font-size: 10px !important; max-width: 90px !important; }
-    #sh-panel.sh-minibar .sh-hc .ver,
-    #sh-panel.sh-minibar .sh-hc .cnt,
-    #sh-panel.sh-minibar .sh-tabs,
-    #sh-panel.sh-minibar .sh-body,
-    #sh-panel.sh-minibar .sh-foot { display: none !important; }
-    #sh-panel.sh-minibar .sh-hbtns { display: none !important; }
 
     @media (max-width: 1200px) { #sh-panel { width: 320px !important; } }
   `;
@@ -1838,7 +1794,6 @@
   let allItems = [];
   let savedSet = new Set();
   let isMin = false;
-  let activeTab = 'auto'; // 'auto' | 'search'
 
   function createPanel() {
     if (panel) panel.remove();
@@ -1854,12 +1809,8 @@
         </div>
         <div class="sh-hbtns">
           <button class="sh-hb" id="sh-ref" title="새로고침">↻</button>
-          <button class="sh-hb" id="sh-min" title="미니바">—</button>
+          <button class="sh-hb" id="sh-min" title="접기">—</button>
         </div>
-      </div>
-      <div class="sh-tabs" id="sh-tabs">
-        <button class="sh-tab active" data-tab="auto">📊 자동 수집</button>
-        <button class="sh-tab" data-tab="search">🔍 검색량</button>
       </div>
       <div class="sh-body" id="sh-body"></div>
       <div class="sh-foot">🐢 소싱 헬퍼 · <a href="https://lumiriz.kr" target="_blank">lumiriz.kr</a></div>
@@ -1867,25 +1818,13 @@
     document.body.appendChild(panel);
     initDrag();
 
-    // 미니바 토글 (키워드가 보이는 작은 바)
     document.getElementById('sh-min').addEventListener('click', (e) => {
       e.stopPropagation();
       isMin = !isMin;
-      panel.classList.toggle('sh-minibar', isMin);
+      panel.classList.toggle('sh-min', isMin);
     });
-    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-minibar'); } });
+    panel.addEventListener('click', () => { if (isMin) { isMin = false; panel.classList.remove('sh-min'); } });
     document.getElementById('sh-ref').addEventListener('click', (e) => { e.stopPropagation(); doScan(true); });
-
-    // 탭 전환
-    document.getElementById('sh-tabs').addEventListener('click', (e) => {
-      const tab = e.target.closest('.sh-tab');
-      if (!tab) return;
-      e.stopPropagation();
-      document.querySelectorAll('.sh-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      activeTab = tab.dataset.tab;
-      if (allItems.length) renderPanel(allItems);
-    });
   }
 
   function initDrag() {
@@ -2134,15 +2073,9 @@
     document.getElementById('sh-q').textContent = q ? `"${q}"` : '';
     document.getElementById('sh-cnt').textContent = items.length + '개';
 
-    // 탭 뱃지 업데이트
-    const tabBtns = document.querySelectorAll('.sh-tab');
-    tabBtns.forEach(t => {
-      t.classList.toggle('active', t.dataset.tab === activeTab);
-    });
-
     const body = document.getElementById('sh-body');
     if (!items.length) {
-      body.innerHTML = '<div style="padding:40px 20px !important;text-align:center !important;color:#94a3b8 !important;"><div style="font-size:28px !important;">📦</div><div style="font-size:12px !important;margin-top:6px !important;">상품 파싱 중...</div></div>';
+      body.innerHTML = '<div style="padding:40px 20px !important;text-align:center !important;color:#94a3b8 !important;"><div style="font-size:28px !important;">📦</div><div style="font-size:11px !important;margin-top:6px !important;">상품 파싱 중...</div></div>';
       return;
     }
 
@@ -2170,164 +2103,125 @@
     const priceBuckets = makeHistogram(prices, 6);
     const revBuckets = makeHistogram(reviews, 5);
 
-    if (activeTab === 'auto') {
-      // ═══════════════════════════════════════════
-      //  자동 수집 탭: DOM 파싱 기반 시장 데이터
-      // ═══════════════════════════════════════════
-      body.innerHTML = `
-        <!-- 핵심 통계 (2x2) -->
-        <div class="sh-sec">
-          <div class="sh-sec-title">📊 시장 개요 (${items.length}개 분석)</div>
-          <div class="sh-stats">
-            <div class="sh-st">
-              <span class="sh-st-v accent">${items.length}</span>
-              <span class="sh-st-l">상품수</span>
-            </div>
-            <div class="sh-st">
-              <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '<small style="font-size:11px !important;font-weight:600 !important;">원</small>' : '-'}</span>
-              <span class="sh-st-l">평균가</span>
-            </div>
-            <div class="sh-st">
-              <span class="sh-st-v">${avgRating !== '-' ? '★ ' + avgRating : '-'}</span>
-              <span class="sh-st-l">평균평점</span>
-            </div>
-            <div class="sh-st">
-              <span class="sh-st-v amber">${totalReviews.toLocaleString()}</span>
-              <span class="sh-st-l">총 리뷰수</span>
-            </div>
+    body.innerHTML = `
+      <!-- 핵심 통계 (2x2) -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">📊 시장 개요 (${items.length}개 분석)</div>
+        <div class="sh-stats">
+          <div class="sh-st">
+            <span class="sh-st-v accent">${items.length}</span>
+            <span class="sh-st-l">상품수</span>
           </div>
-
-          <!-- 세부 통계 -->
-          <div style="margin-top:10px !important; padding:8px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">가격 범위</span>
-              <span class="sh-detail-val">${minPrice ? minPrice.toLocaleString() : '0'} ~ ${maxPrice ? maxPrice.toLocaleString() : '0'}원</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">중간가</span>
-              <span class="sh-detail-val">${medianPrice ? medianPrice.toLocaleString() + '원' : '-'}</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">최다 리뷰</span>
-              <span class="sh-detail-val">${maxReview ? maxReview.toLocaleString() + '개' : '-'}</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">리뷰 100+</span>
-              <span class="sh-detail-val" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100}개 (${reviewOver100Pct}%)</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">광고 비율</span>
-              <span class="sh-detail-val">${adCnt}개 (${items.length ? Math.round(adCnt / items.length * 100) : 0}%)</span>
-            </div>
+          <div class="sh-st">
+            <span class="sh-st-v red">${avgPrice ? avgPrice.toLocaleString() + '<small style="font-size:10px !important;font-weight:600 !important;">원</small>' : '-'}</span>
+            <span class="sh-st-l">평균가</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v">${avgRating !== '-' ? '★ ' + avgRating : '-'}</span>
+            <span class="sh-st-l">평균평점</span>
+          </div>
+          <div class="sh-st">
+            <span class="sh-st-v amber">${totalReviews.toLocaleString()}</span>
+            <span class="sh-st-l">총 리뷰수</span>
           </div>
         </div>
 
-        <!-- 경쟁도 게이지 -->
-        <div class="sh-sec">
-          <div class="sh-sec-title">
-            ⚔️ 경쟁 강도
-            <span style="margin-left:auto !important;font-size:12px !important;font-weight:800 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label}</span>
+        <!-- 세부 통계 -->
+        <div style="margin-top:10px !important; padding:8px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">가격 범위</span>
+            <span class="sh-detail-val">${minPrice ? minPrice.toLocaleString() : '0'} ~ ${maxPrice ? maxPrice.toLocaleString() : '0'}원</span>
           </div>
-          <div class="sh-gauge-wrap">
-            <div class="sh-gauge-bar">
-              <div class="sh-gauge-track" style="width:${100 - comp.sc}% !important;"></div>
-              <div class="sh-gauge-marker" style="left:calc(${comp.sc}% - 2px) !important;"></div>
-            </div>
-            <div class="sh-gauge-labels">
-              <span>진입 용이</span>
-              <span style="font-weight:700 !important;color:#475569 !important;">${comp.sc}점</span>
-              <span>경쟁 치열</span>
-            </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">중간가</span>
+            <span class="sh-detail-val">${medianPrice ? medianPrice.toLocaleString() + '원' : '-'}</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">최다 리뷰</span>
+            <span class="sh-detail-val">${maxReview ? maxReview.toLocaleString() + '개' : '-'}</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">리뷰 100+</span>
+            <span class="sh-detail-val" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100}개 (${reviewOver100Pct}%)</span>
+          </div>
+          <div class="sh-detail-row">
+            <span class="sh-detail-lbl">광고 비율</span>
+            <span class="sh-detail-val">${adCnt}개 (${items.length ? Math.round(adCnt / items.length * 100) : 0}%)</span>
           </div>
         </div>
+      </div>
 
-        <!-- 배송 분포 -->
-        <div class="sh-sec">
-          <div class="sh-sec-title">🚀 배송 유형</div>
-          <div class="sh-delivery-bars">
-            ${deliveryData.map(d => {
-              const pct = Math.round(d.count / deliveryTotal * 100);
-              return `
-                <div class="sh-dbar-row">
-                  <span class="sh-dbar-lbl">${d.label}</span>
-                  <div class="sh-dbar-track">
-                    <div class="sh-dbar-fill" style="width:${pct}% !important;background:${d.color} !important;"></div>
-                  </div>
-                  <span class="sh-dbar-pct">${pct}%</span>
-                </div>`;
-            }).join('')}
-          </div>
+      <!-- 검색량 (비동기 로딩) -->
+      <div class="sh-sec" id="sh-sv-section">
+        <div class="sh-sec-title">🔍 검색량</div>
+        <div style="text-align:center !important;padding:6px !important;color:#c7d2fe !important;font-size:10px !important;">
+          조회 중...
         </div>
+      </div>
 
-        <!-- 가격 & 리뷰 분포 차트 -->
-        <div class="sh-sec">
-          <div class="sh-charts">
-            <div class="sh-chart">
-              <div class="sh-chart-title">💰 가격 분포</div>
-              <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(priceBuckets)}</div>
-              <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
-                <span>${minPrice ? minPrice.toLocaleString() + '원' : ''}</span>
-                <span>${maxPrice ? maxPrice.toLocaleString() + '원' : ''}</span>
-              </div>
-            </div>
-            <div class="sh-chart">
-              <div class="sh-chart-title">💬 리뷰 분포</div>
-              <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(revBuckets)}</div>
-              <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
-                <span>적음</span>
-                <span>많음</span>
-              </div>
-            </div>
+      <!-- 경쟁도 게이지 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">
+          ⚔️ 경쟁 강도
+          <span style="margin-left:auto !important;font-size:11px !important;font-weight:800 !important;color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.label}</span>
+        </div>
+        <div class="sh-gauge-wrap">
+          <div class="sh-gauge-bar">
+            <div class="sh-gauge-track" style="width:${100 - comp.sc}% !important;"></div>
+            <div class="sh-gauge-marker" style="left:calc(${comp.sc}% - 2px) !important;"></div>
+          </div>
+          <div class="sh-gauge-labels">
+            <span>진입 용이</span>
+            <span style="font-weight:700 !important;color:#475569 !important;">${comp.sc}점</span>
+            <span>경쟁 치열</span>
           </div>
         </div>
-      `;
-    } else {
-      // ═══════════════════════════════════════════
-      //  검색량 탭: 서버/네이버 API 기반 데이터
-      // ═══════════════════════════════════════════
-      body.innerHTML = `
-        <!-- 검색량 (비동기 로딩) — 최상단에 크게 배치 -->
-        <div class="sh-sec" id="sh-sv-section">
-          <div class="sh-sec-title">🔍 검색량</div>
-          <div style="text-align:center !important;padding:12px !important;color:#c7d2fe !important;font-size:11px !important;">
-            조회 중...
-          </div>
-        </div>
+      </div>
 
-        <!-- 경쟁 비율 요약 (검색량 기반) -->
-        <div class="sh-sec">
-          <div class="sh-sec-title">📈 검색량 기반 경쟁 분석</div>
-          <div class="sh-stats">
-            <div class="sh-st">
-              <span class="sh-st-v accent">${items.length}</span>
-              <span class="sh-st-l">쿠팡 상품수</span>
-            </div>
-            <div class="sh-st">
-              <span class="sh-st-v" style="color:${comp.level === 'hard' ? '#dc2626' : comp.level === 'mid' ? '#d97706' : '#16a34a'} !important;">${comp.sc}<small style="font-size:10px !important;">점</small></span>
-              <span class="sh-st-l">경쟁 강도</span>
+      <!-- 배송 분포 -->
+      <div class="sh-sec">
+        <div class="sh-sec-title">🚀 배송 유형</div>
+        <div class="sh-delivery-bars">
+          ${deliveryData.map(d => {
+            const pct = Math.round(d.count / deliveryTotal * 100);
+            return `
+              <div class="sh-dbar-row">
+                <span class="sh-dbar-lbl">${d.label}</span>
+                <div class="sh-dbar-track">
+                  <div class="sh-dbar-fill" style="width:${pct}% !important;background:${d.color} !important;"></div>
+                </div>
+                <span class="sh-dbar-pct">${pct}%</span>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <!-- 가격 & 리뷰 분포 차트 -->
+      <div class="sh-sec">
+        <div class="sh-charts">
+          <div class="sh-chart">
+            <div class="sh-chart-title">💰 가격 분포</div>
+            <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(priceBuckets)}</div>
+            <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
+              <span>${minPrice ? minPrice.toLocaleString() + '원' : ''}</span>
+              <span>${maxPrice ? maxPrice.toLocaleString() + '원' : ''}</span>
             </div>
           </div>
-          <div style="margin-top:8px !important; padding:6px 10px !important; background:rgba(99,102,241,0.03) !important; border-radius:8px !important;">
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">평균가</span>
-              <span class="sh-detail-val">${avgPrice ? avgPrice.toLocaleString() + '원' : '-'}</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">리뷰 100+</span>
-              <span class="sh-detail-val" style="color:${reviewOver100Pct > 50 ? '#dc2626' : reviewOver100Pct > 25 ? '#d97706' : '#16a34a'} !important;">${reviewOver100}개 (${reviewOver100Pct}%)</span>
-            </div>
-            <div class="sh-detail-row">
-              <span class="sh-detail-lbl">광고 비율</span>
-              <span class="sh-detail-val">${adCnt}개 (${items.length ? Math.round(adCnt / items.length * 100) : 0}%)</span>
+          <div class="sh-chart">
+            <div class="sh-chart-title">💬 리뷰 분포</div>
+            <div class="sh-bars" style="padding-bottom:14px !important;">${renderBars(revBuckets)}</div>
+            <div style="display:flex !important;justify-content:space-between !important;font-size:8px !important;color:#94a3b8 !important;margin-top:2px !important;">
+              <span>적음</span>
+              <span>많음</span>
             </div>
           </div>
         </div>
-      `;
+      </div>
+    `;
 
-      // 검색량 비동기 로딩
-      if (q) {
-        fetchMarketData(q).then(data => renderSearchVolume(data));
-      }
+    // 검색량 비동기 로딩
+    if (q) {
+      fetchMarketData(q).then(data => renderSearchVolume(data));
     }
   }
 
