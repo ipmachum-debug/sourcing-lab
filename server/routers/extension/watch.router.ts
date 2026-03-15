@@ -206,7 +206,7 @@ export const watchRouter = router({
     .input(z.object({
       activeOnly: z.boolean().default(true),
       sortBy: z.enum(["priority", "lastSearched", "reviewGrowth", "compositeScore", "keywordScore"]).default("compositeScore"),
-      limit: z.number().int().min(1).max(200).default(50),
+      limit: z.number().int().min(1).max(2000).default(50),
       offset: z.number().int().min(0).default(0),
     }))
     .query(async ({ ctx, input }) => {

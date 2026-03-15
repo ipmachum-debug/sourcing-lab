@@ -847,7 +847,7 @@ async function loadManualKeywords() {
   emptyEl.style.display = '';
   try {
     console.log('[Manual] 키워드 목록 로드 시작...');
-    var resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'keyword', limit: 1000 } });
+    var resp = await sendMsg({ type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 } });
     console.log('[Manual] 응답 원본:', JSON.stringify(resp).slice(0, 500));
     
     // v8.5.2: data 형식을 최대한 유연하게 처리 (tRPC, 배열, 객체 등)
