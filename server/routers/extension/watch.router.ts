@@ -350,7 +350,8 @@ export const watchRouter = router({
           reviewGrowth1d: N(r.reviewGrowth1d),
           reviewGrowth7d: N(r.reviewGrowth7d),
           priceChange1d: N(r.priceChange1d),
-          compositeScore: N(r.compositeScore),
+          // ★ v8.4.5: compositeScore를 daily_stats의 keywordScore로 동기화
+          compositeScore: ds?.keywordScore || N(r.compositeScore),
           isPinned: !!r.isPinned,
           pinOrder: N(r.pinOrder),
           keywordScore: ds?.keywordScore || N(r.compositeScore),
@@ -362,8 +363,8 @@ export const watchRouter = router({
         };
       });
 
-      // keywordScore 정렬
-      if (input.sortBy === "keywordScore") {
+      // ★ v8.4.5: compositeScore/keywordScore 정렬 시 daily_stats 기반 재정렬
+      if (input.sortBy === "keywordScore" || input.sortBy === "compositeScore") {
         result.sort((a, b) => b.keywordScore - a.keywordScore);
       }
 
@@ -923,7 +924,7 @@ export const watchRouter = router({
         .from(extKeywordDailyStats)
         .where(eq(extKeywordDailyStats.userId, userId));
 
-      // 배치 수집 상태 (v2)
+      // ===== v2 배치 엔진 상태 =====
       const [batchState] = await db.select()
         .from(extBatchState)
         .where(eq(extBatchState.userId, userId))
@@ -961,6 +962,7 @@ export const watchRouter = router({
         ));
 
       const isBatchDateToday = batchState?.stateDate === todayStr;
+
       return {
         collectedToday: N(todayStats?.collectedToday),
         totalActive: N(queueStats?.totalActive),

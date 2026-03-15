@@ -17,10 +17,12 @@ interface KeywordDetailPanelProps {
   onChangeDays: (days: number) => void;
   dailyStats: any[] | undefined;
   marketOverview: any | undefined;
+  searchVolume: any | undefined;
+  searchVolumeLoading?: boolean;
 }
 
 export default function KeywordDetailPanel({
-  keyword, days, onChangeDays, dailyStats, marketOverview,
+  keyword, days, onChangeDays, dailyStats, marketOverview, searchVolume, searchVolumeLoading,
 }: KeywordDetailPanelProps) {
   return (
     <>
@@ -101,6 +103,61 @@ export default function KeywordDetailPanel({
                     </ComposedChart>
                   </ResponsiveContainer>
                 </ChartSection>
+
+                {/* 검색량 (월간) — 네이버 + 쿠팡 추정 */}
+                {searchVolumeLoading && !searchVolume && (
+                  <div className="mt-4 pt-3 border-t border-gray-100">
+                    <div className="text-[10px] font-semibold text-gray-500 mb-2">🔍 검색량 (월간)</div>
+                    <div className="text-center py-3 text-[10px] text-gray-400">
+                      <Activity className="w-4 h-4 mx-auto mb-1 animate-spin opacity-50" />
+                      네이버 검색량 데이터 수집중...
+                    </div>
+                  </div>
+                )}
+                {searchVolume && (
+                  <div className="mt-4 pt-3 border-t border-gray-100">
+                    <div className="text-[10px] font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
+                      🔍 검색량 (월간)
+                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-blue-200 text-blue-500">
+                        {searchVolume.estimateModel === "hybrid" ? "Hybrid" : "SIMPLE"}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div className="bg-purple-50 rounded-lg p-2.5 text-center border border-purple-100">
+                        <div className="text-lg font-bold text-purple-700">{searchVolume.coupangEstimate.toLocaleString()}</div>
+                        <div className="text-[9px] text-gray-500">쿠팡 추정</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg p-2.5 text-center border border-green-100">
+                        <div className="text-lg font-bold text-green-700">{searchVolume.totalSearch.toLocaleString()}</div>
+                        <div className="text-[9px] text-gray-500">네이버 검색량</div>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg text-[10px]">
+                      <div className="grid grid-cols-2 divide-x divide-gray-200">
+                        <div className="p-1.5 flex justify-between">
+                          <span className="text-gray-500">PC / 모바일</span>
+                          <span className="font-medium">{searchVolume.pcSearch.toLocaleString()} / {searchVolume.mobileSearch.toLocaleString()}</span>
+                        </div>
+                        <div className="p-1.5 flex justify-between">
+                          <span className="text-gray-500">경쟁 비율</span>
+                          <span className="font-medium">{searchVolume.competitionRatio} : 1</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 divide-x divide-gray-200 border-t border-gray-200">
+                        <div className="p-1.5 flex justify-between">
+                          <span className="text-gray-500">네이버 경쟁</span>
+                          <span className={`font-semibold ${searchVolume.competitionIndex === "높음" ? "text-red-600" : searchVolume.competitionIndex === "중간" ? "text-amber-600" : "text-green-600"}`}>
+                            {searchVolume.competitionIndex || "-"}
+                          </span>
+                        </div>
+                        <div className="p-1.5 flex justify-between">
+                          <span className="text-gray-500">기준월</span>
+                          <span className="font-medium">{searchVolume.yearMonth}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* 시장 개요 */}
                 {marketOverview && (
@@ -212,7 +269,7 @@ export default function KeywordDetailPanel({
             <div><span className="font-medium text-orange-600">수요점수</span>: 판매추정 로그스케일(80%) + 시장규모(20%)</div>
             <div><span className="font-medium text-purple-600">종합점수</span>: 성장성(30%) + 시장규모(25%) + 진입용이성(25%) + 수요(20%)</div>
             <div><span className="font-medium text-red-600">경쟁도</span>: 리뷰수(35%) + 고리뷰비율(25%) + 평점(20%) + 광고비율(20%)</div>
-            <div className="pt-1 border-t border-gray-200 mt-1"><span className="font-medium text-pink-600">소싱점수</span>: 시장기회(45%) + 분석완성도(35%) + 차별화전략(20%) → 80점↑ 테스트후보</div>
+            <div className="pt-1 border-t border-gray-200 mt-1"><span className="font-medium text-pink-600">소싱점수</span>: 시장기회(50%) + 분석완성도(30%) + 차별화전략(20%) → 70점↑ 테스트후보</div>
           </div>
         </CardContent>
       </Card>

@@ -22,8 +22,10 @@ import {
   extSearchEvents, extWatchKeywords, extKeywordDailyStatus,
   extSearchSnapshots, extKeywordDailyStats,
   keywordMaster, keywordDailyMetrics,
+  keywordSearchVolumeHistory,
   extBatchState,
 } from "../drizzle/schema";
+import { getNaverKeywords } from "./lib/naverAds";
 import { eq, and, desc, sql, gte, lt, asc, ne, isNull, lte, or } from "drizzle-orm";
 import {
   computeBaseProductCount,
@@ -1276,7 +1278,113 @@ export async function runDailyBatch(
     }
   }
 
+  // ★ v8.5: 일일 배치 완료 후 네이버 검색량 자동 수집 (미수집 키워드만)
+  try {
+    const synced = await syncNaverSearchVolume(userId, batchKeywords.map(k => k.keyword));
+    if (synced > 0) console.log(`[runDailyBatch] 네이버 검색량 ${synced}건 수집 완료`);
+  } catch (e: any) {
+    console.error(`[runDailyBatch] 네이버 검색량 수집 오류:`, e?.message);
+  }
+
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
+}
+
+// ============================================================
+//  v8.5: 네이버 검색량 일괄 수집 (미수집 키워드만)
+// ============================================================
+
+/**
+ * 활성 키워드 중 이번 달 검색량이 아직 없는 키워드를 네이버 API로 수집.
+ * 네이버 API는 요청당 최대 5개 키워드이므로 5개씩 배치 처리.
+ * 월 1회 수집 (같은 yearMonth면 스킵).
+ */
+export async function syncNaverSearchVolume(
+  userId: number,
+  keywords: string[],
+): Promise<number> {
+  const db = await getDb();
+  if (!db || keywords.length === 0) return 0;
+
+  const now = nowKST();
+  const yearMonth = now.toISOString().slice(0, 7); // YYYY-MM
+
+  // 이번 달에 이미 수집된 키워드 조회
+  const existing = await db.select({ keyword: keywordSearchVolumeHistory.keyword })
+    .from(keywordSearchVolumeHistory)
+    .where(and(
+      eq(keywordSearchVolumeHistory.userId, userId),
+      eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
+      eq(keywordSearchVolumeHistory.source, "naver"),
+    ));
+  const existingSet = new Set(existing.map(r => r.keyword));
+
+  // 미수집 키워드만 필터
+  const missing = keywords.filter(kw => !existingSet.has(kw));
+  if (missing.length === 0) return 0;
+
+  let totalSaved = 0;
+  let failCount = 0;
+
+  // ★ 1개씩 개별 호출 (5개 배치 시 1개라도 유효하지 않으면 전체 실패하는 문제 해결)
+  for (let i = 0; i < missing.length; i++) {
+    const kw = missing[i];
+    try {
+      const results = await getNaverKeywords([kw]);
+      if (results.length === 0) {
+        failCount++;
+        continue; // 네이버에 없는 키워드 → 스킵
+      }
+
+      for (const r of results) {
+        const totalSearch = (r.monthlyPcQcCnt || 0) + (r.monthlyMobileQcCnt || 0);
+        if (totalSearch === 0) continue;
+
+        const upsertValues = {
+          pcSearch: r.monthlyPcQcCnt || 0,
+          mobileSearch: r.monthlyMobileQcCnt || 0,
+          totalSearch,
+          competitionIndex: r.compIdx || "낮음",
+          avgCpc: String((r.monthlyAvgPcClkCnt || 0) + (r.monthlyAvgMobileClkCnt || 0)),
+        };
+
+        // relKeyword로 저장
+        await db.insert(keywordSearchVolumeHistory).values({
+          userId,
+          keyword: r.relKeyword,
+          source: "naver",
+          yearMonth,
+          ...upsertValues,
+        }).onDuplicateKeyUpdate({ set: upsertValues });
+        totalSaved++;
+
+        // 원본 키워드(공백 포함)로도 저장
+        const relClean = r.relKeyword.replace(/\s+/g, "").toLowerCase();
+        if (kw !== r.relKeyword && kw.replace(/\s+/g, "").toLowerCase() === relClean) {
+          await db.insert(keywordSearchVolumeHistory).values({
+            userId,
+            keyword: kw,
+            source: "naver",
+            yearMonth,
+            ...upsertValues,
+          }).onDuplicateKeyUpdate({ set: upsertValues });
+        }
+      }
+
+      // API 레이트 리밋 방지: 5건마다 1초 대기
+      if ((i + 1) % 5 === 0 && i + 1 < missing.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (e: any) {
+      failCount++;
+      console.error(`[syncNaverSearchVolume] "${kw}" 실패:`, e?.message);
+    }
+  }
+
+  if (failCount > 0) {
+    console.log(`[syncNaverSearchVolume] ${failCount}개 키워드 네이버 미등록/실패 (정상)`);
+  }
+
+  return totalSaved;
 }
 
 // ============================================================

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import SourcingFormModal from "@/components/SourcingFormModal";
@@ -14,11 +14,45 @@ import { toast } from "sonner";
 import {
   Activity, Zap, Trash2, Loader2, Square,
 } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function formatPrice(n: number | null | undefined) {
   if (n === null || n === undefined) return "-";
   return n.toLocaleString("ko-KR") + "원";
 }
+
+// ===== Korean Initial Consonant (Chosung) Extraction =====
+const CHOSUNG_LIST = [
+  "\u3131","\u3132","\u3134","\u3137","\u3138","\u3139","\u3141","\u3142","\u3143","\u3145","\u3146",
+  "\u3147","\u3148","\u3149","\u314A","\u314B","\u314C","\u314D","\u314E",
+];
+const CHOSUNG_GROUP: Record<string, string> = {
+  "\u3132": "\u3131", "\u3138": "\u3137", "\u3143": "\u3142", "\u3146": "\u3145", "\u3149": "\u3148",
+};
+const CHOSUNG_TABS = ["\u3131","\u3134","\u3137","\u3139","\u3141","\u3142","\u3145","\u3147","\u3148","\u314A","\u314B","\u314C","\u314D","\u314E"];
+
+function getChosung(char: string): string | null {
+  const code = char.charCodeAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    const chosungIdx = Math.floor((code - 0xAC00) / (21 * 28));
+    const raw = CHOSUNG_LIST[chosungIdx];
+    return CHOSUNG_GROUP[raw] || raw;
+  }
+  return null;
+}
+
+function getKeywordGroup(query: string): string {
+  if (!query) return "ETC";
+  const first = query.charAt(0);
+  const chosung = getChosung(first);
+  if (chosung) return chosung;
+  if (/[a-zA-Z]/.test(first)) return "ABC";
+  if (/[0-9]/.test(first)) return "123";
+  return "ETC";
+}
+
+type KwTabMode = "all" | "chosung" | "uncollected";
+const ITEMS_PER_PAGE = 50;
 
 export default function SearchDemand() {
   // ===== State =====
@@ -36,9 +70,14 @@ export default function SearchDemand() {
   const [sourcingPrefillData, setSourcingPrefillData] = useState<Record<string, any> | undefined>(undefined);
   const [sourcingEditProduct, setSourcingEditProduct] = useState<any>(undefined);
 
+  // ===== Tab & Pagination State =====
+  const [kwTabMode, setKwTabMode] = useState<KwTabMode>("all");
+  const [kwChosungFilter, setKwChosungFilter] = useState<string>("\u3131");
+  const [kwPage, setKwPage] = useState(1);
+
   // ===== Queries =====
   const keywordStatsList = trpc.extension.listKeywordStats.useQuery(
-    { search: demandSearch || undefined, sortBy: demandSort, sortDir: "desc", limit: 100 },
+    { search: demandSearch || undefined, sortBy: demandSort, sortDir: "desc", limit: 500 },
   );
   const keywordStatsOverview = trpc.extension.keywordStatsOverview.useQuery();
   const autoCollectInfo = trpc.extension.autoCollectStats.useQuery();
@@ -50,10 +89,17 @@ export default function SearchDemand() {
     { query: demandSelectedKw || "" },
     { enabled: !!demandSelectedKw },
   );
+  const searchVolume = trpc.extension.getKeywordSearchVolume.useQuery(
+    { query: demandSelectedKw || "" },
+    { enabled: !!demandSelectedKw },
+  );
+  const uncollectedKws = trpc.extension.getUncollectedKeywords.useQuery();
 
   // ===== Mutations =====
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
   const rebuildDailyStats = trpc.extension.rebuildDailyStats.useMutation();
+  const fetchSearchVolumeMut = trpc.extension.fetchSearchVolume.useMutation();
+  const boostUncollected = trpc.extension.boostUncollectedPriority.useMutation();
   const togglePin = trpc.extension.togglePinKeyword.useMutation({
     onSuccess: () => { keywordStatsList.refetch(); },
   });
@@ -73,6 +119,70 @@ export default function SearchDemand() {
     onError: (err: any) => toast.error(err.message || "삭제 실패"),
   });
 
+  // ===== 검색량 자동 수집: 데이터 없으면 네이버 API 자동 호출 =====
+  const autoFetchedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (
+      demandSelectedKw &&
+      searchVolume.isFetched &&
+      !searchVolume.data &&
+      !fetchSearchVolumeMut.isPending &&
+      !autoFetchedRef.current.has(demandSelectedKw)
+    ) {
+      autoFetchedRef.current.add(demandSelectedKw);
+      fetchSearchVolumeMut.mutate(
+        { keywords: [demandSelectedKw] },
+        { onSuccess: () => searchVolume.refetch() },
+      );
+    }
+  }, [demandSelectedKw, searchVolume.isFetched, searchVolume.data]);
+
+  // ===== Filtered & Paginated keyword list =====
+  useEffect(() => { setKwPage(1); }, [kwTabMode, kwChosungFilter, demandSearch, demandSort]);
+
+  const { filteredKws, totalPages, paginatedKws, chosungCounts } = useMemo(() => {
+    const allKws = (keywordStatsList.data as any[]) || [];
+
+    const counts: Record<string, number> = {};
+    for (const tab of CHOSUNG_TABS) counts[tab] = 0;
+    counts["ABC"] = 0; counts["123"] = 0; counts["ETC"] = 0;
+    for (const kw of allKws) {
+      const grp = getKeywordGroup(kw.query);
+      if (counts[grp] !== undefined) counts[grp]++;
+      else counts["ETC"] = (counts["ETC"] || 0) + 1;
+    }
+
+    let filtered = allKws;
+    if (kwTabMode === "chosung") {
+      filtered = allKws.filter(kw => getKeywordGroup(kw.query) === kwChosungFilter);
+      filtered = [...filtered].sort((a, b) => a.query.localeCompare(b.query, "ko"));
+    } else if (kwTabMode === "uncollected") {
+      const uncollectedList = uncollectedKws.data?.uncollectedKeywords || [];
+      const uncollectedSet = new Set(uncollectedList);
+      // 1) daily_stats에 존재하는 미수집 키워드
+      const fromStats = allKws.filter(kw => uncollectedSet.has(kw.query));
+      // 2) daily_stats에 없는 미수집 키워드 → 플레이스홀더 행 생성
+      const inStatsSet = new Set(fromStats.map(kw => kw.query));
+      const placeholders = uncollectedList
+        .filter(kw => !inStatsSet.has(kw))
+        .map(kw => ({
+          query: kw,
+          keywordScore: 0, demandScore: 0, reviewGrowth: 0,
+          salesEstimate: 0, competitionScore: 0, avgPrice: 0,
+          productCount: 0, totalReviewSum: 0, dataStatus: "uncollected",
+          isPinned: false, pinOrder: 0, watchId: null,
+        }));
+      filtered = [...fromStats, ...placeholders].sort((a, b) => a.query.localeCompare(b.query, "ko"));
+    }
+
+    const total = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+    const page = Math.min(kwPage, total);
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    const paginated = filtered.slice(start, start + ITEMS_PER_PAGE);
+
+    return { filteredKws: filtered, totalPages: total, paginatedKws: paginated, chosungCounts: counts };
+  }, [keywordStatsList.data, kwTabMode, kwChosungFilter, kwPage, uncollectedKws.data]);
+
   const [rebuildRunning, setRebuildRunning] = useState(false);
   const handleRebuildNormalized = useCallback(async () => {
     if (rebuildRunning) return;
@@ -81,8 +191,7 @@ export default function SearchDemand() {
       toast.info("정규화 재계산 시작...");
       const r = await rebuildDailyStats.mutateAsync({ days: Math.max(demandDays, 90) });
       toast.success(`재계산 완료: ${r.rebuilt}건 (${r.keywords}개 키워드)`);
-      keywordStatsList.refetch();
-      keywordStatsOverview.refetch();
+      keywordStatsList.refetch(); keywordStatsOverview.refetch();
       if (demandSelectedKw) keywordDailyStats.refetch();
     } catch (err: any) {
       toast.error(`재계산 오류: ${err.message}`);
@@ -122,7 +231,8 @@ export default function SearchDemand() {
     keywordStatsList.refetch();
     keywordStatsOverview.refetch();
     autoCollectInfo.refetch();
-    if (demandSelectedKw) { keywordDailyStats.refetch(); marketOverview.refetch(); }
+    uncollectedKws.refetch();
+    if (demandSelectedKw) { keywordDailyStats.refetch(); marketOverview.refetch(); searchVolume.refetch(); }
     toast.success("데이터 갱신됨");
   };
 
@@ -197,10 +307,7 @@ export default function SearchDemand() {
 
         {/* 배치 엔진 상태 + 개요 카드 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* 배치 엔진 상태 카드 */}
           {aci && <BatchStatusCard data={aci} />}
-
-          {/* 개요 카드 그리드 */}
           {overview && (
             <div className="lg:col-span-2 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {[
@@ -226,6 +333,95 @@ export default function SearchDemand() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 좌측: 키워드 목록 */}
           <div className="lg:col-span-2 space-y-3">
+            {/* 탭: 전체 / ㄱㄴㄷ / 미수집 */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                className={`px-3 py-1.5 text-xs rounded-lg font-medium transition ${kwTabMode === "all" ? "bg-indigo-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                onClick={() => setKwTabMode("all")}>
+                전체 <span className="text-[9px] opacity-80">({(keywordStatsList.data as any[])?.length || 0})</span>
+              </button>
+              <button
+                className={`px-3 py-1.5 text-xs rounded-lg font-medium transition ${kwTabMode === "chosung" ? "bg-indigo-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                onClick={() => setKwTabMode("chosung")}>
+                ㄱㄴㄷ순
+              </button>
+              {(uncollectedKws.data?.uncollectedCount || 0) > 0 && (
+                <button
+                  className={`px-3 py-1.5 text-xs rounded-lg font-medium transition flex items-center gap-1 ${kwTabMode === "uncollected" ? "bg-red-600 text-white shadow-sm" : "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"}`}
+                  onClick={() => { setKwTabMode("uncollected"); uncollectedKws.refetch(); }}>
+                  미수집
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${kwTabMode === "uncollected" ? "bg-white/20" : "bg-red-100 text-red-700"}`}>
+                    {uncollectedKws.data?.uncollectedCount}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* ㄱㄴㄷ 초성 필터 */}
+            {kwTabMode === "chosung" && (
+              <div className="flex items-center gap-0.5 flex-wrap">
+                {CHOSUNG_TABS.map(ch => (
+                  <button key={ch}
+                    className={`px-2 py-1 text-[11px] rounded-md font-medium transition min-w-[28px] ${
+                      kwChosungFilter === ch
+                        ? "bg-orange-500 text-white shadow-sm"
+                        : chosungCounts[ch] > 0
+                          ? "bg-gray-100 text-gray-700 hover:bg-orange-100"
+                          : "bg-gray-50 text-gray-300 cursor-default"
+                    }`}
+                    onClick={() => chosungCounts[ch] > 0 && setKwChosungFilter(ch)}>
+                    {ch}
+                    {chosungCounts[ch] > 0 && <span className="text-[8px] ml-0.5 opacity-60">{chosungCounts[ch]}</span>}
+                  </button>
+                ))}
+                {chosungCounts["ABC"] > 0 && (
+                  <button
+                    className={`px-2 py-1 text-[11px] rounded-md font-medium transition ${kwChosungFilter === "ABC" ? "bg-orange-500 text-white shadow-sm" : "bg-gray-100 text-gray-700 hover:bg-orange-100"}`}
+                    onClick={() => setKwChosungFilter("ABC")}>
+                    ABC<span className="text-[8px] ml-0.5 opacity-60">{chosungCounts["ABC"]}</span>
+                  </button>
+                )}
+                {chosungCounts["123"] > 0 && (
+                  <button
+                    className={`px-2 py-1 text-[11px] rounded-md font-medium transition ${kwChosungFilter === "123" ? "bg-orange-500 text-white shadow-sm" : "bg-gray-100 text-gray-700 hover:bg-orange-100"}`}
+                    onClick={() => setKwChosungFilter("123")}>
+                    0-9<span className="text-[8px] ml-0.5 opacity-60">{chosungCounts["123"]}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 미수집 키워드 안내 배너 */}
+            {kwTabMode === "uncollected" && uncollectedKws.data && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="text-[11px] text-red-800">
+                    <p className="font-semibold mb-0.5">
+                      오늘 미수집 키워드 {uncollectedKws.data.uncollectedCount}개
+                      <span className="font-normal text-red-600 ml-1">
+                        (전체 {uncollectedKws.data.total}개 중 {uncollectedKws.data.collectedCount}개 수집완료)
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-red-600">
+                      확장프로그램 수집 탭에서 "미수집 키워드" 라디오 선택 후 수집하면 미수집 키워드만 자동 수집됩니다.
+                    </p>
+                  </div>
+                  <Button size="sm" className="text-[10px] h-7 gap-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    disabled={boostUncollected.isPending}
+                    onClick={async () => {
+                      try {
+                        const r = await boostUncollected.mutateAsync();
+                        toast.success(`${r.boosted}개 키워드 우선 수집 예약 완료!`);
+                        uncollectedKws.refetch();
+                      } catch (err: any) { toast.error(`우선 수집 예약 실패: ${err.message}`); }
+                    }}>
+                    <Zap className="w-3 h-3" />
+                    {boostUncollected.isPending ? "처리중..." : "다음 수집에 우선 포함"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* 검색 + 정렬 */}
             <div className="flex items-center gap-2 flex-wrap">
               <Input placeholder="키워드 검색..." value={demandSearch}
@@ -245,13 +441,16 @@ export default function SearchDemand() {
                     onClick={() => setDemandSort(key)}>{label}</button>
                 ))}
               </div>
+              <span className="text-[10px] text-gray-400 ml-auto">
+                {filteredKws.length}개 {kwTabMode === "all" && totalPages > 1 ? `(${kwPage}/${totalPages} 페이지)` : ""}
+              </span>
             </div>
 
             {/* 키워드 테이블 */}
             <Card>
               <CardContent className="p-0">
                 <KeywordTable
-                  keywords={keywordStatsList.data ?? []}
+                  keywords={paginatedKws}
                   selectedKw={demandSelectedKw}
                   selectedDeleteKws={selectedDeleteKws}
                   onSelectKw={setDemandSelectedKw}
@@ -260,7 +459,7 @@ export default function SearchDemand() {
                     if (next.has(kw)) next.delete(kw); else next.add(kw);
                     setSelectedDeleteKws(next);
                   }}
-                  onSelectAll={() => setSelectedDeleteKws(new Set((keywordStatsList.data || []).map((k: any) => k.query)))}
+                  onSelectAll={() => setSelectedDeleteKws(new Set(paginatedKws.map((k: any) => k.query)))}
                   onDeselectAll={() => setSelectedDeleteKws(new Set())}
                   onTogglePin={(watchId, isPinned) => togglePin.mutate({ keywordId: watchId, isPinned })}
                   onOpenSourcing={prefill => openSourcingModal(prefill)}
@@ -268,6 +467,33 @@ export default function SearchDemand() {
                 />
               </CardContent>
             </Card>
+
+            {/* 페이지네이션 */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2">
+                <Button variant="outline" size="sm" className="h-7 w-7 p-0"
+                  disabled={kwPage <= 1} onClick={() => setKwPage(p => Math.max(1, p - 1))}>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
+                  const p = totalPages <= 10 ? i + 1
+                    : kwPage <= 5 ? i + 1
+                    : kwPage >= totalPages - 4 ? totalPages - 9 + i
+                    : kwPage - 4 + i;
+                  return (
+                    <Button key={p} variant={kwPage === p ? "default" : "outline"}
+                      size="sm" className={`h-7 min-w-[28px] text-[10px] p-0 ${kwPage === p ? "bg-orange-600" : ""}`}
+                      onClick={() => setKwPage(p)}>
+                      {p}
+                    </Button>
+                  );
+                })}
+                <Button variant="outline" size="sm" className="h-7 w-7 p-0"
+                  disabled={kwPage >= totalPages} onClick={() => setKwPage(p => Math.min(totalPages, p + 1))}>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* 우측: 선택된 키워드 상세 */}
@@ -279,6 +505,8 @@ export default function SearchDemand() {
                 onChangeDays={setDemandDays}
                 dailyStats={keywordDailyStats.data as any[] | undefined}
                 marketOverview={marketOverview.data}
+                searchVolume={searchVolume.data}
+                searchVolumeLoading={fetchSearchVolumeMut.isPending}
               />
             ) : (
               <Card className="border-dashed">

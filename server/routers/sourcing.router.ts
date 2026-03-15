@@ -197,6 +197,7 @@ export const sourcingRouter = router({
       status: z.string().optional(),
       category: z.string().optional(),
       search: z.string().optional(),
+      minScore: z.number().optional(),
       limit: z.number().default(100),
       offset: z.number().default(0),
     }).optional().default({ limit: 100, offset: 0 }))
@@ -211,10 +212,11 @@ export const sourcingRouter = router({
       if (filters.status) conditions.push(eq(products.status, filters.status as any));
       if (filters.category) conditions.push(eq(products.category, filters.category));
       if (filters.search) conditions.push(sql`${products.productName} LIKE ${'%' + filters.search + '%'}`);
+      if (filters.minScore != null) conditions.push(gte(products.score, filters.minScore));
 
       const items = await db.select().from(products)
         .where(and(...conditions))
-        .orderBy(desc(products.createdAt))
+        .orderBy(filters.minScore != null ? desc(products.score) : desc(products.createdAt))
         .limit(filters.limit || 100)
         .offset(filters.offset || 0);
 
@@ -862,5 +864,48 @@ export const sourcingRouter = router({
       }
 
       return form;
+    }),
+
+  /** 기존 상품 점수 일괄 재계산 (v2 + 시장 데이터) */
+  recalculateScores: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
+
+      const allProducts = await db.select().from(products)
+        .where(eq(products.userId, ctx.user.id));
+
+      let updated = 0;
+      let promoted = 0;
+
+      for (const p of allProducts) {
+        const market = await lookupMarketData(
+          db, ctx.user.id,
+          [p.keyword1, p.keyword2, p.keyword3],
+        );
+
+        const newScore = calculateScore(p, market);
+        const newGrade = getScoreGrade(newScore);
+        const newStatus = getAutoStatus(newScore);
+
+        // 수동 설정된 상태(selected, testing, dropped)는 유지
+        const manualStatuses = ["selected", "testing", "dropped"];
+        const finalStatus = manualStatuses.includes(p.status) ? p.status : newStatus;
+
+        if (newScore !== p.score || newGrade !== p.scoreGrade || finalStatus !== p.status) {
+          await db.update(products).set({
+            score: newScore,
+            scoreGrade: newGrade,
+            status: finalStatus,
+          }).where(eq(products.id, p.id));
+
+          updated++;
+          if (finalStatus === "test_candidate" && p.status !== "test_candidate") {
+            promoted++;
+          }
+        }
+      }
+
+      return { success: true, total: allProducts.length, updated, promoted };
     }),
 });

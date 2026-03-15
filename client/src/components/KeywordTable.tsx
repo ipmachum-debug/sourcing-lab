@@ -77,7 +77,7 @@ export default function KeywordTable({
               spikeRatio: kw.spikeRatio ? Number(kw.spikeRatio) : undefined,
             });
             return (
-              <tr key={kw.id}
+              <tr key={kw.id ?? `uncollected-${kw.query}`}
                 className={`border-b cursor-pointer transition ${isSelected ? "bg-orange-50 ring-1 ring-orange-200" : "hover:bg-gray-50"}`}
                 onClick={() => onSelectKw(kw.query)}>
                 <td className="p-2 text-center" onClick={e => e.stopPropagation()}>
@@ -88,6 +88,9 @@ export default function KeywordTable({
                   <div className="flex items-center gap-1">
                     {kw.isPinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
                     <span className="truncate">"{kw.query}"</span>
+                    {kw.dataStatus === "uncollected" && (
+                      <Badge className="text-[7px] px-1 py-0 bg-red-50 text-red-600 border border-red-200 flex-shrink-0">미수집</Badge>
+                    )}
                   </div>
                 </td>
                 <td className="p-2 text-center">{kw.productCount || 0}</td>
