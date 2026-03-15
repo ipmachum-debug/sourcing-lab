@@ -54,13 +54,9 @@ $$('.tab').forEach(btn => {
     $$('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     $(`#tab-${btn.dataset.tab}`).classList.add('active');
-    if (btn.dataset.tab === 'candidates') loadCandidates();
     if (btn.dataset.tab === 'history') loadHistory();
-    if (btn.dataset.tab === 'ranking') loadRankingTab();
-    if (btn.dataset.tab === 'detail') loadDetailTab();
     if (btn.dataset.tab === 'wing') loadWingTab();
     if (btn.dataset.tab === 'demand') loadDemandTab();
-    if (btn.dataset.tab === 'datasheet') renderDataSheet();
   });
 });
 
