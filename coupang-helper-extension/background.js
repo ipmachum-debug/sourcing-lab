@@ -1985,7 +1985,7 @@ async function startAutoCollect(options = {}) {
     collector.failCount = 0;
     collector.skipCount = 0;
     collector._collectedKeywords = [];
-    collector._isManual = !!(directKeywords && directKeywords.length > 0); // 수동 수집 여부
+    collector._isManual = options.isManual === true; // 명시적 수동 수집 플래그만 인정
     collector._delayConfig = delayConfig; // 서버 딜레이 설정 저장
     collector._burstIndex = 0;            // 버스트 카운터 초기화
     collector.lastError = null;

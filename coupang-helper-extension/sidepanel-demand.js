@@ -1071,7 +1071,7 @@ document.querySelector('#manualCollectBtn').addEventListener('click', async func
 
   var resp = await sendMsg({
     type: 'START_AUTO_COLLECT',
-    payload: { limit: keywordList.length, collectDetail: collectDetail, keywords: keywordList, roundSize: keywordList.length }
+    payload: { limit: keywordList.length, collectDetail: collectDetail, keywords: keywordList, roundSize: keywordList.length, isManual: true }
   });
 
   if (resp && resp.ok) {
