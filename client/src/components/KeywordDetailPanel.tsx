@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Activity, Info } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, AreaChart, Area, Legend, ComposedChart,
+  BarChart, Bar, AreaChart, Area, Legend, ComposedChart, ReferenceLine,
 } from "recharts";
 
 function formatPrice(n: number | null | undefined) {
@@ -56,17 +56,18 @@ export default function KeywordDetailPanel({
             return (
               <div className="space-y-4">
                 <ChartSection title="판매 추정 (7일 이동평균)">
-                  <ResponsiveContainer width="100%" height={180}>
+                  <ResponsiveContainer width="100%" height={200}>
                     <ComposedChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                       <XAxis dataKey="statDate" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
-                      <YAxis tick={{ fontSize: 9 }} />
+                      <YAxis yAxisId="sales" tick={{ fontSize: 9 }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v} />
+                      <YAxis yAxisId="review" orientation="right" tick={{ fontSize: 9, fill: "#22c55e" }} label={{ value: "리뷰증가", angle: 90, position: "insideRight", style: { fontSize: 8, fill: "#22c55e" }, offset: 10 }} />
                       <Tooltip contentStyle={{ fontSize: 11 }} />
                       <Legend wrapperStyle={{ fontSize: 10 }} />
-                      <Bar dataKey="reviewGrowthReal" fill="#86efac" name="리뷰 증가" radius={[3, 3, 0, 0]} stackId="rg" />
-                      <Bar dataKey="reviewGrowthInterp" fill="#86efac" name="리뷰 증가(보간)" radius={[3, 3, 0, 0]} stackId="rg" fillOpacity={0.25} />
-                      <Area type="monotone" dataKey="salesEstimateMa7" fill="#dbeafe" stroke="#2563eb" strokeWidth={2} name="판매추정(MA7)" fillOpacity={0.4} connectNulls />
-                      <Line type="monotone" dataKey="salesEstimateMa30" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" name="MA30" dot={false} connectNulls />
+                      <Bar yAxisId="review" dataKey="reviewGrowthReal" fill="#22c55e" name="리뷰 증가" radius={[3, 3, 0, 0]} stackId="rg" barSize={14} />
+                      <Bar yAxisId="review" dataKey="reviewGrowthInterp" fill="#86efac" name="리뷰 증가(보간)" radius={[3, 3, 0, 0]} stackId="rg" fillOpacity={0.45} barSize={14} />
+                      <Area yAxisId="sales" type="monotone" dataKey="salesEstimateMa7" fill="#dbeafe" stroke="#2563eb" strokeWidth={2} name="판매추정(MA7)" fillOpacity={0.35} connectNulls />
+                      <Line yAxisId="sales" type="monotone" dataKey="salesEstimateMa30" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" name="MA30" dot={false} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </ChartSection>
