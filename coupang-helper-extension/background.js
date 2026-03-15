@@ -1932,7 +1932,7 @@ async function startAutoCollect(options = {}) {
   // v7.2: declarativeNetRequest 헤더 위조 적용 (셀러라이프 완전 반영)
   await HybridParser.setupCoupangHeaders().catch(() => {});
 
-  const limit = Math.min(options.limit || 30, 200);
+  const limit = Math.min(options.limit || 100, 500);
   const collectDetail = options.collectDetail !== false;
   const directKeywords = options.keywords || null;
 

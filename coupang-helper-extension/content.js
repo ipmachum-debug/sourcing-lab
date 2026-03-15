@@ -2382,9 +2382,20 @@
       startBtn.textContent = '⏳ 준비 중...';
 
       try {
+        // v8.5.2: 하루 5배치 제한 먼저 체크
+        const todayData = await chrome.storage.local.get(['todayBatchRuns', 'todayBatchDate']);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayRuns = (todayData.todayBatchDate === todayStr) ? (todayData.todayBatchRuns || 0) : 0;
+        if (todayRuns >= 5) {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          alert('오늘 배치 한도(5회)에 도달했습니다.\n하루 최대 5배치 × 100개 = 500개까지 수집 가능합니다.');
+          return;
+        }
+
         // 서버에서 감시 키워드 목록 가져오기
         const kwResp = await chrome.runtime.sendMessage({
-          type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 200 }
+          type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 }
         });
 
         let keywordList = [];
@@ -2393,6 +2404,7 @@
           const arr = Array.isArray(data) ? data : (data.items || data.keywords || []);
           keywordList = arr.map(kw => kw.keyword || kw);
         }
+        const totalRegisteredCount = keywordList.length;
 
         if (keywordList.length === 0) {
           startBtn.disabled = false;
@@ -2401,8 +2413,42 @@
           return;
         }
 
-        const estMin = Math.ceil(keywordList.length * 20 / 60);
-        if (!confirm(`${keywordList.length}개 키워드 자동 수집을 시작합니다.\n⏱️ 예상: 약 ${estMin}분\n\n계속하시겠습니까?`)) {
+        // v8.5.2: 이미 수집된 키워드 필터링
+        let alreadyCollectedCount = 0;
+        try {
+          const ucResp = await chrome.runtime.sendMessage({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
+          if (ucResp?.ok && ucResp.data?.collectedKeywords?.length > 0) {
+            const collectedSet = new Set(ucResp.data.collectedKeywords);
+            const beforeLen = keywordList.length;
+            keywordList = keywordList.filter(kw => !collectedSet.has(kw));
+            alreadyCollectedCount = beforeLen - keywordList.length;
+          }
+        } catch (_) {}
+
+        if (keywordList.length === 0) {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          alert('오늘 모든 키워드가 이미 수집되었습니다!');
+          return;
+        }
+
+        // v8.5.2: 배치 로직 — 이번 배치 최대 100개
+        const BATCH_SIZE = 100;
+        const batchKeywords = keywordList.slice(0, BATCH_SIZE);
+        const totalUncollected = keywordList.length;
+        const neededBatches = Math.ceil(totalUncollected / BATCH_SIZE);
+        const remainingBatches = 5 - todayRuns;
+        const estMin = Math.ceil(batchKeywords.length * 25 / 60);
+
+        let confirmMsg = `📊 배치 수집\n\n🗂️ 전체 등록: ${totalRegisteredCount}개\n`;
+        if (alreadyCollectedCount > 0) confirmMsg += `✅ 오늘 수집 완료: ${alreadyCollectedCount}개\n`;
+        confirmMsg += `📋 미수집: ${totalUncollected}개\n\n── 이번 배치 ──\n`;
+        confirmMsg += `📦 수집 대상: ${batchKeywords.length}개 (1배치=최대100)\n`;
+        confirmMsg += `📅 남은 배치: ${remainingBatches}회 (5회 중 ${todayRuns}회 완료)\n`;
+        if (totalUncollected > BATCH_SIZE) confirmMsg += `🔄 전체 완료까지: ${neededBatches}배치 필요\n`;
+        confirmMsg += `⏱️ 예상: 약 ${estMin}분\n\n계속하시겠습니까?`;
+
+        if (!confirm(confirmMsg)) {
           startBtn.disabled = false;
           startBtn.textContent = '🤖 자동 수집';
           return;
@@ -2410,7 +2456,7 @@
 
         const resp = await chrome.runtime.sendMessage({
           type: 'START_AUTO_COLLECT',
-          payload: { limit: keywordList.length, collectDetail: false, keywords: keywordList, roundSize: keywordList.length }
+          payload: { limit: batchKeywords.length, collectDetail: false, keywords: batchKeywords, roundSize: BATCH_SIZE }
         });
 
         if (resp?.ok) {

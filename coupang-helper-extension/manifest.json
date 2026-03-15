@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.5.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.5.0 — 사이드패널 모듈 분할 + 플로팅 배치수집 + 파이프라인 마이그레이션",
+  "version": "8.5.2",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.5.2 — 배치수집 로직 수정(100/배치, 5배치/일) + 수동수집 안정화",
   "permissions": [
     "storage",
     "tabs",
