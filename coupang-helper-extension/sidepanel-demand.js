@@ -461,12 +461,13 @@ function updateAutoCollectUI(state) {
   const startBtn = document.querySelector('#startAutoCollectBtn');
   const pauseBtn = document.querySelector('#pauseAutoCollectBtn');
   const stopBtn = document.querySelector('#stopAutoCollectBtn');
+  const livePanel = document.querySelector('#liveBatchStatusPanel');
 
   if (!badge) return;
 
   // 상태 뱃지
   const statusMap = {
-    'IDLE': { text: '준비', cls: '' },
+    'IDLE': { text: '대기중', cls: 'level-easy' },
     'RUNNING': { text: '수집중', cls: 'level-medium' },
     'NAVIGATING': { text: '이동중', cls: 'level-medium' },
     'PARSING': { text: '파싱중', cls: 'level-medium' },
@@ -490,10 +491,67 @@ function updateAutoCollectUI(state) {
     pauseBtn.style.display = 'none';
     stopBtn.style.display = '';
   } else {
-    startBtn.textContent = '▶ 자동 수집 시작';
+    startBtn.textContent = '▶ 수집 시작';
     startBtn.style.display = '';
     pauseBtn.style.display = 'none';
     stopBtn.style.display = 'none';
+  }
+
+  // ★ v8.5.6: 수집 상태 카드 내 라이브 프로그레스 패널 연동
+  if (livePanel) {
+    if (state.running || state.paused) {
+      livePanel.style.display = '';
+      var done = (state.successCount || 0) + (state.failCount || 0) + (state.skipCount || 0);
+      var total = state.totalQueued || 0;
+      var pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+      var progressFill = document.querySelector('#liveBatchProgressFill');
+      var progressText = document.querySelector('#liveBatchProgressText');
+      if (progressFill) progressFill.style.width = pct + '%';
+      if (progressText) progressText.textContent = done + '/' + total + ' (' + pct + '%)';
+
+      var successEl = document.querySelector('#liveBatchSuccess');
+      var failEl = document.querySelector('#liveBatchFail');
+      var currentEl = document.querySelector('#liveBatchCurrent');
+      var totalEl = document.querySelector('#liveBatchTotal');
+      if (successEl) successEl.textContent = state.successCount || 0;
+      if (failEl) failEl.textContent = state.failCount || 0;
+      if (currentEl) currentEl.textContent = done + '/' + total;
+      if (totalEl) totalEl.textContent = total + '개';
+
+      var kwEl = document.querySelector('#liveBatchCurrentKw');
+      if (kwEl) {
+        if (state.currentKeyword) {
+          kwEl.textContent = '\u25b6 "' + state.currentKeyword + '" 수집 중...';
+        } else if (state.status === 'WAITING_NEXT') {
+          kwEl.textContent = '\u23f3 다음 키워드 대기중... (' + (state.queueLength || 0) + '개 남음)';
+        } else {
+          kwEl.textContent = '';
+        }
+      }
+
+      // 뱃지도 진행률 표시
+      badge.textContent = st.text + ' ' + done + '/' + total;
+
+      // 라이브 폴링 시작
+      if (!liveBatchPollingId) {
+        liveBatchPollingId = setInterval(updateLiveBatchStatus, 2000);
+      }
+    } else {
+      // 수집 완료/중단 시 — 결과가 있으면 잠시 표시 유지
+      if (state.successCount > 0 || state.failCount > 0) {
+        // 완료 상태 표시
+        var kwEl = document.querySelector('#liveBatchCurrentKw');
+        if (kwEl) kwEl.textContent = '✅ 수집 완료 — 성공: ' + (state.successCount || 0) + ', 실패: ' + (state.failCount || 0);
+      } else {
+        livePanel.style.display = 'none';
+      }
+      // 라이브 폴링 중단
+      if (liveBatchPollingId) {
+        clearInterval(liveBatchPollingId);
+        liveBatchPollingId = null;
+      }
+    }
   }
 }
 
