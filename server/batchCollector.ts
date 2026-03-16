@@ -1116,6 +1116,7 @@ export async function runDailyBatch(
 
   let processed = 0, updated = 0, errors = 0;
   const results: Array<{ keyword: string; reviewGrowth: number; salesEstimate: number; error?: string }> = [];
+  const successfulKeywords: string[] = []; // 크롤링 데이터가 있는 키워드만 추적
 
   for (const kw of batchKeywords) {
     try {
@@ -1127,6 +1128,7 @@ export async function runDailyBatch(
       }
 
       processed++;
+      successfulKeywords.push(kw.keyword);
 
       // ★ v9: ext_keyword_daily_stats에 per-product delta 기반 UPSERT
       // rebuildKeywordDailyStatsForKeyword가 MA, provisional 재보정, spike 탐지 모두 처리
@@ -1230,12 +1232,15 @@ export async function runDailyBatch(
     }
   }
 
-  // ★ v8.5: 일일 배치 완료 후 네이버 검색량 자동 수집 (미수집 키워드만)
-  try {
-    const synced = await syncNaverSearchVolume(userId, batchKeywords.map(k => k.keyword));
-    if (synced > 0) console.log(`[runDailyBatch] 네이버 검색량 ${synced}건 수집 완료`);
-  } catch (e: any) {
-    console.error(`[runDailyBatch] 네이버 검색량 수집 오류:`, e?.message);
+  // ★ v8.5.5: 크롤링 성공한 키워드만 네이버 검색량 수집 (전체 → 성공분만)
+  if (successfulKeywords.length > 0) {
+    try {
+      console.log(`[runDailyBatch] 네이버 검색량 수집 대상: ${successfulKeywords.length}/${batchKeywords.length}개 (크롤링 성공분만)`);
+      const synced = await syncNaverSearchVolume(userId, successfulKeywords);
+      if (synced > 0) console.log(`[runDailyBatch] 네이버 검색량 ${synced}건 수집 완료`);
+    } catch (e: any) {
+      console.error(`[runDailyBatch] 네이버 검색량 수집 오류:`, e?.message);
+    }
   }
 
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
