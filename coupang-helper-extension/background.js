@@ -790,21 +790,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'no_keyword' });
             return;
           }
-          // ★ v8.4.4: 검색량 조회 개선
-          // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출 + directVolume 반환)
+          // ★ v8.5.6: 배치 수집 중에는 fetchSearchVolume 스킵 (429 방지)
+          // 배치 완료 후 syncNaverSearchVolume에서 미수집분만 일괄 처리
           let naverFetchData = null;
           let naverNotFound = false;
-          try {
-            const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
-            naverFetchData = fetchResp?.result?.data;
-            naverNotFound = naverFetchData?.naverNotFound === true;
-          } catch (e) {
-            const errMsg = e.message || '';
-            if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
-              sendResponse({ ok: false, error: 'UNAUTHORIZED' });
-              return;
+          if (!collector.running) {
+            try {
+              const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
+              naverFetchData = fetchResp?.result?.data;
+              naverNotFound = naverFetchData?.naverNotFound === true;
+            } catch (e) {
+              const errMsg = e.message || '';
+              if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
+                sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+                return;
+              }
+              console.log('[SH] Naver 검색량 fetch 실패 (계속 진행):', errMsg);
             }
-            console.log('[SH] Naver 검색량 fetch 실패 (계속 진행):', errMsg);
           }
           // 2) 통합 마켓 데이터 조회
           const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
