@@ -1,5 +1,5 @@
 /* ============================================================
-   Coupang Sourcing Helper — Content Script v8.5.0
+   Coupang Sourcing Helper — Content Script (dynamic version)
    "시장 인사이트 대시보드" — 경쟁분석 + 배송유형 + 분포차트
 
    원칙:
@@ -49,7 +49,7 @@
    ============================================================ */
 (function () {
   'use strict';
-  const VER = '8.5.0';
+  const VER = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '8.5.4';
 
   if (window.__SH_LOADED__) return;
   window.__SH_LOADED__ = true;

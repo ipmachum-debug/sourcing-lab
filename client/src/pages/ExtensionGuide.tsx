@@ -13,7 +13,7 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.5.3";
+const EXTENSION_VERSION = "8.5.4";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "688KB";
 
@@ -834,9 +834,18 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
+                    version: "v8.5.4",
+                    date: "2026-03-16",
+                    badge: "Latest",
+                    changes: [
+                      "배치 키워드 중복 수집 방지 (3중 필터링)",
+                      "버전 표시 동적 로드 (manifest.json 기반)",
+                    ],
+                  },
+                  {
                     version: "v8.5.3",
                     date: "2026-03-15",
-                    badge: "Latest",
+                    badge: "",
                     changes: [
                       "🔧 사이드패널 모듈 분할: sidepanel.js 2680줄 → 6개 파일 (utils, analysis, demand, wing, tabs, main)",
                       "📊 사이드패널 탭 정리: 미사용 5개 탭 제거 → 6개 탭 (분석, 수집, WING, 이력, 마진, 서버)",
