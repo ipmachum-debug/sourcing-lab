@@ -86,7 +86,7 @@
       <!-- ═══════ 자동 수집 서브탭 ═══════ -->
       <div class="demand-subtab-content active" id="subtab-auto">
 
-        <!-- 배치 상태 카드 -->
+        <!-- 배치 상태 카드 (v8.6.3: 자동수집 버튼 통합, 항상 활성화) -->
         <div class="analysis-card" id="demandStatusCard">
           <div class="competition-header">
             <span class="competition-label">수집 상태</span>
@@ -101,7 +101,7 @@
             <div class="stat-box"><div class="stat-value" id="demandStatGrowth">-</div><div class="stat-label">성장 키워드</div></div>
           </div>
 
-          <!-- 실시간 수집 상태 표시 (v8.5.1) -->
+          <!-- 실시간 수집 상태 표시 (수집 중일 때만) -->
           <div id="liveBatchStatusPanel" style="display:none;margin-top:8px;padding:8px 10px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
               <span style="font-size:11px;font-weight:700;color:#0284c7">🔄 수집 진행 중</span>
@@ -120,9 +120,20 @@
             </div>
           </div>
 
-          <!-- 오늘의 배치 요약 (v8.5.1) -->
+          <!-- 오늘의 배치 요약 -->
           <div id="todayBatchSummary" style="display:none;margin-top:6px;padding:6px 10px;background:#f8fafc;border-radius:6px;font-size:10px;color:#64748b">
             <span>📅 오늘: <b id="todayBatchCount" style="color:#475569">0</b>/5 수집 완료 · <b id="todayValidKeywords" style="color:#16a34a">0</b>개 유효 수집</span>
+          </div>
+
+          <!-- v8.6.3: 자동수집 동작 버튼 (항상 카드 안에 표시) -->
+          <div id="autoCollectBtnArea" style="margin-top:8px">
+            <div id="autoCollectIdleButtons" style="display:flex;gap:4px">
+              <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1;padding:6px 0;font-size:12px;font-weight:600">▶ 자동 수집 시작</button>
+            </div>
+            <div id="autoCollectRunningButtons" style="display:none;gap:4px">
+              <button class="btn-sm" id="livePauseBtn" style="flex:1;background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:6px 0;font-size:11px;font-weight:600;cursor:pointer">⏸ 일시정지</button>
+              <button class="btn-sm" id="liveStopBtn" style="flex:1;background:#dc2626;color:#fff;border:none;border-radius:6px;padding:6px 0;font-size:11px;font-weight:600;cursor:pointer">⏹ 중단</button>
+            </div>
           </div>
 
           <div class="demand-last-run" id="demandLastRun" style="display:none">
@@ -130,31 +141,18 @@
           </div>
         </div>
 
-        <!-- 수집 컨트롤 -->
-        <div class="analysis-card demand-batch-controls" id="demandBatchControls" style="display:none">
-          <div class="demand-mode-row">
-            <label class="demand-radio"><input type="radio" name="batchMode" value="all" checked /> 전체 키워드</label>
-            <label class="demand-radio"><input type="radio" name="batchMode" value="selected" /> 선택한 키워드</label>
-            <label class="demand-radio" style="color:#dc2626"><input type="radio" name="batchMode" value="uncollected" /> 미수집 키워드 <span id="uncollectedBadge" style="background:#dc2626;color:#fff;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700;display:none">0</span></label>
+        <!-- hidden elements for JS compatibility (모드/상세/진행률 — JS 참조용) -->
+        <div id="demandBatchControls" style="display:none">
+          <input type="radio" name="batchMode" value="all" checked />
+          <input type="checkbox" id="autoCollectDetailCheck" />
+          <button id="pauseAutoCollectBtn"></button>
+          <button id="stopAutoCollectBtn"></button>
+          <div id="autoCollectProgress">
+            <div class="demand-progress-fill" id="autoCollectProgressFill"></div>
+            <span id="autoCollectProgressText"></span>
+            <div id="autoCollectLog"></div>
           </div>
-          <div class="demand-batch-size-row" style="flex-wrap:wrap;gap:6px">
-            <div style="font-size:10px;color:#64748b;width:100%;padding:4px 0;border-top:1px solid #e2e8f0;margin-top:2px">
-              📦 1수집 = 100개 · 하루 최대 5회(500개) · 수집 간 자동 쿨다운
-            </div>
-            <label class="filter-check" style="font-size:10px"><input type="checkbox" id="autoCollectDetailCheck" /> 상세 Top3</label>
-          </div>
-          <div style="display:flex;gap:4px;margin-top:6px">
-            <button class="btn-sm btn-primary-sm" id="startAutoCollectBtn" style="flex:1">▶ 시작</button>
-            <button class="btn-sm" id="pauseAutoCollectBtn" style="display:none;background:#f59e0b;color:#fff">⏸</button>
-            <button class="btn-sm" id="stopAutoCollectBtn" style="display:none;background:#dc2626;color:#fff">⏹</button>
-          </div>
-          <div id="autoCollectProgress" style="display:none;margin-top:8px">
-            <div class="demand-batch-progress" style="display:block">
-              <div class="demand-progress-fill" id="autoCollectProgressFill" style="width:0%"></div>
-              <span class="demand-progress-text" id="autoCollectProgressText">0/0</span>
-            </div>
-            <div id="autoCollectLog" style="margin-top:4px;font-size:9px;color:#64748b;max-height:80px;overflow-y:auto"></div>
-          </div>
+          <span id="uncollectedBadge" style="display:none">0</span>
         </div>
 
         <!-- 자동 수집 스케줄 -->

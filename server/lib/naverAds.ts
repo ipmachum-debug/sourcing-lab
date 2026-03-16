@@ -38,6 +38,17 @@ function getHeaders(method: string, uri: string) {
   };
 }
 
+/** ★ v8.6.1: 네이버 API가 "< 10" 같은 문자열을 반환할 수 있으므로 안전하게 숫자로 변환 */
+function naverToNum(val: unknown): number {
+  if (typeof val === "number") return val;
+  if (typeof val === "string") {
+    if (val.includes("<")) return 5; // "< 10" → 5 (추정치)
+    const n = parseInt(val, 10);
+    return isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+
 export interface NaverKeywordResult {
   relKeyword: string;
   monthlyPcQcCnt: number;
@@ -80,23 +91,46 @@ export async function getNaverKeywords(
     showDetail: "1",
   });
 
-  const res = await fetch(`${BASE_URL}${uri}?${params}`, {
-    method,
-    headers,
-  });
+  // ★ v8.6.1: 429 레이트 리밋 자동 재시도 (최대 3회, 지수 백오프)
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // 재시도 시 타임스탬프/서명 갱신 필요
+    const retryHeaders = attempt === 0 ? headers : getHeaders(method, uri);
+    res = await fetch(`${BASE_URL}${uri}?${params}`, {
+      method,
+      headers: retryHeaders,
+    });
+    if (res.status === 429) {
+      const waitSec = Math.pow(2, attempt + 1) * 5; // 10s, 20s, 40s
+      console.log(`[naverAds] 429 레이트 리밋 — ${waitSec}초 대기 후 재시도 (${attempt + 1}/3)`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+      continue;
+    }
+    break;
+  }
 
-  if (!res.ok) {
+  if (!res || !res.ok) {
     // ★ v8.4.4: 400 에러는 키워드가 네이버에 없는 경우 → 빈 배열 반환 (throw 대신)
-    if (res.status === 400) {
+    if (res?.status === 400) {
       console.log(`[naverAds] 네이버 API 400: 키워드 미등록 — ${cleanedKeywords.join(", ")}`);
       return [];
     }
-    const text = await res.text();
-    throw new Error(`네이버 API 오류: ${res.status} ${text}`);
+    const text = res ? await res.text() : "no response";
+    throw new Error(`네이버 API 오류: ${res?.status} ${text}`);
   }
 
   const data = await res.json();
-  return (data.keywordList || []) as NaverKeywordResult[];
+  // ★ v8.6.1: "< 10" 문자열 → 숫자 변환 (네이버 API가 저검색량 키워드에 문자열 반환)
+  const list = (data.keywordList || []) as NaverKeywordResult[];
+  for (const item of list) {
+    item.monthlyPcQcCnt = naverToNum(item.monthlyPcQcCnt);
+    item.monthlyMobileQcCnt = naverToNum(item.monthlyMobileQcCnt);
+    if (item.monthlyAvgPcClkCnt !== undefined) item.monthlyAvgPcClkCnt = naverToNum(item.monthlyAvgPcClkCnt);
+    if (item.monthlyAvgMobileClkCnt !== undefined) item.monthlyAvgMobileClkCnt = naverToNum(item.monthlyAvgMobileClkCnt);
+    if (item.monthlyAvgPcQcCnt !== undefined) item.monthlyAvgPcQcCnt = naverToNum(item.monthlyAvgPcQcCnt);
+    if (item.monthlyAvgMobileQcCnt !== undefined) item.monthlyAvgMobileQcCnt = naverToNum(item.monthlyAvgMobileQcCnt);
+  }
+  return list;
 }
 
 /**

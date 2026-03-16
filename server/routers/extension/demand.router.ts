@@ -160,15 +160,24 @@ export const demandRouter = router({
         console.error("[listKeywordStats] search volume query failed:", e);
       }
 
+      // ★ v8.6: 공백 제거 폴백 매핑 (키워드 변형 매칭)
+      // ext_watch_keywords: "실리콘 샴푸 브러시" vs SV: "실리콘샴푸브러시"
+      const svNospaceMap = new Map<string, number>();
+      for (const [kw, val] of svMap) {
+        svNospaceMap.set(kw.replace(/\s+/g, "").toLowerCase(), val);
+      }
+
       // 핀 상태 + 검색량 합치기
       const enriched = rows.map((r: any) => {
         const pin = pinMap.get(r.query);
+        // 1차: 정확 매칭, 2차: 공백 제거 폴백
+        const sv = svMap.get(r.query) ?? svNospaceMap.get(r.query.replace(/\s+/g, "").toLowerCase()) ?? null;
         return {
           ...r,
           isPinned: pin ? !!pin.isPinned : false,
           pinOrder: pin ? Number(pin.pinOrder) || 0 : 0,
           watchId: pin?.watchId || null,
-          monthlySearchVolume: svMap.get(r.query) ?? null,
+          monthlySearchVolume: sv,
         };
       });
 
