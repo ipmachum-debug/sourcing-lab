@@ -64,13 +64,23 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
     console.log('[Discovery] 폴링 알람 재생성');
   }
-  // v8.6: 예약 수집 알람 보장
-  const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
-  if (scheduleEnabled) {
+  // v8.6: 예약 수집 알람 보장 + 경과 시간 기반 즉시 실행
+  const schedData = await chrome.storage.local.get(['scheduleEnabled', 'scheduleLastRun']);
+  if (schedData.scheduleEnabled) {
     const schedAlarm = await chrome.alarms.get('scheduledAutoCollect').catch(() => null);
     if (!schedAlarm) {
-      chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-      console.log('[Schedule] 예약 수집 알람 재생성');
+      const lastRun = schedData.scheduleLastRun ? new Date(schedData.scheduleLastRun).getTime() : 0;
+      const elapsed = Date.now() - lastRun;
+      const intervalMs = 120 * 60 * 1000;
+      if (elapsed >= intervalMs) {
+        chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+        console.log('[Schedule] 알람 재생성 — 즉시 실행');
+        setTimeout(() => runScheduledAutoCollect(), 5000);
+      } else {
+        const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
+        chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
+        console.log('[Schedule] 알람 재생성 — ' + remainMin + '분 후');
+      }
     }
   }
   // 10초 후 즉시 체크
@@ -930,8 +940,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const newVal = !scheduleEnabled;
         await chrome.storage.local.set({ scheduleEnabled: newVal });
         if (newVal) {
-          chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-          console.log('[Schedule] 예약 수집 활성화 — 2시간 주기');
+          // 마지막 수집으로부터 경과 시간 계산
+          const { scheduleLastRun } = await chrome.storage.local.get('scheduleLastRun');
+          const lastRun = scheduleLastRun ? new Date(scheduleLastRun).getTime() : 0;
+          const elapsed = Date.now() - lastRun;
+          const intervalMs = 120 * 60 * 1000; // 2시간
+          if (elapsed >= intervalMs) {
+            // 이미 2시간 지남 → 즉시 실행 + 이후 2시간 주기
+            chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+            console.log('[Schedule] 예약 활성화 — 마지막 수집 ' + Math.round(elapsed / 60000) + '분 전 → 즉시 실행');
+            setTimeout(() => runScheduledAutoCollect(), 3000);
+          } else {
+            // 아직 2시간 안됨 → 남은 시간 후 첫 실행
+            const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
+            chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
+            console.log('[Schedule] 예약 활성화 — ' + remainMin + '분 후 첫 수집');
+          }
         } else {
           chrome.alarms.clear('scheduledAutoCollect');
           console.log('[Schedule] 예약 수집 비활성화');
