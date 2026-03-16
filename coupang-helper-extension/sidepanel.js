@@ -91,3 +91,10 @@ chrome.runtime.onMessage.addListener(async (message) => {
 // 초기 로드
 refreshFromCurrentTab();
 checkServerAuth();
+
+// 버전 표시 (manifest.json에서 동적 로드)
+try {
+  const ver = chrome.runtime.getManifest().version;
+  const el = document.querySelector('#extVersion');
+  if (el) el.textContent = 'v' + ver;
+} catch (_) {}

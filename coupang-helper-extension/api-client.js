@@ -257,11 +257,6 @@ class ApiClient {
     return this._call('extension.resetNextCollectForKeywords', data, 'mutation');
   }
 
-  // v8.6: 전체 활성 키워드 네이버 검색량 일괄 갱신
-  async syncAllNaverSearchVolume() {
-    return this._call('extension.syncAllNaverSearchVolume', {}, 'mutation');
-  }
-
   // ===== v6.5: 상세 페이지 확장 파싱 데이터 =====
   async saveDetailSnapshot(data) {
     return this._call('extension.saveDetailSnapshot', data, 'mutation');

@@ -16,7 +16,6 @@ import {
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
   syncWatchKeywordsToMaster, advanceBatchState,
-  syncNaverSearchVolume,
 } from "../../batchCollector";
 import { autoComputeKeywordDailyStat, autoMatchTrackedProducts } from "./_autoHelpers";
 
@@ -196,11 +195,6 @@ export const watchRouter = router({
       // 이전에는 수동 "통계 계산" 버튼을 눌러야만 업데이트되었음 → 이제 자동
       autoComputeKeywordDailyStat(userId, input.keyword, db).catch((err) => {
         console.error("[saveSearchEvent] daily stats (dashboard) error:", err);
-      });
-
-      // 6. ★ v8.6: 키워드 등록/수집 시 네이버 검색량 자동 수집 (미수집 키워드만)
-      syncNaverSearchVolume(userId, [input.keyword]).catch((err) => {
-        console.error("[saveSearchEvent] naver search volume sync error:", err);
       });
 
       return { success: true, eventId: result.insertId };
@@ -828,13 +822,6 @@ export const watchRouter = router({
         console.log(`[autoCollectComplete] 수동 수집 — 배치 카운트 증가 생략 (성공: ${input.successCount})`);
       }
 
-      // 6. ★ v8.6: 수집 완료된 키워드에 대해 네이버 검색량 자동 수집 (미수집 키워드만)
-      if (input.keywords && input.keywords.length > 0) {
-        syncNaverSearchVolume(userId, input.keywords).catch(err =>
-          console.error("[autoCollectComplete] 네이버 검색량 수집 오류:", err.message)
-        );
-      }
-
       console.log(`[autoCollectComplete] 완료: batch=${batchResult.updated}, stats=${statsOk}, err=${statsErr}, synced=${syncCount}, nicheSynced=${nicheSync.synced}, nicheMetrics=${nicheSync.metricsCreated}`);
       return { success: true, batchUpdated: batchResult.updated, statsComputed: statsOk, statsErrors: statsErr, totalKeywords: allKws.length, keywordsSynced: syncCount, nicheSynced: nicheSync.synced, nicheMetricsCreated: nicheSync.metricsCreated };
     }),
@@ -998,34 +985,5 @@ export const watchRouter = router({
         newKeywordCount: N(newStats?.newCount),
         overdueCount: N(overdueStats?.overdueCount),
       };
-    }),
-
-  // ★ v8.6: 전체 활성 키워드 네이버 검색량 일괄 갱신 (매주 자동 또는 수동 호출)
-  syncAllNaverSearchVolume: protectedProcedure
-    .mutation(async ({ ctx }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
-      const userId = ctx.user!.id;
-
-      // 전체 활성 키워드 조회
-      const allKws = await db.select({ keyword: extWatchKeywords.keyword })
-        .from(extWatchKeywords)
-        .where(and(
-          eq(extWatchKeywords.userId, userId),
-          eq(extWatchKeywords.isActive, true),
-        ));
-
-      if (allKws.length === 0) return { success: true, synced: 0, total: 0 };
-
-      const keywords = allKws.map(k => k.keyword);
-      let synced = 0;
-      try {
-        synced = await syncNaverSearchVolume(userId, keywords);
-      } catch (err: any) {
-        console.error("[syncAllNaverSearchVolume] 오류:", err.message);
-      }
-
-      console.log(`[syncAllNaverSearchVolume] 완료: ${synced}/${keywords.length}개 수집`);
-      return { success: true, synced, total: keywords.length };
     }),
 });

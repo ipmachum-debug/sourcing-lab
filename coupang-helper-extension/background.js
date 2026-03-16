@@ -39,8 +39,6 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
   // v8.6: 예약 자동수집 알람 (매 2시간마다)
   chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-  // v8.6: 매주 네이버 검색량 전체 갱신 (7일 = 10080분)
-  chrome.alarms.create('weeklyNaverSearchVolume', { periodInMinutes: 10080 });
   // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
 
@@ -119,17 +117,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // v8.6: 예약 자동수집 (2시간마다)
   if (alarm.name === 'scheduledAutoCollect') {
     await runScheduledAutoCollect();
-  }
-  // v8.6: 매주 네이버 검색량 전체 갱신
-  if (alarm.name === 'weeklyNaverSearchVolume') {
-    try {
-      const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
-      if (!serverLoggedIn) { console.log('[WeeklyNaver] 서버 미로그인 — 스킵'); return; }
-      const resp = await apiClient.syncAllNaverSearchVolume();
-      console.log('[WeeklyNaver] 전체 검색량 갱신 완료:', resp?.result?.data);
-    } catch (e) {
-      console.error('[WeeklyNaver] 오류:', e.message);
-    }
   }
 });
 
