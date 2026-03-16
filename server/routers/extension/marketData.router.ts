@@ -33,33 +33,85 @@ export const marketDataRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      // ★ v8.4.4: 원본 키워드 보존 (공백 포함 가능)
       const originalKeywords = input.keywords;
 
-      // 네이버 API 호출 (naverAds.ts에서 공백 자동 제거 + 400 에러 처리)
+      // 현재 월 YYYY-MM (KST)
+      const now = new Date();
+      now.setHours(now.getHours() + 9);
+      const yearMonth = now.toISOString().slice(0, 7);
+
+      // ★ v8.5.6: 이번 달 이미 수집된 키워드는 DB에서 반환 (네이버 API 호출 스킵)
+      const existing = await db.select({
+        keyword: keywordSearchVolumeHistory.keyword,
+        totalSearch: keywordSearchVolumeHistory.totalSearch,
+        pcSearch: keywordSearchVolumeHistory.pcSearch,
+        mobileSearch: keywordSearchVolumeHistory.mobileSearch,
+        competitionIndex: keywordSearchVolumeHistory.competitionIndex,
+      })
+        .from(keywordSearchVolumeHistory)
+        .where(and(
+          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+          eq(keywordSearchVolumeHistory.source, "naver"),
+          eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
+        ));
+
+      const existingMap = new Map<string, typeof existing[0]>();
+      for (const row of existing) {
+        existingMap.set(row.keyword.replace(/\s+/g, "").toLowerCase(), row);
+      }
+
+      // 이미 수집된 키워드인지 확인
+      const mainKw = originalKeywords[0];
+      const mainClean = mainKw?.replace(/\s+/g, "").toLowerCase() || "";
+      const cached = existingMap.get(mainClean);
+
+      if (cached) {
+        // DB에 이번 달 데이터가 있으면 API 호출 없이 즉시 반환
+        return {
+          success: true,
+          saved: 0,
+          yearMonth,
+          totalResults: 1,
+          naverNotFound: false,
+          fromCache: true,
+          directVolume: {
+            keyword: mainKw,
+            pcSearch: Number(cached.pcSearch ?? 0),
+            mobileSearch: Number(cached.mobileSearch ?? 0),
+            totalSearch: Number(cached.totalSearch ?? 0),
+            competitionIndex: cached.competitionIndex || "낮음",
+          },
+        };
+      }
+
+      // 미수집 키워드만 네이버 API 호출
       let naverResults;
       try {
         naverResults = await getNaverKeywords(originalKeywords);
       } catch (err: any) {
+        // ★ v8.5.6: 429 에러는 조용히 처리 — 다음 배치에서 syncNaverSearchVolume이 수집
+        const errMsg = err?.message || "";
+        if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
+          console.warn(`[fetchSearchVolume] 429 — "${mainKw}" 스킵 (배치에서 재수집)`);
+          return {
+            success: true,
+            saved: 0,
+            yearMonth,
+            totalResults: 0,
+            naverNotFound: false,
+            rateLimited: true,
+            directVolume: null,
+          };
+        }
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: `네이버 API 오류: ${err.message}`,
         });
       }
 
-      // ★ v8.4.4: 네이버 API가 빈 결과를 반환해도 에러가 아님 (키워드 미등록)
-      // naverNotFound 플래그로 확장 프로그램에 알림
       const naverNotFound = naverResults.length === 0;
-
-      // 현재 월 YYYY-MM
-      const now = new Date();
-      now.setHours(now.getHours() + 9);
-      const yearMonth = now.toISOString().slice(0, 7);
-
       let saved = 0;
 
-      // ★ v8.4.4: 원본 키워드에 해당하는 결과를 정확히 매칭하기 위한 맵
-      // 원본 키워드(공백 제거 후 소문자) → 원본 키워드 (DB 저장 시 원본 키워드로 저장)
       const keywordLookup = new Map<string, string>();
       for (const kw of originalKeywords) {
         keywordLookup.set(kw.replace(/\s+/g, "").toLowerCase(), kw);
@@ -79,7 +131,6 @@ export const marketDataRouter = router({
           ),
         };
 
-        // UPSERT: relKeyword로 저장 (네이버 반환 키워드)
         await db.insert(keywordSearchVolumeHistory).values({
           userId: ctx.user!.id,
           keyword: r.relKeyword,
@@ -89,8 +140,6 @@ export const marketDataRouter = router({
         }).onDuplicateKeyUpdate({ set: upsertValues });
         saved++;
 
-        // ★ v8.4.4: 원본 키워드에 공백이 있었다면 원본 키워드로도 저장
-        // (예: "현금 파우치" → DB에 "현금 파우치"로도 저장, 네이버 반환은 "현금파우치")
         const relClean = r.relKeyword.replace(/\s+/g, "").toLowerCase();
         const originalKw = keywordLookup.get(relClean);
         if (originalKw && originalKw !== r.relKeyword) {
@@ -110,7 +159,6 @@ export const marketDataRouter = router({
         yearMonth,
         totalResults: naverResults.length,
         naverNotFound,
-        // ★ v8.4.4: 원본 키워드의 검색량을 직접 전달 (DB timing 이슈 우회)
         directVolume: naverResults.length > 0 ? (() => {
           const inputClean = originalKeywords[0]?.replace(/\s+/g, "").toLowerCase();
           const matched = naverResults.find(r =>
