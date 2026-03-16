@@ -853,6 +853,7 @@ var manualFilteredKeywords = [];
 var manualSelectedIds = new Set();
 var manualChosungFilter = '전체';
 var manualSearchText = '';
+var manualShowUncollectedOnly = false;
 var manualPage = 1;
 var MANUAL_PER_PAGE = 50;
 
@@ -969,6 +970,13 @@ function updateChosungCounts() {
 function filterManualKeywords() {
   var filtered = manualAllKeywords;
 
+  // 미수집만 필터
+  if (manualShowUncollectedOnly) {
+    filtered = filtered.filter(function(kw) {
+      return !kw.lastSearchedAt;
+    });
+  }
+
   // 초성 필터
   if (manualChosungFilter !== '전체') {
     filtered = filtered.filter(function(kw) {
@@ -1075,6 +1083,17 @@ document.querySelector('#chosungFilter').addEventListener('click', function(e) {
   filterManualKeywords();
 });
 
+// 미수집만 필터 체크박스
+(function() {
+  var ucCheck = document.querySelector('#manualShowUncollectedOnly');
+  if (ucCheck) {
+    ucCheck.addEventListener('change', function(e) {
+      manualShowUncollectedOnly = e.target.checked;
+      filterManualKeywords();
+    });
+  }
+})();
+
 // 검색 입력
 document.querySelector('#manualKwSearch').addEventListener('input', function(e) {
   manualSearchText = e.target.value;
@@ -1105,7 +1124,7 @@ document.querySelector('#manualCollectBtn').addEventListener('click', async func
 
   var selectedKws = manualAllKeywords.filter(function(kw) { return manualSelectedIds.has(kw.id); });
   var keywordList = selectedKws.map(function(kw) { return kw.keyword; });
-  var collectDetail = document.querySelector('#manualCollectDetailCheck').checked;
+  var collectDetail = false; // v8.6.3: 상세 Top3 제거
   var estMin = Math.ceil(keywordList.length * 20 / 60);
 
   if (!confirm('선택한 ' + keywordList.length + '개 키워드를 수집합니다.\n⏱️ 예상: 약 ' + estMin + '분\n\n계속하시겠습니까?')) return;
