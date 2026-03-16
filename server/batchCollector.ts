@@ -1278,7 +1278,10 @@ export async function syncNaverSearchVolume(
   let failCount = 0;
 
   // ★ 1개씩 개별 호출 (5개 배치 시 1개라도 유효하지 않으면 전체 실패하는 문제 해결)
+  let rateLimitHit = false;
   for (let i = 0; i < missing.length; i++) {
+    if (rateLimitHit) break; // 429 발생 시 나머지 키워드 스킵 (다음 배치에서 처리)
+
     const kw = missing[i];
     try {
       const results = await getNaverKeywords([kw]);
@@ -1322,13 +1325,20 @@ export async function syncNaverSearchVolume(
         }
       }
 
-      // API 레이트 리밋 방지: 5건마다 1초 대기
-      if ((i + 1) % 5 === 0 && i + 1 < missing.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      // API 레이트 리밋 방지: 3건마다 2초 대기 (네이버 429 방지)
+      if ((i + 1) % 3 === 0 && i + 1 < missing.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     } catch (e: any) {
       failCount++;
-      console.error(`[syncNaverSearchVolume] "${kw}" 실패:`, e?.message);
+      const errMsg = e?.message || "";
+      // 429 Too Many Requests → 즉시 중단 (다음 배치에서 미수집 키워드 자동 재시도)
+      if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
+        console.warn(`[syncNaverSearchVolume] 429 레이트 리밋 — ${i + 1}/${missing.length}번째에서 중단 (성공: ${totalSaved})`);
+        rateLimitHit = true;
+      } else {
+        console.error(`[syncNaverSearchVolume] "${kw}" 실패:`, errMsg);
+      }
     }
   }
 
