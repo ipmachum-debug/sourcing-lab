@@ -456,8 +456,13 @@ export async function selectBatchKeywords(
 
   // 회차 간 최소 간격 체크
   if (lastBatchCompletedAt) {
-    const lastBatch = new Date(lastBatchCompletedAt);
-    const hoursSinceLast = (now.getTime() - lastBatch.getTime()) / (3600 * 1000);
+    // lastBatchCompletedAt은 KST 문자열로 저장됨 (toMySQLTimestamp(nowKST()))
+    // now도 nowKST()이므로 동일 기준이지만, JS Date()가 UTC로 해석하므로
+    // 직접 문자열→Date 변환 시 둘 다 같은 방식으로 해석되어야 함
+    // 해결: now 대신 현재 시각을 동일하게 toMySQLTimestamp로 변환 후 비교
+    const lastBatchMs = new Date(lastBatchCompletedAt as string).getTime();
+    const nowMs = new Date(nowStr).getTime(); // nowStr = toMySQLTimestamp(nowKST())
+    const hoursSinceLast = (nowMs - lastBatchMs) / (3600 * 1000);
     if (hoursSinceLast < MIN_ROUND_INTERVAL_HOURS) {
       return {
         ...emptyResult,
