@@ -93,12 +93,11 @@ async function loadDemandDashboard() {
   try {
     var ucResp = await sendMsg({ type: 'HYBRID_GET_UNCOLLECTED_KEYWORDS' });
     var ucBadge = document.querySelector('#uncollectedBadge');
+    var ucInfo = document.querySelector('#uncollectedInfo');
     if (ucResp && ucResp.ok && ucResp.data) {
       var ucCount = ucResp.data.uncollectedCount || 0;
-      if (ucBadge) {
-        ucBadge.textContent = ucCount;
-        ucBadge.style.display = ucCount > 0 ? 'inline' : 'none';
-      }
+      if (ucBadge) ucBadge.textContent = ucCount;
+      if (ucInfo) ucInfo.style.display = ucCount > 0 ? '' : 'none';
     }
   } catch (e) { console.error('[Demand] uncollected badge:', e); }
 
@@ -462,10 +461,6 @@ function updateAutoCollectUI(state) {
   const startBtn = document.querySelector('#startAutoCollectBtn');
   const pauseBtn = document.querySelector('#pauseAutoCollectBtn');
   const stopBtn = document.querySelector('#stopAutoCollectBtn');
-  const progressDiv = document.querySelector('#autoCollectProgress');
-  const progressFill = document.querySelector('#autoCollectProgressFill');
-  const progressText = document.querySelector('#autoCollectProgressText');
-  const logDiv = document.querySelector('#autoCollectLog');
 
   if (!badge) return;
 
@@ -489,64 +484,16 @@ function updateAutoCollectUI(state) {
     startBtn.style.display = 'none';
     pauseBtn.style.display = '';
     stopBtn.style.display = '';
-    progressDiv.style.display = '';
   } else if (state.paused) {
     startBtn.textContent = '▶ 재개';
     startBtn.style.display = '';
     pauseBtn.style.display = 'none';
     stopBtn.style.display = '';
-    progressDiv.style.display = '';
   } else {
     startBtn.textContent = '▶ 자동 수집 시작';
     startBtn.style.display = '';
     pauseBtn.style.display = 'none';
     stopBtn.style.display = 'none';
-    if (!state.successCount && !state.failCount) progressDiv.style.display = 'none';
-  }
-
-  // 진행률
-  if (progressFill && progressText) {
-    progressFill.style.width = state.progress + '%';
-    var kw = state.currentKeyword ? ' "' + state.currentKeyword + '"' : '';
-    progressText.textContent = (state.successCount + state.failCount + state.skipCount) + '/' + state.totalQueued + kw;
-  }
-
-  // 로그
-  if (logDiv) {
-    var html = '';
-    if (state.running || state.paused) {
-      html += '<div>성공: <b style="color:#16a34a">' + state.successCount + '</b> · ';
-      html += '실패: <b style="color:#dc2626">' + state.failCount + '</b> · ';
-      html += '대기: ' + state.queueLength + '개</div>';
-      if (state.currentKeyword) {
-        html += '<div>현재: "' + escHtml(state.currentKeyword) + '" (' + st.text + ')</div>';
-      } else if (state.status === 'WAITING_NEXT' && state.queueLength > 0) {
-        html += '<div style="color:#6366f1">⏳ 다음 키워드 대기중... (' + state.queueLength + '개 남음)</div>';
-      }
-      if (state.lastError) {
-        // v7.2.2: error code to user-friendly text
-        var errCodeMap = {
-          'ALL_STRATEGIES_FAILED': '수집 전략 실패 (공 재시도)',
-          'FETCH_EXCEPTION': '네트워크 오류 (공 재시도)',
-          'PARSE_EXCEPTION': '파싱 오류 (공 재시도)',
-          'EMPTY_RESULT': '결과 없음 (공 재시도)',
-          'ACCESS_BLOCKED': '쿠팡 접근 차단 (장시간 대기)',
-          'NETWORK_ERROR': '네트워크 연결 오류',
-          'TIMEOUT': '요청 시간 초과',
-          'TAB_ERROR': '탭 오류 (재생성 중)',
-          'RUNTIME_ERROR': '런타임 오류',
-          'UNKNOWN': '알 수 없는 오류'
-        };
-        var errParts = state.lastError.split(': ');
-        var errKw = errParts[0] || '';
-        var errCode = errParts.slice(1).join(': ') || state.lastError;
-        var friendlyErr = errCodeMap[errCode] || errCode;
-        html += '<div style="color:#f59e0b;font-size:9px">⚠️ ' + escHtml(errKw) + ': ' + friendlyErr + '</div>';
-      }
-    } else if (state.status === 'IDLE' && (state.successCount > 0 || state.failCount > 0)) {
-      html += '<div>✅ 수집 완료 — 성공: ' + state.successCount + ', 실패: ' + state.failCount + '</div>';
-    }
-    logDiv.innerHTML = html;
   }
 }
 
@@ -573,9 +520,8 @@ function stopAutoCollectPolling() {
 //   - 서버 적응형 스케줄러 기반 키워드 선별
 //   - 수집 간 쿨다운 자동 적용
 document.querySelector('#startAutoCollectBtn').addEventListener('click', async function() {
-  var collectDetail = document.querySelector('#autoCollectDetailCheck').checked;
-  var mode = document.querySelector('input[name="batchMode"]:checked');
-  mode = mode ? mode.value : 'all';
+  var collectDetail = false; // 상세 Top3 수집 제거됨
+  var mode = 'all'; // 수동 선택 모드 제거됨, 항상 서버 적응형 스케줄러 사용
 
   // ── v8.5.3: 서버 적응형 스케줄러에서 배치 정보를 가져옴 ──
   var serverBatch = null;
@@ -725,7 +671,6 @@ document.querySelector('#startAutoCollectBtn').addEventListener('click', async f
   });
   if (resp && resp.ok) {
     batchRunning = true;
-    document.querySelector('#autoCollectProgress').style.display = '';
     updateAutoCollectUI({
       status: 'RUNNING', running: true, paused: false,
       queueLength: resp.queueLength || batchKeywords.length, currentKeyword: null,
@@ -967,6 +912,19 @@ function updateChosungCounts() {
 function filterManualKeywords() {
   var filtered = manualAllKeywords;
 
+  // 미수집만 필터
+  var uncollectedOnly = document.querySelector('#manualUncollectedOnly');
+  if (uncollectedOnly && uncollectedOnly.checked) {
+    var todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    filtered = filtered.filter(function(kw) {
+      // lastCollectedAt 또는 lastSearchedAt 기준으로 오늘 수집 여부 판단
+      var collectedAt = kw.lastCollectedAt || kw.lastSearchedAt;
+      if (!collectedAt) return true; // 한번도 수집 안됨
+      return new Date(collectedAt) < todayStart; // 오늘 이전에 수집된 것만
+    });
+  }
+
   // 초성 필터
   if (manualChosungFilter !== '전체') {
     filtered = filtered.filter(function(kw) {
@@ -1003,8 +961,11 @@ function renderManualKeywords() {
 
   if (pageItems.length === 0) {
     document.querySelector('#manualEmpty').style.display = '';
-    document.querySelector('#manualEmpty').textContent = manualSearchText || manualChosungFilter !== '전체'
-      ? '검색 결과가 없습니다.' : '감시 키워드가 없습니다.';
+    var ucCb = document.querySelector('#manualUncollectedOnly');
+    var hasFilter = manualSearchText || manualChosungFilter !== '전체' || (ucCb && ucCb.checked);
+    document.querySelector('#manualEmpty').textContent = hasFilter
+      ? (ucCb && ucCb.checked ? '미수집 키워드가 없습니다. (모두 수집 완료)' : '검색 결과가 없습니다.')
+      : '감시 키워드가 없습니다.';
     document.querySelector('#manualPagination').style.display = 'none';
     updateManualSelectedCount();
     return;
@@ -1079,6 +1040,12 @@ document.querySelector('#manualKwSearch').addEventListener('input', function(e) 
   filterManualKeywords();
 });
 
+// 미수집만 필터 체크박스
+(function() {
+  var cb = document.querySelector('#manualUncollectedOnly');
+  if (cb) cb.addEventListener('change', function() { filterManualKeywords(); });
+})();
+
 // 새로고침
 document.querySelector('#manualKwRefreshBtn').addEventListener('click', function() {
   manualSelectedIds.clear();
@@ -1103,7 +1070,7 @@ document.querySelector('#manualCollectBtn').addEventListener('click', async func
 
   var selectedKws = manualAllKeywords.filter(function(kw) { return manualSelectedIds.has(kw.id); });
   var keywordList = selectedKws.map(function(kw) { return kw.keyword; });
-  var collectDetail = document.querySelector('#manualCollectDetailCheck').checked;
+  var collectDetail = false; // 상세 Top3 수집 제거됨
   var estMin = Math.ceil(keywordList.length * 20 / 60);
 
   if (!confirm('선택한 ' + keywordList.length + '개 키워드를 수집합니다.\n⏱️ 예상: 약 ' + estMin + '분\n\n계속하시겠습니까?')) return;
