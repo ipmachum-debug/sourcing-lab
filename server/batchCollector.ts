@@ -1230,9 +1230,9 @@ export async function runDailyBatch(
     }
   }
 
-  // ★ v8.5: 일일 배치 완료 후 네이버 검색량 자동 수집 (미수집 키워드만)
+  // ★ v8.5.6: 크롤링 데이터는 있지만 검색량 미수집 키워드만 네이버 API 요청
   try {
-    const synced = await syncNaverSearchVolume(userId, batchKeywords.map(k => k.keyword));
+    const synced = await syncNaverSearchVolume(userId);
     if (synced > 0) console.log(`[runDailyBatch] 네이버 검색량 ${synced}건 수집 완료`);
   } catch (e: any) {
     console.error(`[runDailyBatch] 네이버 검색량 수집 오류:`, e?.message);
@@ -1242,25 +1242,37 @@ export async function runDailyBatch(
 }
 
 // ============================================================
-//  v8.5: 네이버 검색량 일괄 수집 (미수집 키워드만)
+//  v8.5.6: 네이버 검색량 수집 — 크롤링 완료 + 검색량 미수집 키워드만
 // ============================================================
 
 /**
- * 활성 키워드 중 이번 달 검색량이 아직 없는 키워드를 네이버 API로 수집.
- * 네이버 API는 요청당 최대 5개 키워드이므로 5개씩 배치 처리.
- * 월 1회 수집 (같은 yearMonth면 스킵).
+ * 크롤링 데이터(ext_keyword_daily_stats)는 있지만 이번 달 네이버 검색량이
+ * 아직 없는 키워드만 찾아서 네이버 API로 수집.
+ * - 전체 키워드를 보내지 않고 DB 조인으로 미수집분만 추출
+ * - 월 1회 수집 (같은 yearMonth면 스킵)
+ * - 1회 최대 30개로 제한 (API 레이트 리밋 방지)
  */
 export async function syncNaverSearchVolume(
   userId: number,
-  keywords: string[],
 ): Promise<number> {
   const db = await getDb();
-  if (!db || keywords.length === 0) return 0;
+  if (!db) return 0;
 
   const now = nowKST();
+  const todayStr = now.toISOString().slice(0, 10);
   const yearMonth = now.toISOString().slice(0, 7); // YYYY-MM
 
-  // 이번 달에 이미 수집된 키워드 조회
+  // 1) 오늘 크롤링 데이터가 있는 키워드 (ext_keyword_daily_stats에 오늘 날짜 존재)
+  const crawledToday = await db.selectDistinct({ keyword: extKeywordDailyStats.query })
+    .from(extKeywordDailyStats)
+    .where(and(
+      eq(extKeywordDailyStats.userId, userId),
+      eq(extKeywordDailyStats.statDate, todayStr),
+    ));
+  const crawledSet = new Set(crawledToday.map(r => r.keyword));
+  if (crawledSet.size === 0) return 0;
+
+  // 2) 이번 달에 이미 검색량 수집된 키워드
   const existing = await db.select({ keyword: keywordSearchVolumeHistory.keyword })
     .from(keywordSearchVolumeHistory)
     .where(and(
@@ -1270,9 +1282,13 @@ export async function syncNaverSearchVolume(
     ));
   const existingSet = new Set(existing.map(r => r.keyword));
 
-  // 미수집 키워드만 필터
-  const missing = keywords.filter(kw => !existingSet.has(kw));
+  // 3) 크롤링 완료 + 검색량 미수집 = 실제 네이버 API 호출 대상
+  const missing = Array.from(crawledSet).filter(kw => !existingSet.has(kw));
   if (missing.length === 0) return 0;
+
+  // 1회 최대 30개 제한 (429 방지)
+  const batch = missing.slice(0, 30);
+  console.log(`[syncNaverSearchVolume] 대상: ${batch.length}개 (크롤링 ${crawledSet.size}, 이미수집 ${existingSet.size}, 미수집 ${missing.length})`);
 
   let totalSaved = 0;
   let failCount = 0;
@@ -1280,7 +1296,7 @@ export async function syncNaverSearchVolume(
   // ★ 1개씩 개별 호출 — 429 발생 시 즉시 중단, 다음 배치에서 자동 재시도
   let rateLimitHit = false;
   let consecutiveRateLimits = 0;
-  for (let i = 0; i < missing.length; i++) {
+  for (let i = 0; i < batch.length; i++) {
     if (rateLimitHit) break;
 
     const kw = missing[i];
@@ -1338,7 +1354,7 @@ export async function syncNaverSearchVolume(
       if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
         consecutiveRateLimits++;
         if (consecutiveRateLimits >= 3) {
-          console.warn(`[syncNaverSearchVolume] 429 연속 ${consecutiveRateLimits}회 — ${i + 1}/${missing.length}번째에서 중단 (성공: ${totalSaved})`);
+          console.warn(`[syncNaverSearchVolume] 429 연속 ${consecutiveRateLimits}회 — ${i + 1}/${batch.length}번째에서 중단 (성공: ${totalSaved})`);
           rateLimitHit = true;
         } else {
           // 지수 백오프: 5초, 15초
