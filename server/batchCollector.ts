@@ -1279,12 +1279,14 @@ export async function syncNaverSearchVolume(
 
   // ★ 1개씩 개별 호출 (5개 배치 시 1개라도 유효하지 않으면 전체 실패하는 문제 해결)
   let rateLimitHit = false;
+  let consecutiveRateLimits = 0;
   for (let i = 0; i < missing.length; i++) {
-    if (rateLimitHit) break; // 429 발생 시 나머지 키워드 스킵 (다음 배치에서 처리)
+    if (rateLimitHit) break;
 
     const kw = missing[i];
     try {
       const results = await getNaverKeywords([kw]);
+      consecutiveRateLimits = 0; // 성공 시 리셋
       if (results.length === 0) {
         failCount++;
         continue; // 네이버에 없는 키워드 → 스킵
@@ -1325,17 +1327,27 @@ export async function syncNaverSearchVolume(
         }
       }
 
-      // API 레이트 리밋 방지: 3건마다 2초 대기 (네이버 429 방지)
-      if ((i + 1) % 3 === 0 && i + 1 < missing.length) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      // API 레이트 리밋 방지: 매 요청마다 1.5초 대기
+      if (i + 1 < missing.length) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
       }
     } catch (e: any) {
       failCount++;
       const errMsg = e?.message || "";
-      // 429 Too Many Requests → 즉시 중단 (다음 배치에서 미수집 키워드 자동 재시도)
+      // 429 Too Many Requests → 지수 백오프 재시도 (최대 3회)
       if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
-        console.warn(`[syncNaverSearchVolume] 429 레이트 리밋 — ${i + 1}/${missing.length}번째에서 중단 (성공: ${totalSaved})`);
-        rateLimitHit = true;
+        consecutiveRateLimits++;
+        if (consecutiveRateLimits >= 3) {
+          console.warn(`[syncNaverSearchVolume] 429 연속 ${consecutiveRateLimits}회 — ${i + 1}/${missing.length}번째에서 중단 (성공: ${totalSaved})`);
+          rateLimitHit = true;
+        } else {
+          // 지수 백오프: 5초, 15초
+          const backoffMs = consecutiveRateLimits === 1 ? 5000 : 15000;
+          console.warn(`[syncNaverSearchVolume] 429 발생 (${consecutiveRateLimits}/3) — ${backoffMs / 1000}초 대기 후 재시도`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          i--; // 같은 키워드 재시도
+          failCount--; // 재시도할 것이므로 실패 카운트 복원
+        }
       } else {
         console.error(`[syncNaverSearchVolume] "${kw}" 실패:`, errMsg);
       }
