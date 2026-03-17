@@ -2457,9 +2457,19 @@
           }
         }
 
-        // ── 서버 선별 실패 시 로컬 폴백 ──
+        // ── 서버 선별 결과 0개 처리 ──
         if (batchKeywords.length === 0) {
-          console.log('[SH] 서버 선별 결과 없음, 로컬 키워드 로드...');
+          // ★ v8.5.6: 서버가 정상 응답했는데 0개면 = 오늘 모든 키워드 수집 완료
+          if (serverBatch) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🤖 자동 수집';
+            const collected = dailyStats?.collectedToday || 0;
+            const total = dailyStats?.totalActiveKeywords || 0;
+            alert('오늘 수집할 키워드가 없습니다.\n\n✅ ' + collected + '/' + total + '개 키워드 수집 완료\n📊 ' + (dailyStats?.roundsToday || 0) + '회차까지 완료\n\n미수집 키워드가 추가되면 다음 회차에 자동 수집됩니다.');
+            return;
+          }
+          // 서버 연결 실패 시에만 로컬 폴백
+          console.log('[SH] 서버 연결 실패, 로컬 키워드 로드...');
           const kwResp = await chrome.runtime.sendMessage({
             type: 'HYBRID_LIST_WATCH_KEYWORDS', opts: { sortBy: 'compositeScore', limit: 1000 }
           });
