@@ -13,7 +13,7 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.5.4";
+const EXTENSION_VERSION = "8.5.5";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "688KB";
 
@@ -834,9 +834,20 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
+                    version: "v8.5.5",
+                    date: "2026-03-17",
+                    badge: "Latest",
+                    changes: [
+                      "전수조사: 배치 수집 로직 전체 검증 및 버그 수정",
+                      "예약 자동수집 다회차 간격 체크 우회 (2회차부터 즉시 수집)",
+                      "TZ-safe 날짜 계산 (todayKST) 적용",
+                      "키워드당 1일 1회 자동배치 보장 (3중 필터 검증 완료)",
+                    ],
+                  },
+                  {
                     version: "v8.5.4",
                     date: "2026-03-16",
-                    badge: "Latest",
+                    badge: "",
                     changes: [
                       "배치 키워드 중복 수집 방지 (3중 필터링)",
                       "버전 표시 동적 로드 (manifest.json 기반)",
