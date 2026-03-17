@@ -502,18 +502,18 @@ export async function selectBatchKeywords(
     ));
   for (const r of collectedRows) todayCollectedKeywords.add(r.keyword);
 
-  // 방법 2: ext_search_events 기반 (saveSearchEvent가 markKeywordCollected보다 먼저 호출)
-  // markKeywordCollected 실패해도 이미 수집된 키워드를 잡아냄
-  const eventRows = await db.select({
-    keyword: extSearchEvents.keyword,
+  // 방법 2: ext_search_snapshots 기반 (실제 크롤링 데이터가 저장된 키워드)
+  // ★ v8.5.6: events 대신 snapshots 기준으로 통일 (events만 있고 snapshot 실패 시 미수집 처리)
+  const snapshotRows = await db.select({
+    keyword: extSearchSnapshots.query,
   })
-    .from(extSearchEvents)
+    .from(extSearchSnapshots)
     .where(and(
-      eq(extSearchEvents.userId, userId),
-      gte(extSearchEvents.createdAt, todayStartStr),
+      eq(extSearchSnapshots.userId, userId),
+      gte(extSearchSnapshots.createdAt, todayStartStr),
     ))
-    .groupBy(extSearchEvents.keyword);
-  for (const r of eventRows) todayCollectedKeywords.add(r.keyword);
+    .groupBy(extSearchSnapshots.query);
+  for (const r of snapshotRows) todayCollectedKeywords.add(r.keyword);
 
   // 방법 3: ext_keyword_daily_stats 기반 (runDailyBatch가 통계 생성 시)
   const validRows = await db.select({
