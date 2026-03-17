@@ -1825,10 +1825,10 @@ async function runScheduledAutoCollect() {
       await waitForCollectorDone(180000); // 최대 3분 대기
     }
 
-    // 서버에서 이번 회차 키워드 선별
+    // 서버에서 이번 회차 키워드 선별 (2회차부터 간격 체크 스킵)
     let batchKeywords = [];
     try {
-      const batchResp = await apiClient.getBatchKeywordSelection({ limit: 100 });
+      const batchResp = await apiClient.getBatchKeywordSelection({ limit: 100, skipIntervalCheck: round > 0 });
       const batchData = batchResp?.result?.data;
       if (batchData && batchData.keywords && batchData.keywords.length > 0) {
         batchKeywords = batchData.keywords.map(function(k) { return k.keyword; });

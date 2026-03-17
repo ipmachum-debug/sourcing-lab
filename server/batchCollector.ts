@@ -39,11 +39,21 @@ import {
 /** Drizzle-ORM decimal/SUM 결과 → number 변환 */
 function N(v: any): number { return Number(v) || 0; }
 
-/** KST 현재 시각 */
+/** KST 현재 시각
+ * ⚠ 이 함수는 서버 TZ=Asia/Seoul 환경에서 동작.
+ *   setHours(+9) → toISOString(UTC변환 -9) 상쇄로 결과적으로
+ *   toMySQLTimestamp()와 slice(0,10)은 올바른 KST 값을 반환.
+ *   서버 TZ가 UTC인 환경에서도 올바르게 동작함.
+ */
 function nowKST(): Date {
   const d = new Date();
   d.setHours(d.getHours() + 9);
   return d;
+}
+
+/** KST 오늘 날짜 (YYYY-MM-DD) — TZ-safe */
+function todayKST(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 }
 
 /** Date → MySQL TIMESTAMP 문자열 (KST) */
@@ -369,7 +379,7 @@ export async function advanceBatchState(
   const db = await getDb();
   if (!db) return;
   const now = nowKST();
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = todayKST();
   const state = await getOrCreateBatchState(db, userId, todayStr);
 
   const nextTurn = (state.currentGroupTurn + 1) % ROUND_ROBIN_GROUP_COUNT;
@@ -403,6 +413,7 @@ export async function advanceBatchState(
 export async function selectBatchKeywords(
   userId: number,
   limit: number = BATCH_PER_ROUND_LIMIT,
+  options?: { skipIntervalCheck?: boolean },
 ): Promise<AdaptiveBatchResult> {
   const db = await getDb();
   const emptyResult: AdaptiveBatchResult = {
@@ -421,7 +432,7 @@ export async function selectBatchKeywords(
 
   const now = nowKST();
   const nowStr = toMySQLTimestamp(now);
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = todayKST(); // TZ-safe KST 날짜
 
   // ── 1. 배치 상태 조회 (이월 포함) ──
   const batchState = await getOrCreateBatchState(db, userId, todayStr);
@@ -454,8 +465,8 @@ export async function selectBatchKeywords(
     };
   }
 
-  // 회차 간 최소 간격 체크
-  if (lastBatchCompletedAt) {
+  // 회차 간 최소 간격 체크 (예약 자동수집 다회차 시 skipIntervalCheck로 우회)
+  if (lastBatchCompletedAt && !options?.skipIntervalCheck) {
     const lastBatch = new Date(lastBatchCompletedAt);
     const hoursSinceLast = (now.getTime() - lastBatch.getTime()) / (3600 * 1000);
     if (hoursSinceLast < MIN_ROUND_INTERVAL_HOURS) {
@@ -1091,7 +1102,7 @@ export async function runDailyBatch(
   if (!db) return { processed: 0, updated: 0, errors: 0, hasMore: false, total: 0, results: [] };
 
   const now = nowKST();
-  const today = now.toISOString().slice(0, 10);
+  const today = todayKST();
 
   // 활성 키워드 가져오기
   let activeKeywords = await db.select()
@@ -1259,8 +1270,8 @@ export async function syncNaverSearchVolume(
   if (!db) return 0;
 
   const now = nowKST();
-  const todayStr = now.toISOString().slice(0, 10);
-  const yearMonth = now.toISOString().slice(0, 7); // YYYY-MM
+  const todayStr = todayKST();
+  const yearMonth = todayStr.slice(0, 7); // YYYY-MM
 
   // 1) 오늘 크롤링 데이터가 있는 키워드 (ext_keyword_daily_stats에 오늘 날짜 존재)
   const crawledToday = await db.selectDistinct({ keyword: extKeywordDailyStats.query })
@@ -1584,7 +1595,7 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
   if (!db) return { synced: 0, metricsCreated: 0, errors: 0 };
 
   const now = nowKST();
-  const today = now.toISOString().slice(0, 10);
+  const today = todayKST();
 
   // keywordMasterId가 없는 감시 키워드 조회
   const unlinked = await db.select()

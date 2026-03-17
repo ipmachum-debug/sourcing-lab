@@ -405,9 +405,12 @@ export const watchRouter = router({
   getBatchKeywordSelection: protectedProcedure
     .input(z.object({
       limit: z.number().int().min(1).max(100).default(100),
+      skipIntervalCheck: z.boolean().default(false),
     }))
     .query(async ({ ctx, input }) => {
-      return await selectBatchKeywords(ctx.user!.id, input.limit);
+      return await selectBatchKeywords(ctx.user!.id, input.limit, {
+        skipIntervalCheck: input.skipIntervalCheck,
+      });
     }),
 
   // ===== 검색 이벤트 히스토리 =====
