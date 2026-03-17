@@ -7,6 +7,7 @@ import { getDb } from "../../db";
 import {
   extSearchEvents, extWatchKeywords,
   extSearchSnapshots, extKeywordDailyStats, extBatchState,
+  keywordSearchVolumeHistory,
 } from "../../../drizzle/schema";
 import { eq, and, desc, sql, like, asc, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -16,6 +17,7 @@ import {
   recomputeCompositeScore, diagnoseParsingQuality,
   normalizeKeyword, detectDuplicateKeywords,
   syncWatchKeywordsToMaster, advanceBatchState,
+  syncNaverSearchVolume,
 } from "../../batchCollector";
 import { autoComputeKeywordDailyStat, autoMatchTrackedProducts } from "./_autoHelpers";
 
@@ -617,6 +619,85 @@ export const watchRouter = router({
       const groups = detectDuplicateKeywords(keywords, 0.85);
       
       return { totalKeywords: keywords.length, duplicateGroups: groups };
+    }),
+
+  // ===================================================================
+  //  v8.5.6: 네이버 검색량 수집 (수동/전체/선택 트리거)
+  // ===================================================================
+
+  // ===== 네이버 검색량 동기화 실행 =====
+  syncNaverVolume: protectedProcedure
+    .input(z.object({
+      mode: z.enum(["all", "selected"]).default("all"),
+      keywords: z.array(z.string().min(1).max(255)).max(500).optional(),
+      forceRefresh: z.boolean().default(false),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await syncNaverSearchVolume(ctx.user!.id, {
+        mode: input.mode,
+        keywords: input.keywords,
+        forceRefresh: input.forceRefresh,
+      });
+      return result;
+    }),
+
+  // ===== 네이버 검색량 수집 상태 조회 (대상 필터링 미리보기) =====
+  getNaverVolumeStatus: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const userId = ctx.user!.id;
+      const now = new Date();
+      const todayStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+      const yearMonth = todayStr.slice(0, 7);
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgoStr = sevenDaysAgo.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+
+      // 전체 활성 키워드 수
+      const [kwCount] = await db.select({
+        total: sql<number>`COUNT(*)`,
+        active: sql<number>`SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)`,
+      })
+        .from(extWatchKeywords)
+        .where(eq(extWatchKeywords.userId, userId));
+
+      // 7일 내 크롤링된 고유 키워드 수
+      const [crawlCount] = await db.select({
+        count: sql<number>`COUNT(DISTINCT query)`,
+      })
+        .from(extKeywordDailyStats)
+        .where(and(
+          eq(extKeywordDailyStats.userId, userId),
+          gte(extKeywordDailyStats.statDate, sevenDaysAgoStr),
+        ));
+
+      // 이번 달 네이버 검색량 수집된 키워드 수
+      const [volCount] = await db.select({
+        count: sql<number>`COUNT(DISTINCT keyword)`,
+      })
+        .from(keywordSearchVolumeHistory)
+        .where(and(
+          eq(keywordSearchVolumeHistory.userId, userId),
+          eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
+          eq(keywordSearchVolumeHistory.source, "naver"),
+        ));
+
+      const totalActive = N(kwCount?.active);
+      const crawledRecently = N(crawlCount?.count);
+      const hasVolume = N(volCount?.count);
+      const needsVolume = Math.max(0, crawledRecently - hasVolume);
+      const estimatedTimeMinutes = Math.ceil(needsVolume * 5 / 60);
+
+      return {
+        totalKeywords: N(kwCount?.total),
+        totalActive,
+        crawledRecently7d: crawledRecently,
+        hasVolumeThisMonth: hasVolume,
+        needsVolumeCollection: needsVolume,
+        estimatedTimeMinutes,
+        yearMonth,
+      };
     }),
 
   // ===================================================================

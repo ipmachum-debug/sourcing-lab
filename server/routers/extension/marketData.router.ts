@@ -18,7 +18,7 @@ import {
 import { eq, and, desc, sql, asc, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { N } from "./_helpers";
-import { getNaverKeywords } from "../../lib/naverAds";
+import { getNaverKeywords, normalizeNaverKeyword, isNaverKeywordMatch } from "../../lib/naverAds";
 import { estimateSearchVolume } from "../../lib/searchVolumeEstimator";
 
 export const marketDataRouter = router({
@@ -57,12 +57,12 @@ export const marketDataRouter = router({
 
       const existingMap = new Map<string, typeof existing[0]>();
       for (const row of existing) {
-        existingMap.set(row.keyword.replace(/\s+/g, "").toLowerCase(), row);
+        existingMap.set(normalizeNaverKeyword(row.keyword), row);
       }
 
       // 이미 수집된 키워드인지 확인
       const mainKw = originalKeywords[0];
-      const mainClean = mainKw?.replace(/\s+/g, "").toLowerCase() || "";
+      const mainClean = normalizeNaverKeyword(mainKw || "");
       const cached = existingMap.get(mainClean);
 
       if (cached) {
@@ -114,7 +114,7 @@ export const marketDataRouter = router({
 
       const keywordLookup = new Map<string, string>();
       for (const kw of originalKeywords) {
-        keywordLookup.set(kw.replace(/\s+/g, "").toLowerCase(), kw);
+        keywordLookup.set(normalizeNaverKeyword(kw), kw);
       }
 
       for (const r of naverResults) {
@@ -140,7 +140,7 @@ export const marketDataRouter = router({
         }).onDuplicateKeyUpdate({ set: upsertValues });
         saved++;
 
-        const relClean = r.relKeyword.replace(/\s+/g, "").toLowerCase();
+        const relClean = normalizeNaverKeyword(r.relKeyword);
         const originalKw = keywordLookup.get(relClean);
         if (originalKw && originalKw !== r.relKeyword) {
           await db.insert(keywordSearchVolumeHistory).values({
@@ -160,9 +160,9 @@ export const marketDataRouter = router({
         totalResults: naverResults.length,
         naverNotFound,
         directVolume: naverResults.length > 0 ? (() => {
-          const inputClean = originalKeywords[0]?.replace(/\s+/g, "").toLowerCase();
+          const inputClean = normalizeNaverKeyword(originalKeywords[0] || "");
           const matched = naverResults.find(r =>
-            r.relKeyword.replace(/\s+/g, "").toLowerCase() === inputClean,
+            normalizeNaverKeyword(r.relKeyword) === inputClean,
           );
           if (matched) {
             return {

@@ -51,23 +51,99 @@ export interface NaverKeywordResult {
 }
 
 /**
+ * 키워드 정규화: 공백·특수문자 제거 + 소문자
+ * "현금 파우치" → "현금파우치"
+ * "LED 조명" → "led조명"
+ */
+export function normalizeNaverKeyword(kw: string): string {
+  return kw.replace(/\s+/g, "").replace(/[·,.\-_\/\\()\[\]{}"']+/g, "").trim().toLowerCase();
+}
+
+/**
+ * 동종언어 매핑: 원본 키워드와 네이버 relKeyword 매칭 여부 판단
+ * - 정규화 후 완전 일치
+ * - 띄어쓰기 변형 허용 ("냄비 받침" == "냄비받침")
+ * - 특수문자 무시 ("오트밀·국수" == "오트밀국수")
+ * - 괄호/따옴표 무시 ("에어팟(3세대)" == "에어팟3세대")
+ */
+export function isNaverKeywordMatch(original: string, relKeyword: string): boolean {
+  return normalizeNaverKeyword(original) === normalizeNaverKeyword(relKeyword);
+}
+
+/**
+ * ★ v8.5.6: 키워드 변형 생성 (네이버 동종언어 매핑 개선)
+ *
+ * 네이버 API는 공백 포함 키워드를 400으로 거부하지만,
+ * 사용자의 감시 키워드에는 공백이 포함될 수 있음.
+ * 이 함수는 원본 + 공백제거 + 일반적 변형을 생성하여
+ * API 호출 전 최적 형태를 결정함.
+ *
+ * "냄비 받침" → ["냄비받침", "냄비 받침"]
+ * "LED조명" → ["led조명", "LED조명"]
+ * "에어팟 프로" → ["에어팟프로", "에어팟 프로"]
+ */
+export function generateKeywordVariants(keyword: string): string[] {
+  const variants = new Set<string>();
+  const trimmed = keyword.trim();
+  if (!trimmed) return [];
+
+  // 원본 (공백 제거)
+  const noSpace = trimmed.replace(/\s+/g, "");
+  variants.add(noSpace);
+
+  // 원본 (공백 유지 — API는 거부하지만, 결과 매칭용)
+  variants.add(trimmed);
+
+  // 특수문자 제거 버전
+  const cleaned = normalizeNaverKeyword(trimmed);
+  variants.add(cleaned);
+
+  return Array.from(variants).filter(Boolean);
+}
+
+/**
+ * ★ v8.5.6: 네이버 API 결과에서 원본 키워드에 매칭되는 결과 찾기
+ * 정규화 기반으로 relKeyword 중 원본과 일치하는 것을 우선 반환
+ */
+export function findBestNaverMatch(
+  originalKeyword: string,
+  results: NaverKeywordResult[],
+): NaverKeywordResult | null {
+  const normalized = normalizeNaverKeyword(originalKeyword);
+
+  // 1차: 정규화 완전 매칭
+  for (const r of results) {
+    if (normalizeNaverKeyword(r.relKeyword) === normalized) {
+      return r;
+    }
+  }
+
+  // 2차: 포함 관계 (긴 키워드가 짧은 키워드를 포함)
+  for (const r of results) {
+    const relNorm = normalizeNaverKeyword(r.relKeyword);
+    if (relNorm.includes(normalized) || normalized.includes(relNorm)) {
+      const totalSearch = (r.monthlyPcQcCnt || 0) + (r.monthlyMobileQcCnt || 0);
+      if (totalSearch > 0) return r;
+    }
+  }
+
+  return null;
+}
+
+/**
  * 네이버 키워드 도구 API 호출
- * seed 키워드를 넣으면 연관 키워드 + 검색량/경쟁도 반환
+ * ★ v8.5.6: 공백 제거 + 정규화 매핑 강화
+ * 네이버 API는 공백 포함 키워드를 400으로 거부함 → 자동 정제
  */
 export async function getNaverKeywords(
   hintKeywords: string[],
 ): Promise<NaverKeywordResult[]> {
-  // ★ v8.4.4: 공백 제거 + 원본 키워드 매핑
-  // 네이버 API는 공백 포함 키워드를 400으로 거부함
+  // 공백 제거 + 정규화 (네이버 API 호환)
   const cleanedKeywords = hintKeywords.map(kw => kw.replace(/\s+/g, "").trim()).filter(Boolean);
-  // 원본→정제 매핑 (나중에 결과에 원본 키워드 복원용)
-  const originalMap = new Map<string, string>(); // cleaned → original
-  for (let i = 0; i < hintKeywords.length; i++) {
-    const cleaned = hintKeywords[i].replace(/\s+/g, "").trim();
-    if (cleaned) originalMap.set(cleaned.toLowerCase(), hintKeywords[i]);
-  }
+  // 중복 제거 ("냄비 받침" 과 "냄비받침" 이 같은 키워드를 지칭)
+  const uniqueCleaned = [...new Set(cleanedKeywords)];
 
-  if (cleanedKeywords.length === 0) {
+  if (uniqueCleaned.length === 0) {
     return [];
   }
 
@@ -76,7 +152,7 @@ export async function getNaverKeywords(
   const headers = getHeaders(method, uri);
 
   const params = new URLSearchParams({
-    hintKeywords: cleanedKeywords.join(","),
+    hintKeywords: uniqueCleaned.join(","),
     showDetail: "1",
   });
 
@@ -86,10 +162,12 @@ export async function getNaverKeywords(
   });
 
   if (!res.ok) {
-    // ★ v8.4.4: 400 에러는 키워드가 네이버에 없는 경우 → 빈 배열 반환 (throw 대신)
     if (res.status === 400) {
-      console.log(`[naverAds] 네이버 API 400: 키워드 미등록 — ${cleanedKeywords.join(", ")}`);
+      console.log(`[naverAds] 네이버 API 400: 키워드 미등록 — ${uniqueCleaned.join(", ")}`);
       return [];
+    }
+    if (res.status === 429) {
+      throw new Error(`네이버 API 429: Too Many Requests`);
     }
     const text = await res.text();
     throw new Error(`네이버 API 오류: ${res.status} ${text}`);
