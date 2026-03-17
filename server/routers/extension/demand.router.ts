@@ -149,10 +149,10 @@ export const demandRouter = router({
           .where(and(
             eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
             eq(keywordSearchVolumeHistory.source, "naver"),
-            sql`(${keywordSearchVolumeHistory.keyword}, ${keywordSearchVolumeHistory.yearMonth}) IN (
-              SELECT keyword, MAX(year_month) FROM keyword_search_volume_history
-              WHERE user_id = ${ctx.user!.id} AND source = 'naver'
-              GROUP BY keyword
+            sql`${keywordSearchVolumeHistory.yearMonth} = (
+              SELECT MAX(ksvh2.year_month) FROM keyword_search_volume_history ksvh2
+              WHERE ksvh2.user_id = ${ctx.user!.id} AND ksvh2.source = 'naver'
+                AND ksvh2.keyword = ${keywordSearchVolumeHistory.keyword}
             )`,
           ));
         svMap = new Map(svRows.map(sv => [sv.keyword, N(sv.totalSearch)]));
