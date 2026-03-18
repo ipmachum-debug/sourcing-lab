@@ -2035,19 +2035,30 @@
     const cached = cachedMarketData[keyword];
     // 10분 캐시
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
-      console.log('[SH] fetchMarketData resp:', keyword, JSON.stringify(resp)?.slice(0, 300));
-      if (resp?.ok && resp.data) {
-        cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
-        return resp.data;
+    // ★ v8.5.8: MV3 Service Worker 응답 누락 대응 — 최대 2회 시도
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
+        console.log('[SH] fetchMarketData resp:', keyword, 'attempt=' + attempt, JSON.stringify(resp)?.slice(0, 300));
+        if (resp?.ok && resp.data) {
+          cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
+          return resp.data;
+        }
+        if (resp?.error === 'UNAUTHORIZED') return { _error: 'UNAUTHORIZED' };
+        // resp가 undefined → Service Worker 응답 누락, 재시도
+        if (!resp && attempt === 0) {
+          console.log('[SH] 응답 없음, 2초 후 재시도...', keyword);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        return { _error: resp?.error || 'no_data' };
+      } catch (e) {
+        console.log('[SH] 마켓 데이터 조회 실패:', keyword, 'attempt=' + attempt, e.message);
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 2000)); continue; }
+        return { _error: e.message };
       }
-      // 서버 응답은 왔지만 데이터 없음 (로그인 안됨 등)
-      return { _error: resp?.error || 'no_data' };
-    } catch (e) {
-      console.log('[SH] 마켓 데이터 조회 실패:', e.message);
-      return { _error: e.message };
     }
+    return { _error: 'max_retries' };
   }
 
   function renderSearchVolume(marketData) {
@@ -2065,18 +2076,15 @@
             서버 로그인 후 조회 가능
           </div>`;
       } else {
+        // ★ v8.5.8: 에러 내용에 따라 차별화 표시
+        const isRetryError = errMsg === 'max_retries' || errMsg === 'no_data';
         el.innerHTML = `
-          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">수집 중</span></div>
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">${isRetryError ? '재시도' : '수집 중'}</span></div>
           <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-            네이버 검색량 데이터 수집 중...
-          </div>
-          <div style="padding:4px 8px !important;">
-            <div style="height:4px !important;background:#e2e8f0 !important;border-radius:2px !important;overflow:hidden !important;">
-              <div style="width:15% !important;height:100% !important;background:linear-gradient(90deg,#f59e0b,#f97316) !important;border-radius:2px !important;animation:none !important;"></div>
-            </div>
+            ${isRetryError ? '서버 통신 지연 — 페이지 새로고침 시 표시됩니다' : '네이버 검색량 데이터 수집 중...'}
           </div>
           <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
-            데이터가 축적되면 자동으로 표시됩니다
+            ${isRetryError ? '(수집 완료 후 자동 표시)' : '데이터가 축적되면 자동으로 표시됩니다'}
           </div>`;
       }
       return;
