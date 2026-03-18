@@ -257,7 +257,13 @@ export default function SearchDemand() {
             }
             const saved = status.syncResult?.totalSaved ?? 0;
             const failed = status.syncResult?.failCount ?? 0;
-            toast.success(`검색량 수집 완료! (${saved}개 저장, ${failed}개 실패)`, { id: "sv-progress" });
+            const skipped = status.syncResult?.skipped ?? 0;
+            const target = status.syncResult?.targetCount ?? 0;
+            if (target === 0 && saved === 0) {
+              toast.success("✅ 이번 달 검색량이 이미 모두 수집되었습니다", { id: "sv-progress" });
+            } else {
+              toast.success(`⭐ 검색량 수집 완료! (${saved}개 저장, ${skipped}개 스킵, ${failed}개 실패)`, { id: "sv-progress" });
+            }
             keywordStatsList.refetch();
             if (demandSelectedKw) searchVolume.refetch();
             setSvFetching(false);
