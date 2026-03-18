@@ -414,6 +414,9 @@ export const marketDataRouter = router({
         console.error("[getKeywordMarketData] 검색량 추정 실패:", e);
       }
 
+      // ★ v8.5.8: 디버그 로그 — 확장 프로그램 검색량 표시 문제 추적
+      console.log(`[getKeywordMarketData] "${input.keyword}" → vol=${volume ? Number(volume.totalSearch ?? 0) : 'null'}, snap=${!!snapshot}, est=${searchVolumeEstimate?.model || 'null'}`);
+
       return {
         snapshot: snapshot || null,
         searchVolume: volume || null,
