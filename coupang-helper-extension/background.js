@@ -809,8 +809,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           // 2) 통합 마켓 데이터 조회
-          const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
-          const data = resp?.result?.data || {};
+          let data = {};
+          try {
+            const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+            data = resp?.result?.data || {};
+          } catch (marketErr) {
+            console.log('[SH] getKeywordMarketData 실패 (directVolume fallback 사용):', marketErr.message);
+            // ★ v8.5.8: getKeywordMarketData 실패해도 directVolume이 있으면 사용
+            if (naverFetchData?.directVolume) {
+              data = { searchVolume: naverFetchData.directVolume, snapshot: null, cpc: null, searchVolumeEstimate: null };
+            } else {
+              throw marketErr; // directVolume도 없으면 에러 전파
+            }
+          }
 
           // ★ v8.4.4: searchVolume이 null이면 directVolume으로 보충
           if (!data.searchVolume && naverFetchData?.directVolume) {

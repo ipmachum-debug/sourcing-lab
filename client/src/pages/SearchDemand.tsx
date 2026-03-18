@@ -259,10 +259,13 @@ export default function SearchDemand() {
             const failed = status.syncResult?.failCount ?? 0;
             const skipped = status.syncResult?.skipped ?? 0;
             const target = status.syncResult?.targetCount ?? 0;
+            const alreadyHas = status.syncResult?.filterStats?.alreadyHasVolume ?? 0;
             if (target === 0 && saved === 0) {
-              toast.success("✅ 이번 달 검색량이 이미 모두 수집되었습니다", { id: "sv-progress" });
+              toast.success(`✅ 이번 달 검색량이 이미 모두 수집되었습니다 (${alreadyHas}개 기수집)`, { id: "sv-progress" });
+            } else if (saved === 0 && skipped > 0) {
+              toast.info(`📋 수집 대상 ${target}개 중 ${skipped}개 네이버 미등록 키워드 (저장 0건)`, { id: "sv-progress" });
             } else {
-              toast.success(`⭐ 검색량 수집 완료! (${saved}개 저장, ${skipped}개 스킵, ${failed}개 실패)`, { id: "sv-progress" });
+              toast.success(`⭐ 검색량 수집 완료! (${saved}개 저장, ${skipped > 0 ? `${skipped}개 미등록, ` : ""}${failed > 0 ? `${failed}개 실패` : "실패 없음"})`, { id: "sv-progress" });
             }
             keywordStatsList.refetch();
             if (demandSelectedKw) searchVolume.refetch();
