@@ -935,8 +935,20 @@ export const watchRouter = router({
         try { await autoComputeKeywordDailyStat(userId, q, db); computed++; } catch { errors++; }
       }
       if (!hasMore) {
-        await runDailyBatch(userId).catch(() => {});
-        await syncWatchKeywordsToMaster(userId).catch(() => {});
+        // ★ v8.5.7: 마지막 라운드 후속 작업을 비동기로 실행하여 HTTP 타임아웃 방지
+        // runDailyBatch는 autoComputeKeywordDailyStat가 이미 per-keyword 통계를 처리하므로
+        // watch_keyword 필드 갱신 + 적응형 스케줄링만 수행
+        // syncWatchKeywordsToMaster는 keyword_master 동기화 (무거울 수 있음)
+        setImmediate(async () => {
+          try {
+            console.log("[bulkComputeStats] 후속 비동기 작업 시작: runDailyBatch + syncWatchToMaster");
+            await runDailyBatch(userId).catch((e: any) => console.error("[bulkComputeStats] runDailyBatch 오류:", e?.message));
+            await syncWatchKeywordsToMaster(userId).catch((e: any) => console.error("[bulkComputeStats] syncWatchToMaster 오류:", e?.message));
+            console.log("[bulkComputeStats] 후속 비동기 작업 완료");
+          } catch (e: any) {
+            console.error("[bulkComputeStats] 후속 비동기 작업 전체 오류:", e?.message);
+          }
+        });
       }
 
       const now = new Date(); now.setHours(now.getHours() + 9);

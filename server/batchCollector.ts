@@ -1802,15 +1802,6 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
         .limit(1);
 
       if (dailyStatus) {
-        const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
-          .from(keywordDailyMetrics)
-          .where(and(
-            eq(keywordDailyMetrics.userId, userId),
-            eq(keywordDailyMetrics.keywordId, masterId),
-            eq(keywordDailyMetrics.metricDate, today),
-          ))
-          .limit(1);
-
         const metricData = {
           coupangProductCount: N(dailyStatus.productCount),
           coupangAvgPrice: N(dailyStatus.avgPrice),
@@ -1818,18 +1809,15 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
           coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
         };
 
-        if (existingMetric) {
-          await db.update(keywordDailyMetrics)
-            .set(metricData)
-            .where(eq(keywordDailyMetrics.id, existingMetric.id));
-        } else {
-          await db.insert(keywordDailyMetrics).values({
-            userId,
-            keywordId: masterId,
-            metricDate: today,
-            ...metricData,
-          });
-        }
+        // ★ v8.5.7: onDuplicateKeyUpdate로 race condition 방지
+        await db.insert(keywordDailyMetrics).values({
+          userId,
+          keywordId: masterId,
+          metricDate: today,
+          ...metricData,
+        }).onDuplicateKeyUpdate({
+          set: metricData,
+        });
         metricsCreated++;
       }
     } catch (err: any) {
@@ -1865,15 +1853,6 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
 
       if (!dailyStatus || !wk.keywordMasterId) continue;
 
-      const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
-        .from(keywordDailyMetrics)
-        .where(and(
-          eq(keywordDailyMetrics.userId, userId),
-          eq(keywordDailyMetrics.keywordId, wk.keywordMasterId),
-          eq(keywordDailyMetrics.metricDate, today),
-        ))
-        .limit(1);
-
       const metricData = {
         coupangProductCount: N(dailyStatus.productCount),
         coupangAvgPrice: N(dailyStatus.avgPrice),
@@ -1881,18 +1860,15 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
         coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
       };
 
-      if (existingMetric) {
-        await db.update(keywordDailyMetrics)
-          .set(metricData)
-          .where(eq(keywordDailyMetrics.id, existingMetric.id));
-      } else {
-        await db.insert(keywordDailyMetrics).values({
-          userId,
-          keywordId: wk.keywordMasterId,
-          metricDate: today,
-          ...metricData,
-        });
-      }
+      // ★ v8.5.7: onDuplicateKeyUpdate로 race condition 방지
+      await db.insert(keywordDailyMetrics).values({
+        userId,
+        keywordId: wk.keywordMasterId,
+        metricDate: today,
+        ...metricData,
+      }).onDuplicateKeyUpdate({
+        set: metricData,
+      });
       metricsCreated++;
     } catch (err: any) {
       console.error(`[syncWatchToMaster] 쿠팡 데이터 갱신 에러 (${wk.keyword}):`, err.message);
