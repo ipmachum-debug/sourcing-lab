@@ -527,6 +527,8 @@ export async function selectBatchKeywords(
   for (const r of snapshotRows) todayCollectedKeywords.add(r.keyword);
 
   // 방법 3: ext_keyword_daily_stats 기반 (runDailyBatch가 통계 생성 시)
+  // ★ v8.5.6 FIX: interpolated/provisional은 보간 데이터이므로 "수집 완료"가 아님
+  //   raw_valid, anomaly, baseline만 실제 크롤링 데이터로 판단
   const validRows = await db.select({
     keyword: extKeywordDailyStats.query,
   })
@@ -534,6 +536,7 @@ export async function selectBatchKeywords(
     .where(and(
       eq(extKeywordDailyStats.userId, userId),
       eq(extKeywordDailyStats.statDate, todayStr),
+      sql`${extKeywordDailyStats.dataStatus} IN ('raw_valid', 'anomaly', 'baseline')`,
     ));
   for (const r of validRows) todayCollectedKeywords.add(r.keyword);
 
