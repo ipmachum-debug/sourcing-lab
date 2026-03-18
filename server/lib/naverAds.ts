@@ -156,10 +156,25 @@ export async function getNaverKeywords(
     showDetail: "1",
   });
 
-  const res = await fetch(`${BASE_URL}${uri}?${params}`, {
-    method,
-    headers,
-  });
+  // ★ v8.5.8: 15초 타임아웃 추가 — 느린 API 응답으로 이벤트 루프 차단 방지
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${uri}?${params}`, {
+      method,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    if (e?.name === "AbortError") {
+      throw new Error(`네이버 API 타임아웃 (15초): ${uniqueCleaned.join(", ")}`);
+    }
+    throw e;
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     if (res.status === 400) {

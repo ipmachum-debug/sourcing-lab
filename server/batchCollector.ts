@@ -1131,7 +1131,16 @@ export async function runDailyBatch(
   let processed = 0, updated = 0, errors = 0;
   const results: Array<{ keyword: string; reviewGrowth: number; salesEstimate: number; error?: string }> = [];
 
-  for (const kw of batchKeywords) {
+  for (let ki = 0; ki < batchKeywords.length; ki++) {
+    const kw = batchKeywords[ki];
+
+    // ★ v8.5.8: 매 키워드마다 이벤트 루프 양보 (HTTP 요청 처리 기회 제공)
+    // 각 키워드는 computeDailyAggregation + rebuildKeywordDailyStatsForKeyword + recomputeCompositeScore
+    // 등 무거운 DB 작업을 수행하므로 매 키워드 후 yield 필수
+    if (ki > 0) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
     try {
       // 일일 집계 계산
       const agg = await computeDailyAggregation(userId, kw.keyword, today);
@@ -1244,13 +1253,9 @@ export async function runDailyBatch(
     }
   }
 
-  // ★ v8.5.5: 크롤링 완료 키워드 중 검색량 미수집분만 네이버 API 요청
-  try {
-    const syncResult = await syncNaverSearchVolume(userId);
-    if (syncResult.totalSaved > 0) console.log(`[runDailyBatch] 네이버 검색량 ${syncResult.totalSaved}건 수집 완료`);
-  } catch (e: any) {
-    console.error(`[runDailyBatch] 네이버 검색량 수집 오류:`, e?.message);
-  }
+  // ★ v8.5.8: syncNaverSearchVolume은 bulkComputeStats 후속 작업 또는 syncNaverVolume 엔드포인트에서 별도 실행
+  // runDailyBatch에서 직접 호출하면 5초×N 키워드만큼 이벤트 루프 차단 → 제거
+  // (기존 v8.5.5 호출 제거)
 
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
 }
@@ -1755,7 +1760,10 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
 
   let synced = 0, metricsCreated = 0, errors = 0;
 
-  for (const wk of unlinked) {
+  for (let ui = 0; ui < unlinked.length; ui++) {
+    const wk = unlinked[ui];
+    // ★ v8.5.8: 매 키워드마다 이벤트 루프 양보
+    if (ui > 0) await new Promise<void>(resolve => setImmediate(resolve));
     try {
       const normalized = normalizeKeyword(wk.keyword);
       if (!normalized) continue;
@@ -1842,7 +1850,10 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
       sql`${extWatchKeywords.keywordMasterId} IS NOT NULL`,
     ));
 
-  for (const wk of linked) {
+  for (let li = 0; li < linked.length; li++) {
+    const wk = linked[li];
+    // ★ v8.5.8: 매 키워드마다 이벤트 루프 양보
+    if (li > 0) await new Promise<void>(resolve => setImmediate(resolve));
     try {
       const [dailyStatus] = await db.select({
         productCount: extKeywordDailyStats.productCount,
