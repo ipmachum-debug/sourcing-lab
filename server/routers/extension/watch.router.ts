@@ -21,6 +21,15 @@ import {
 } from "../../batchCollector";
 import { autoComputeKeywordDailyStat, autoMatchTrackedProducts } from "./_autoHelpers";
 
+// ★ v8.5.7: 네이버 검색량 수집 진행 상태 (메모리 내 — 유저별)
+const naverSyncProgress = new Map<number, {
+  running: boolean;
+  current: number;
+  total: number;
+  startedAt: number;
+  result?: any;
+}>();
+
 export const watchRouter = router({
   saveSearchEvent: protectedProcedure
     .input(z.object({
@@ -625,7 +634,7 @@ export const watchRouter = router({
   //  v8.5.6: 네이버 검색량 수집 (수동/전체/선택 트리거)
   // ===================================================================
 
-  // ===== 네이버 검색량 동기화 실행 =====
+  // ===== 네이버 검색량 동기화 실행 (비동기 — 즉시 응답, 백그라운드 처리) =====
   syncNaverVolume: protectedProcedure
     .input(z.object({
       mode: z.enum(["all", "selected"]).default("all"),
@@ -633,12 +642,56 @@ export const watchRouter = router({
       forceRefresh: z.boolean().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
-      const result = await syncNaverSearchVolume(ctx.user!.id, {
-        mode: input.mode,
-        keywords: input.keywords,
-        forceRefresh: input.forceRefresh,
+      const userId = ctx.user!.id;
+
+      // ★ v8.5.7: 이미 수집 중이면 중복 실행 방지
+      if (naverSyncProgress.has(userId) && naverSyncProgress.get(userId)!.running) {
+        const prog = naverSyncProgress.get(userId)!;
+        return {
+          started: false,
+          alreadyRunning: true,
+          progress: { current: prog.current, total: prog.total, running: true },
+        };
+      }
+
+      // 진행 상태 초기화
+      naverSyncProgress.set(userId, { running: true, current: 0, total: 0, startedAt: Date.now() });
+
+      // ★ 백그라운드 실행 — 클라이언트에 즉시 응답 반환
+      setImmediate(async () => {
+        try {
+          const result = await syncNaverSearchVolume(userId, {
+            mode: input.mode,
+            keywords: input.keywords,
+            forceRefresh: input.forceRefresh,
+            onProgress: (current, total) => {
+              const prog = naverSyncProgress.get(userId);
+              if (prog) {
+                prog.current = current;
+                prog.total = total;
+              }
+            },
+          });
+          console.log(`[syncNaverVolume] 백그라운드 완료: saved=${result.totalSaved}, fail=${result.failCount}, skipped=${result.skipped}`);
+          naverSyncProgress.set(userId, {
+            running: false,
+            current: result.totalSaved + result.failCount,
+            total: result.targetCount,
+            startedAt: naverSyncProgress.get(userId)?.startedAt || Date.now(),
+            result,
+          });
+        } catch (e: any) {
+          console.error(`[syncNaverVolume] 백그라운드 오류:`, e?.message);
+          const prog = naverSyncProgress.get(userId);
+          if (prog) prog.running = false;
+        }
       });
-      return result;
+
+      return {
+        started: true,
+        alreadyRunning: false,
+        progress: { current: 0, total: 0, running: true },
+      };
     }),
 
   // ===== 네이버 검색량 수집 상태 조회 (대상 필터링 미리보기) =====
@@ -689,6 +742,13 @@ export const watchRouter = router({
       const needsVolume = Math.max(0, crawledRecently - hasVolume);
       const estimatedTimeMinutes = Math.ceil(needsVolume * 5 / 60);
 
+      // ★ v8.5.7: 실시간 수집 진행 상태
+      const syncProg = naverSyncProgress.get(userId);
+      const syncRunning = syncProg?.running ?? false;
+      const syncCurrent = syncProg?.current ?? 0;
+      const syncTotal = syncProg?.total ?? 0;
+      const syncResult = syncProg?.result ?? null;
+
       return {
         totalKeywords: N(kwCount?.total),
         totalActive,
@@ -697,6 +757,11 @@ export const watchRouter = router({
         needsVolumeCollection: needsVolume,
         estimatedTimeMinutes,
         yearMonth,
+        // 실시간 진행 상태
+        syncRunning,
+        syncCurrent,
+        syncTotal,
+        syncResult,
       };
     }),
 

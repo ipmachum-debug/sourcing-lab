@@ -1283,6 +1283,7 @@ export async function syncNaverSearchVolume(
     mode?: "all" | "selected";
     keywords?: string[];
     forceRefresh?: boolean;
+    onProgress?: (current: number, total: number) => void;
   },
 ): Promise<{
   totalSaved: number;
@@ -1387,6 +1388,10 @@ export async function syncNaverSearchVolume(
 
   console.log(`[syncNaverSearchVolume] 수집 시작: ${finalBatch.length}개 (활성 ${totalActive}, 크롤링O ${crawlFilteredKeywords.length}, 검색량O ${alreadyHasVolume}, mode=${mode}, force=${forceRefresh})`);
 
+  // ★ v8.5.7: 초기 진행 상태 콜백
+  const onProgress = options?.onProgress;
+  if (onProgress) onProgress(0, finalBatch.length);
+
   // ── 4. 1개씩 5초 간격 수집 + 동종언어 매핑 강화 ──
   let totalSaved = 0;
   let failCount = 0;
@@ -1485,6 +1490,8 @@ export async function syncNaverSearchVolume(
       if ((i + 1) % 50 === 0) {
         console.log(`[syncNaverSearchVolume] ${i + 1}/${finalBatch.length} 진행 중 (성공 ${totalSaved}, 실패 ${failCount}, 스킵 ${skipped})`);
       }
+      // ★ v8.5.7: 진행 상태 콜백
+      if (onProgress) onProgress(i + 1, finalBatch.length);
 
     } catch (e: any) {
       failCount++;

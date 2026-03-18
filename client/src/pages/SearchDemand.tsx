@@ -56,6 +56,7 @@ const ITEMS_PER_PAGE = 50;
 
 export default function SearchDemand() {
   // ===== State =====
+  const utils = trpc.useUtils();
   const [demandSelectedKw, setDemandSelectedKw] = useState<string | null>(null);
   const [demandDays, setDemandDays] = useState(30);
   const [demandSearch, setDemandSearch] = useState("");
@@ -99,6 +100,7 @@ export default function SearchDemand() {
   const bulkCompute = trpc.extension.bulkComputeStats.useMutation();
   const rebuildDailyStats = trpc.extension.rebuildDailyStats.useMutation();
   const fetchSearchVolumeMut = trpc.extension.fetchSearchVolume.useMutation();
+  const syncNaverVolumeMut = trpc.extension.syncNaverVolume.useMutation();
   const boostUncollected = trpc.extension.boostUncollectedPriority.useMutation();
   const togglePin = trpc.extension.togglePinKeyword.useMutation({
     onSuccess: () => { keywordStatsList.refetch(); },
@@ -185,6 +187,7 @@ export default function SearchDemand() {
 
   const [rebuildRunning, setRebuildRunning] = useState(false);
   const [svFetching, setSvFetching] = useState(false);
+  const svPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const handleRebuildNormalized = useCallback(async () => {
     if (rebuildRunning) return;
     setRebuildRunning(true);
@@ -228,40 +231,48 @@ export default function SearchDemand() {
 
   const handleStopStats = () => { statsStoppedRef.current = true; };
 
-  // ===== 검색량 일괄 수집: 검색량 없는 키워드에 대해 네이버 API 호출 =====
+  // ===== 검색량 일괄 수집: 서버측 syncNaverSearchVolume 비동기 실행 + 폴링 =====
   const handleBulkSearchVolume = useCallback(async () => {
     if (svFetching) return;
     setSvFetching(true);
     try {
-      const allKws = (keywordStatsList.data as any[]) || [];
-      const missing = allKws
-        .filter((kw: any) => kw.monthlySearchVolume == null)
-        .map((kw: any) => kw.query as string);
-      if (missing.length === 0) {
-        toast.info("모든 키워드에 검색량 데이터가 있습니다");
-        return;
+      const result = await syncNaverVolumeMut.mutateAsync({ mode: "all" });
+      if (result.alreadyRunning) {
+        toast.info("검색량 수집이 이미 진행 중입니다");
+      } else if (result.started) {
+        toast.info("🔄 검색량 수집 시작 (키워드당 5초 간격, 백그라운드 진행)");
       }
-      let fetched = 0;
-      // 20개씩 배치 호출 (네이버 API 제한)
-      for (let i = 0; i < missing.length; i += 20) {
-        const batch = missing.slice(i, i + 20);
+      // ★ v8.5.7: 5초 간격으로 진행 상태 폴링
+      if (svPollingRef.current) clearInterval(svPollingRef.current);
+      svPollingRef.current = setInterval(async () => {
         try {
-          await fetchSearchVolumeMut.mutateAsync({ keywords: batch });
-          fetched += batch.length;
-          toast.info(`검색량 수집중... ${fetched}/${missing.length}`);
-        } catch (err: any) {
-          toast.error(`검색량 수집 오류 (${batch[0]}...): ${err.message}`);
+          const status = await utils.extension.getNaverVolumeStatus.fetch();
+          if (status.syncRunning) {
+            toast.info(`검색량 수집중... ${status.syncCurrent}/${status.syncTotal}`, { id: "sv-progress" });
+          } else {
+            // 수집 완료
+            if (svPollingRef.current) {
+              clearInterval(svPollingRef.current);
+              svPollingRef.current = null;
+            }
+            const saved = status.syncResult?.totalSaved ?? 0;
+            const failed = status.syncResult?.failCount ?? 0;
+            toast.success(`검색량 수집 완료! (${saved}개 저장, ${failed}개 실패)`, { id: "sv-progress" });
+            keywordStatsList.refetch();
+            if (demandSelectedKw) searchVolume.refetch();
+            setSvFetching(false);
+          }
+        } catch {
+          if (svPollingRef.current) clearInterval(svPollingRef.current);
+          svPollingRef.current = null;
+          setSvFetching(false);
         }
-      }
-      toast.success(`검색량 수집 완료! (${fetched}개 키워드)`);
-      keywordStatsList.refetch();
-      if (demandSelectedKw) searchVolume.refetch();
+      }, 5000);
     } catch (err: any) {
-      toast.error(`검색량 일괄 수집 오류: ${err.message}`);
-    } finally {
+      toast.error(`검색량 수집 오류: ${err.message}`);
       setSvFetching(false);
     }
-  }, [svFetching, keywordStatsList.data, demandSelectedKw]);
+  }, [svFetching, demandSelectedKw]);
 
   const refreshAll = () => {
     keywordStatsList.refetch();
