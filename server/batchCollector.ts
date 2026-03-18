@@ -545,10 +545,14 @@ export async function selectBatchKeywords(
     lastUserViewAt: extWatchKeywords.lastUserViewAt,
   };
 
-  // ── nextCollectAt 기반 만기 조건 (모든 티어 공통) ──
+  // ── 수집 대상 조건: nextCollectAt 만기 OR 12시간 경과 ──
+  // nextCollectAt 적응형 주기(24~120h)와 12시간 윈도우 중 빠른 쪽 적용
+  // → 12시간 지나면 nextCollectAt 무관하게 수집 가능
   const dueCondition = or(
     isNull(extWatchKeywords.nextCollectAt),
     lte(extWatchKeywords.nextCollectAt, nowStr),
+    isNull(extWatchKeywords.lastCollectedAt),
+    lte(extWatchKeywords.lastCollectedAt, cutoffStr),
   );
 
   // ── 티어 1: 핀 키워드 (nextCollectAt 만기 기준) ──
