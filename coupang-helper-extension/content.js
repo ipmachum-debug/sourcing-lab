@@ -2465,7 +2465,15 @@
           }
         }
 
-        // ── 서버 선별 결과 0개 처리 ──
+        // ── 서버 선별 실패 시 로컬 폴백 ──
+        // ── v8.6.3: 서버 0개 + roundsToday >= 1 = 수집 완료 → 로컬 폴백 금지 ──
+        if (batchKeywords.length === 0 && serverBatch && dailyStats && (dailyStats.roundsToday || 0) >= 1) {
+          startBtn.disabled = false;
+          startBtn.textContent = '🤖 자동 수집';
+          alert('오늘 수집 대상 키워드가 모두 수집되었습니다.\n수집회차: ' + (dailyStats.roundsToday||0) + '/' + (dailyStats.maxRoundsPerDay||5) + '\n수집완료: ' + (dailyStats.collectedToday||0) + '/' + (dailyStats.dailyLimit||500) + '개');
+          return;
+        }
+
         if (batchKeywords.length === 0) {
           // ★ v8.5.6: 서버가 정상 응답했는데 0개면 = 오늘 모든 키워드 수집 완료
           if (serverBatch) {

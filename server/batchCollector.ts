@@ -25,7 +25,7 @@ import {
   keywordSearchVolumeHistory,
   extBatchState,
 } from "../drizzle/schema";
-import { getNaverKeywords, isNaverKeywordMatch, normalizeNaverKeyword, findBestNaverMatch, generateKeywordVariants } from "./lib/naverAds";
+import { getNaverKeywords } from "./lib/naverAds";
 import { eq, and, desc, sql, gte, lt, asc, ne, isNull, lte, or } from "drizzle-orm";
 import { rebuildKeywordDailyStatsForKeyword } from "./lib/keywordDailyStatsService";
 import {
@@ -39,21 +39,11 @@ import {
 /** Drizzle-ORM decimal/SUM 결과 → number 변환 */
 function N(v: any): number { return Number(v) || 0; }
 
-/** KST 현재 시각
- * ⚠ 이 함수는 서버 TZ=Asia/Seoul 환경에서 동작.
- *   setHours(+9) → toISOString(UTC변환 -9) 상쇄로 결과적으로
- *   toMySQLTimestamp()와 slice(0,10)은 올바른 KST 값을 반환.
- *   서버 TZ가 UTC인 환경에서도 올바르게 동작함.
- */
+/** KST 현재 시각 */
 function nowKST(): Date {
   const d = new Date();
   d.setHours(d.getHours() + 9);
   return d;
-}
-
-/** KST 오늘 날짜 (YYYY-MM-DD) — TZ-safe */
-function todayKST(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 }
 
 /** Date → MySQL TIMESTAMP 문자열 (KST) */
@@ -379,7 +369,7 @@ export async function advanceBatchState(
   const db = await getDb();
   if (!db) return;
   const now = nowKST();
-  const todayStr = todayKST();
+  const todayStr = now.toISOString().slice(0, 10);
   const state = await getOrCreateBatchState(db, userId, todayStr);
 
   const nextTurn = (state.currentGroupTurn + 1) % ROUND_ROBIN_GROUP_COUNT;
@@ -413,7 +403,7 @@ export async function advanceBatchState(
 export async function selectBatchKeywords(
   userId: number,
   limit: number = BATCH_PER_ROUND_LIMIT,
-  options?: { skipIntervalCheck?: boolean },
+  _options?: { skipIntervalCheck?: boolean },
 ): Promise<AdaptiveBatchResult> {
   const db = await getDb();
   const emptyResult: AdaptiveBatchResult = {
@@ -432,7 +422,7 @@ export async function selectBatchKeywords(
 
   const now = nowKST();
   const nowStr = toMySQLTimestamp(now);
-  const todayStr = todayKST(); // TZ-safe KST 날짜
+  const todayStr = now.toISOString().slice(0, 10);
 
   // ── 1. 배치 상태 조회 (이월 포함) ──
   const batchState = await getOrCreateBatchState(db, userId, todayStr);
@@ -465,10 +455,15 @@ export async function selectBatchKeywords(
     };
   }
 
-  // 회차 간 최소 간격 체크 (예약 자동수집 다회차 시 skipIntervalCheck로 우회)
-  if (lastBatchCompletedAt && !options?.skipIntervalCheck) {
-    const lastBatch = new Date(lastBatchCompletedAt);
-    const hoursSinceLast = (now.getTime() - lastBatch.getTime()) / (3600 * 1000);
+  // 회차 간 최소 간격 체크
+  if (lastBatchCompletedAt) {
+    // lastBatchCompletedAt은 KST 문자열로 저장됨 (toMySQLTimestamp(nowKST()))
+    // now도 nowKST()이므로 동일 기준이지만, JS Date()가 UTC로 해석하므로
+    // 직접 문자열→Date 변환 시 둘 다 같은 방식으로 해석되어야 함
+    // 해결: now 대신 현재 시각을 동일하게 toMySQLTimestamp로 변환 후 비교
+    const lastBatchMs = new Date(lastBatchCompletedAt as string).getTime();
+    const nowMs = new Date(nowStr).getTime(); // nowStr = toMySQLTimestamp(nowKST())
+    const hoursSinceLast = (nowMs - lastBatchMs) / (3600 * 1000);
     if (hoursSinceLast < MIN_ROUND_INTERVAL_HOURS) {
       return {
         ...emptyResult,
@@ -494,12 +489,12 @@ export async function selectBatchKeywords(
       eq(extWatchKeywords.isActive, true),
     ));
 
-  // ── 3. 오늘 이미 수집된 키워드 목록 (자동 제외용) ──
-  // ★ race condition 방지: roundsToday 무관하게 항상 체크
-  //   autoCollectComplete가 아직 처리 중이라 roundsToday 미증가 상태에서도
-  //   lastCollectedAt 기반으로 이미 수집된 키워드를 확실히 제외
-  const todayCollectedKeywords: Set<string> = new Set();
-  const todayStartStr = todayStr + " 00:00:00";
+  // ── 3. 최근 12시간 이내 수집된 키워드 목록 (자동 제외용) ──
+  // ★ 24시간(자정 기준) → 12시간 슬라이딩 윈도우로 변경
+  //   어제 오후 수집 → 오늘 오전에 다시 수집 대상이 됨
+  const recentCollectedKeywords: Set<string> = new Set();
+  const twelveHoursAgo = new Date(now.getTime() - 12 * 3600 * 1000);
+  const cutoffStr = toMySQLTimestamp(twelveHoursAgo);
 
   // 방법 1: lastCollectedAt 기반 (markKeywordCollected가 수집 중 실시간 갱신)
   const collectedRows = await db.select({
@@ -509,36 +504,25 @@ export async function selectBatchKeywords(
     .where(and(
       eq(extWatchKeywords.userId, userId),
       eq(extWatchKeywords.isActive, true),
-      gte(extWatchKeywords.lastCollectedAt, todayStartStr),
+      gte(extWatchKeywords.lastCollectedAt, cutoffStr),
     ));
-  for (const r of collectedRows) todayCollectedKeywords.add(r.keyword);
+  for (const r of collectedRows) recentCollectedKeywords.add(r.keyword);
 
-  // 방법 2: ext_search_snapshots 기반 (실제 크롤링 데이터가 저장된 키워드)
-  // ★ v8.5.6: events 대신 snapshots 기준으로 통일 (events만 있고 snapshot 실패 시 미수집 처리)
-  const snapshotRows = await db.select({
-    keyword: extSearchSnapshots.query,
+  // 방법 2: ext_search_events 기반 (saveSearchEvent가 markKeywordCollected보다 먼저 호출)
+  // markKeywordCollected 실패해도 이미 수집된 키워드를 잡아냄
+  const eventRows = await db.select({
+    keyword: extSearchEvents.keyword,
   })
-    .from(extSearchSnapshots)
+    .from(extSearchEvents)
     .where(and(
-      eq(extSearchSnapshots.userId, userId),
-      gte(extSearchSnapshots.createdAt, todayStartStr),
+      eq(extSearchEvents.userId, userId),
+      gte(extSearchEvents.createdAt, cutoffStr),
     ))
-    .groupBy(extSearchSnapshots.query);
-  for (const r of snapshotRows) todayCollectedKeywords.add(r.keyword);
+    .groupBy(extSearchEvents.keyword);
+  for (const r of eventRows) recentCollectedKeywords.add(r.keyword);
 
-  // 방법 3: ext_keyword_daily_stats 기반 (runDailyBatch가 통계 생성 시)
-  // ★ v8.5.6 FIX: interpolated/provisional은 보간 데이터이므로 "수집 완료"가 아님
-  //   raw_valid, anomaly, baseline만 실제 크롤링 데이터로 판단
-  const validRows = await db.select({
-    keyword: extKeywordDailyStats.query,
-  })
-    .from(extKeywordDailyStats)
-    .where(and(
-      eq(extKeywordDailyStats.userId, userId),
-      eq(extKeywordDailyStats.statDate, todayStr),
-      sql`${extKeywordDailyStats.dataStatus} IN ('raw_valid', 'anomaly', 'baseline')`,
-    ));
-  for (const r of validRows) todayCollectedKeywords.add(r.keyword);
+  // 방법 3 제거: daily_stats는 하루 단위 통계이므로 12시간 윈도우와 무관
+  // 같은 날 재수집 시 daily_stats는 upsert로 갱신됨
 
   // ── 공통 select 필드 ──
   const selectFields = {
@@ -562,10 +546,14 @@ export async function selectBatchKeywords(
     lastUserViewAt: extWatchKeywords.lastUserViewAt,
   };
 
-  // ── nextCollectAt 기반 만기 조건 (모든 티어 공통) ──
+  // ── 수집 대상 조건: nextCollectAt 만기 OR 12시간 경과 ──
+  // nextCollectAt 적응형 주기(24~120h)와 12시간 윈도우 중 빠른 쪽 적용
+  // → 12시간 지나면 nextCollectAt 무관하게 수집 가능
   const dueCondition = or(
     isNull(extWatchKeywords.nextCollectAt),
     lte(extWatchKeywords.nextCollectAt, nowStr),
+    isNull(extWatchKeywords.lastCollectedAt),
+    lte(extWatchKeywords.lastCollectedAt, cutoffStr),
   );
 
   // ── 티어 1: 핀 키워드 (nextCollectAt 만기 기준) ──
@@ -636,9 +624,8 @@ export async function selectBatchKeywords(
   ): BatchKeywordSelection | null => {
     if (seenKeywords.has(k.keyword)) return null;
 
-    // 오늘 이미 수집된 키워드 제외 (lastCollectedAt + daily_stats 이중 체크)
-    // ★ roundsToday 무관 — race condition 방지
-    if (todayCollectedKeywords.has(k.keyword)) {
+    // 최근 12시간 이내 수집된 키워드 제외
+    if (recentCollectedKeywords.has(k.keyword)) {
       return null;
     }
 
@@ -704,7 +691,7 @@ export async function selectBatchKeywords(
     if (entry) result.push(entry);
   }
 
-  console.log(`[selectBatchKeywords] userId=${userId} round=${roundsToday + 1} | active=${N(totalActive)} collectedToday=${todayCollectedKeywords.size} | tier1=${pinnedKeywords.length} tier2=${newKeywords.length} tier3=${regularKeywords.length} → selected=${result.length}/${effectiveLimit}`);
+  console.log(`[selectBatchKeywords] userId=${userId} round=${roundsToday + 1} | active=${N(totalActive)} recentlyCollected=${recentCollectedKeywords.size} | tier1=${pinnedKeywords.length} tier2=${newKeywords.length} tier3=${regularKeywords.length} → selected=${result.length}/${effectiveLimit}`);
 
   return {
     keywords: result,
@@ -1105,7 +1092,7 @@ export async function runDailyBatch(
   if (!db) return { processed: 0, updated: 0, errors: 0, hasMore: false, total: 0, results: [] };
 
   const now = nowKST();
-  const today = todayKST();
+  const today = now.toISOString().slice(0, 10);
 
   // 활성 키워드 가져오기
   let activeKeywords = await db.select()
@@ -1133,14 +1120,10 @@ export async function runDailyBatch(
 
   for (let ki = 0; ki < batchKeywords.length; ki++) {
     const kw = batchKeywords[ki];
-
     // ★ v8.5.8: 매 키워드마다 이벤트 루프 양보 (HTTP 요청 처리 기회 제공)
-    // 각 키워드는 computeDailyAggregation + rebuildKeywordDailyStatsForKeyword + recomputeCompositeScore
-    // 등 무거운 DB 작업을 수행하므로 매 키워드 후 yield 필수
     if (ki > 0) {
       await new Promise<void>(resolve => setImmediate(resolve));
     }
-
     try {
       // 일일 집계 계산
       const agg = await computeDailyAggregation(userId, kw.keyword, today);
@@ -1253,34 +1236,22 @@ export async function runDailyBatch(
     }
   }
 
-  // ★ v8.5.8: syncNaverSearchVolume은 bulkComputeStats 후속 작업 또는 syncNaverVolume 엔드포인트에서 별도 실행
-  // runDailyBatch에서 직접 호출하면 5초×N 키워드만큼 이벤트 루프 차단 → 제거
-  // (기존 v8.5.5 호출 제거)
+  // ★ v8.5.8: syncNaverSearchVolume은 syncNaverVolume 엔드포인트에서 별도 실행
+  // runDailyBatch 내부 호출 제거 (5초×N 키워드 이벤트 루프 차단 방지)
 
   return { processed, updated, errors, hasMore, total: totalKeywords, results };
 }
 
 // ============================================================
-//  v8.5.6: 네이버 검색량 수집 — 서버측 독립 실행
+//  v8.5.6: 네이버 검색량 수집 — 크롤링 완료 + 검색량 미수집 키워드만
 // ============================================================
 
 /**
- * 네이버 검색량 수집 (서버측 독립 실행)
- *
- * ★ v8.5.6 전면 개편:
- * - 필터링 로직:
- *   (A) 7일간 크롤링 데이터 없는 키워드 → 수집 제외 (크롤링된 키워드만 대상)
- *   (B) 이번 달 검색량 이력 없는 키워드 → 수집 대상
- *   ⇒ 크롤링 이력이 있으면서(A 통과) 검색량이 없는(B 해당) 키워드만 수집
- * - 간격: 키워드당 5초 (정밀도 향상 + 429 방어)
- * - 모드: 전체(all) / 선택(keywords[]) 수집
- * - 동종언어 매핑: 띄어쓰기·특수문자 정규화 + findBestNaverMatch
- * - 429 방어: 지수 백오프 10s/30s/60s, 연속 3회 중단
- *
- * @param userId - 사용자 ID
- * @param options.mode - 'all' (전체) | 'selected' (선택 키워드만)
- * @param options.keywords - mode='selected' 시 수집할 키워드 목록
- * @param options.forceRefresh - true면 이번 달 수집 이력 무시하고 재수집
+ * 크롤링 데이터(ext_keyword_daily_stats)는 있지만 이번 달 네이버 검색량이
+ * 아직 없는 키워드만 찾아서 네이버 API로 수집.
+ * - 전체 키워드를 보내지 않고 DB 조인으로 미수집분만 추출
+ * - 월 1회 수집 (같은 yearMonth면 스킵)
+ * - 1회 최대 30개로 제한 (API 레이트 리밋 방지)
  */
 export async function syncNaverSearchVolume(
   userId: number,
@@ -1308,171 +1279,123 @@ export async function syncNaverSearchVolume(
     rateLimitHit: false,
     filterStats: { totalActive: 0, crawledRecently: 0, alreadyHasVolume: 0, finalTarget: 0 },
   };
-
   const db = await getDb();
   if (!db) return emptyResult;
 
-  const todayStr = todayKST();
-  const yearMonth = todayStr.slice(0, 7); // YYYY-MM
-  const mode = options?.mode || "all";
-  const forceRefresh = options?.forceRefresh || false;
+  const now = nowKST();
+  const todayStr = now.toISOString().slice(0, 10);
+  const yearMonth = now.toISOString().slice(0, 7); // YYYY-MM
 
-  // ── 1. 대상 키워드 결정 ──
-  let targetKeywords: string[] = [];
-
-  if (mode === "selected" && options?.keywords?.length) {
-    // 선택 모드: 사용자가 지정한 키워드만
-    targetKeywords = options.keywords;
-  } else {
-    // 전체 모드: 활성 감시 키워드
-    const allActive = await db.select({ keyword: extWatchKeywords.keyword })
-      .from(extWatchKeywords)
-      .where(and(
-        eq(extWatchKeywords.userId, userId),
-        eq(extWatchKeywords.isActive, true),
-      ));
-    targetKeywords = allActive.map(r => r.keyword);
-  }
-
-  if (targetKeywords.length === 0) {
-    return emptyResult;
-  }
-
-  const totalActive = targetKeywords.length;
-
-  // ── 2. 필터 A: 7일 내 크롤링 된 키워드만 남기기 ──
-  // (크롤링 이력이 없는 키워드는 제외 — 크롤링 데이터와 연동)
-  const sevenDaysAgoStr = getPrevDateN(todayStr, 7);
-  const recentCrawled = await db.selectDistinct({ keyword: extKeywordDailyStats.query })
+  // ── 1) 최근 7일 크롤링 데이터가 있는 키워드 ──
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10);
+  const crawledRecently = await db.selectDistinct({ keyword: extKeywordDailyStats.query })
     .from(extKeywordDailyStats)
     .where(and(
       eq(extKeywordDailyStats.userId, userId),
       gte(extKeywordDailyStats.statDate, sevenDaysAgoStr),
     ));
-  const recentCrawledSet = new Set(recentCrawled.map(r => r.keyword));
+  const crawledSet = new Set(crawledRecently.map(r => r.keyword));
 
-  // 선택 모드에서는 크롤링 필터 생략 (사용자 의도 존중)
-  const crawlFilteredKeywords = mode === "selected"
-    ? targetKeywords
-    : targetKeywords.filter(kw => recentCrawledSet.has(kw));
+  // ── 2) 이번 달에 이미 검색량 수집된 키워드 ──
+  const existing = await db.select({ keyword: keywordSearchVolumeHistory.keyword })
+    .from(keywordSearchVolumeHistory)
+    .where(and(
+      eq(keywordSearchVolumeHistory.userId, userId),
+      eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
+      eq(keywordSearchVolumeHistory.source, "naver"),
+    ));
+  const existingSet = new Set(existing.map(r => r.keyword));
 
-  if (crawlFilteredKeywords.length === 0) {
-    console.log(`[syncNaverSearchVolume] 7일 내 크롤링된 키워드 0개 — 수집 스킵 (전체 ${totalActive}개)`);
-    return {
-      ...emptyResult,
-      filterStats: { totalActive, crawledRecently: 0, alreadyHasVolume: 0, finalTarget: 0 },
-    };
-  }
+  // ── 3) 전체 활성 키워드 ──
+  const activeKws = await db.select({ keyword: extWatchKeywords.keyword })
+    .from(extWatchKeywords)
+    .where(and(
+      eq(extWatchKeywords.userId, userId),
+      eq(extWatchKeywords.isActive, true),
+    ));
+  const totalActive = activeKws.length;
 
-  // ── 3. 필터 B: 이번 달 검색량 데이터 없는 키워드만 ──
-  let finalBatch: string[];
-  if (forceRefresh) {
-    finalBatch = [...crawlFilteredKeywords];
+  // ── 4) 대상 키워드 결정 ──
+  let targetKeywords: string[];
+  if (options?.mode === "selected" && options.keywords?.length) {
+    targetKeywords = options.keywords;
   } else {
-    const existing = await db.select({ keyword: keywordSearchVolumeHistory.keyword })
-      .from(keywordSearchVolumeHistory)
-      .where(and(
-        eq(keywordSearchVolumeHistory.userId, userId),
-        eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
-        eq(keywordSearchVolumeHistory.source, "naver"),
-      ));
-    // 정규화 기반 매칭 (띄어쓰기 변형 "냄비 받침" == "냄비받침")
-    const existingNormSet = new Set(existing.map(r => normalizeNaverKeyword(r.keyword)));
-    finalBatch = crawlFilteredKeywords.filter(kw => !existingNormSet.has(normalizeNaverKeyword(kw)));
+    targetKeywords = activeKws.map(r => r.keyword);
   }
 
-  const alreadyHasVolume = crawlFilteredKeywords.length - finalBatch.length;
+  // 최근 크롤링이 있는 키워드만
+  let filtered = targetKeywords.filter(kw => crawledSet.has(kw));
 
-  if (finalBatch.length === 0) {
-    console.log(`[syncNaverSearchVolume] 모든 키워드 수집 완료 (활성 ${totalActive}, 크롤링O ${crawlFilteredKeywords.length}, 검색량O ${alreadyHasVolume})`);
-    return {
-      ...emptyResult,
-      filterStats: { totalActive, crawledRecently: crawlFilteredKeywords.length, alreadyHasVolume, finalTarget: 0 },
-    };
+  // forceRefresh가 아니면 이미 수집된 키워드 제외
+  const alreadyHasVolume = filtered.filter(kw => existingSet.has(kw)).length;
+  if (!options?.forceRefresh) {
+    filtered = filtered.filter(kw => !existingSet.has(kw));
   }
 
-  console.log(`[syncNaverSearchVolume] 수집 시작: ${finalBatch.length}개 (활성 ${totalActive}, 크롤링O ${crawlFilteredKeywords.length}, 검색량O ${alreadyHasVolume}, mode=${mode}, force=${forceRefresh})`);
+  const filterStats = {
+    totalActive,
+    crawledRecently: crawledSet.size,
+    alreadyHasVolume,
+    finalTarget: filtered.length,
+  };
 
-  // ★ v8.5.7: 초기 진행 상태 콜백
-  const onProgress = options?.onProgress;
-  if (onProgress) onProgress(0, finalBatch.length);
+  if (filtered.length === 0) {
+    console.log(`[syncNaverSearchVolume] 대상 0개 (active=${totalActive}, crawled=${crawledSet.size}, existing=${existingSet.size})`);
+    return { ...emptyResult, filterStats };
+  }
 
-  // ── 4. 1개씩 5초 간격 수집 + 동종언어 매핑 강화 ──
+  // 1회 최대 30개 제한 (429 방지)
+  const batch = filtered.slice(0, 30);
+  console.log(`[syncNaverSearchVolume] 시작: ${batch.length}개 (active=${totalActive}, crawled=${crawledSet.size}, existing=${existingSet.size}, target=${filtered.length})`);
+  options?.onProgress?.(0, batch.length);
+
   let totalSaved = 0;
   let failCount = 0;
   let skipped = 0;
+
+  // ★ 1개씩 개별 호출 (5개 배치 시 1개라도 유효하지 않으면 전체 실패하는 문제 해결)
   let rateLimitHit = false;
   let consecutiveRateLimits = 0;
-
-  for (let i = 0; i < finalBatch.length; i++) {
+  for (let i = 0; i < batch.length; i++) {
     if (rateLimitHit) break;
 
-    const kw = finalBatch[i];
+    const kw = batch[i];
+    options?.onProgress?.(i + 1, batch.length);
     try {
-      // ★ v8.5.6: 키워드 변형 생성 후 공백 제거된 형태로 API 호출
       const results = await getNaverKeywords([kw]);
       consecutiveRateLimits = 0; // 성공 시 리셋
-
       if (results.length === 0) {
-        // 네이버에 등록되지 않은 키워드 → 미등록으로 기록
-        skipped++;
-        if (i % 50 === 0) console.log(`[syncNaverSearchVolume] ${i + 1}/${finalBatch.length} 진행 중 (성공 ${totalSaved}, 미등록 ${skipped})`);
-        // ★ 5초 간격 유지
-        if (i + 1 < finalBatch.length) await new Promise(resolve => setTimeout(resolve, 5000));
-        continue;
+        failCount++;
+        continue; // 네이버에 없는 키워드 → 스킵
       }
 
-      // ★ v8.5.6: 동종언어 매핑 강화 — findBestNaverMatch 사용
-      const bestMatch = findBestNaverMatch(kw, results);
+      for (const r of results) {
+        const totalSearch = (r.monthlyPcQcCnt || 0) + (r.monthlyMobileQcCnt || 0);
+        if (totalSearch === 0) continue;
 
-      if (bestMatch) {
-        const totalSearch = (bestMatch.monthlyPcQcCnt || 0) + (bestMatch.monthlyMobileQcCnt || 0);
-        if (totalSearch > 0) {
-          const upsertValues = {
-            pcSearch: bestMatch.monthlyPcQcCnt || 0,
-            mobileSearch: bestMatch.monthlyMobileQcCnt || 0,
-            totalSearch,
-            competitionIndex: bestMatch.compIdx || "낮음",
-            avgCpc: String((bestMatch.monthlyAvgPcClkCnt || 0) + (bestMatch.monthlyAvgMobileClkCnt || 0)),
-          };
+        const upsertValues = {
+          pcSearch: r.monthlyPcQcCnt || 0,
+          mobileSearch: r.monthlyMobileQcCnt || 0,
+          totalSearch,
+          competitionIndex: r.compIdx || "낮음",
+          avgCpc: String((r.monthlyAvgPcClkCnt || 0) + (r.monthlyAvgMobileClkCnt || 0)),
+        };
 
-          // relKeyword 형태로 저장
-          await db.insert(keywordSearchVolumeHistory).values({
-            userId,
-            keyword: bestMatch.relKeyword,
-            source: "naver",
-            yearMonth,
-            ...upsertValues,
-          }).onDuplicateKeyUpdate({ set: upsertValues });
+        // relKeyword로 저장
+        await db.insert(keywordSearchVolumeHistory).values({
+          userId,
+          keyword: r.relKeyword,
+          source: "naver",
+          yearMonth,
+          ...upsertValues,
+        }).onDuplicateKeyUpdate({ set: upsertValues });
+        totalSaved++;
 
-          // ★ 동종언어 매핑: 원본 키워드가 relKeyword와 다르면 원본으로도 저장
-          // "냄비 받침" → API 반환 "냄비받침" → 두 형태 모두 저장
-          if (kw !== bestMatch.relKeyword) {
-            await db.insert(keywordSearchVolumeHistory).values({
-              userId,
-              keyword: kw,
-              source: "naver",
-              yearMonth,
-              ...upsertValues,
-            }).onDuplicateKeyUpdate({ set: upsertValues });
-          }
-
-          totalSaved++;
-        } else {
-          skipped++; // 검색량 0
-        }
-      } else {
-        // 매칭 없음 — 첫 번째 유효 결과를 원본 키워드명으로 저장
-        const firstValid = results.find(r => ((r.monthlyPcQcCnt || 0) + (r.monthlyMobileQcCnt || 0)) > 0);
-        if (firstValid) {
-          const totalSearch = (firstValid.monthlyPcQcCnt || 0) + (firstValid.monthlyMobileQcCnt || 0);
-          const upsertValues = {
-            pcSearch: firstValid.monthlyPcQcCnt || 0,
-            mobileSearch: firstValid.monthlyMobileQcCnt || 0,
-            totalSearch,
-            competitionIndex: firstValid.compIdx || "낮음",
-            avgCpc: String((firstValid.monthlyAvgPcClkCnt || 0) + (firstValid.monthlyAvgMobileClkCnt || 0)),
-          };
+        // 원본 키워드(공백 포함)로도 저장
+        const relClean = r.relKeyword.replace(/\s+/g, "").toLowerCase();
+        if (kw !== r.relKeyword && kw.replace(/\s+/g, "").toLowerCase() === relClean) {
           await db.insert(keywordSearchVolumeHistory).values({
             userId,
             keyword: kw,
@@ -1480,24 +1403,13 @@ export async function syncNaverSearchVolume(
             yearMonth,
             ...upsertValues,
           }).onDuplicateKeyUpdate({ set: upsertValues });
-          totalSaved++;
-        } else {
-          skipped++; // 모든 결과 검색량 0
         }
       }
 
-      // ★ 키워드당 5초 간격 (정밀도 + 429 방어)
-      if (i + 1 < finalBatch.length) {
+      // API 레이트 리밋 방지: 매 요청마다 5초 대기
+      if (i + 1 < batch.length) {
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
-
-      // 진행률 로깅 (50개마다)
-      if ((i + 1) % 50 === 0) {
-        console.log(`[syncNaverSearchVolume] ${i + 1}/${finalBatch.length} 진행 중 (성공 ${totalSaved}, 실패 ${failCount}, 스킵 ${skipped})`);
-      }
-      // ★ v8.5.7: 진행 상태 콜백
-      if (onProgress) onProgress(i + 1, finalBatch.length);
-
     } catch (e: any) {
       failCount++;
       const errMsg = e?.message || "";
@@ -1505,38 +1417,34 @@ export async function syncNaverSearchVolume(
       if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
         consecutiveRateLimits++;
         if (consecutiveRateLimits >= 3) {
-          console.warn(`[syncNaverSearchVolume] 429 연속 ${consecutiveRateLimits}회 — ${i + 1}/${finalBatch.length}번째에서 중단 (성공: ${totalSaved})`);
+          console.warn(`[syncNaverSearchVolume] 429 연속 ${consecutiveRateLimits}회 — ${i + 1}/${batch.length}번째에서 중단 (성공: ${totalSaved})`);
           rateLimitHit = true;
         } else {
-          const backoffMs = consecutiveRateLimits === 1 ? 10000 : consecutiveRateLimits === 2 ? 30000 : 60000;
+          const backoffMs = consecutiveRateLimits === 1 ? 10000 : 30000;
           console.warn(`[syncNaverSearchVolume] 429 발생 (${consecutiveRateLimits}/3) — ${backoffMs / 1000}초 대기 후 재시도`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           i--; // 같은 키워드 재시도
-          failCount--;
+          failCount--; // 재시도할 것이므로 실패 카운트 복원
         }
       } else {
+        skipped++;
         console.error(`[syncNaverSearchVolume] "${kw}" 실패:`, errMsg);
       }
     }
   }
 
   if (failCount > 0) {
-    console.log(`[syncNaverSearchVolume] ${failCount}개 키워드 실패`);
+    console.log(`[syncNaverSearchVolume] ${failCount}개 키워드 네이버 미등록/실패 (정상)`);
   }
-  console.log(`[syncNaverSearchVolume] 완료: 성공 ${totalSaved}, 실패 ${failCount}, 스킵 ${skipped}, 429중단 ${rateLimitHit} (대상 ${finalBatch.length})`);
+  console.log(`[syncNaverSearchVolume] 완료: saved=${totalSaved}, fail=${failCount}, skipped=${skipped}, target=${batch.length}`);
 
   return {
     totalSaved,
     failCount,
     skipped,
-    targetCount: finalBatch.length,
+    targetCount: batch.length,
     rateLimitHit,
-    filterStats: {
-      totalActive,
-      crawledRecently: crawlFilteredKeywords.length,
-      alreadyHasVolume,
-      finalTarget: finalBatch.length,
-    },
+    filterStats,
   };
 }
 
@@ -1747,7 +1655,7 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
   if (!db) return { synced: 0, metricsCreated: 0, errors: 0 };
 
   const now = nowKST();
-  const today = todayKST();
+  const today = now.toISOString().slice(0, 10);
 
   // keywordMasterId가 없는 감시 키워드 조회
   const unlinked = await db.select()
@@ -1817,6 +1725,15 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
         .limit(1);
 
       if (dailyStatus) {
+        const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
+          .from(keywordDailyMetrics)
+          .where(and(
+            eq(keywordDailyMetrics.userId, userId),
+            eq(keywordDailyMetrics.keywordId, masterId),
+            eq(keywordDailyMetrics.metricDate, today),
+          ))
+          .limit(1);
+
         const metricData = {
           coupangProductCount: N(dailyStatus.productCount),
           coupangAvgPrice: N(dailyStatus.avgPrice),
@@ -1824,15 +1741,18 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
           coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
         };
 
-        // ★ v8.5.7: onDuplicateKeyUpdate로 race condition 방지
-        await db.insert(keywordDailyMetrics).values({
-          userId,
-          keywordId: masterId,
-          metricDate: today,
-          ...metricData,
-        }).onDuplicateKeyUpdate({
-          set: metricData,
-        });
+        if (existingMetric) {
+          await db.update(keywordDailyMetrics)
+            .set(metricData)
+            .where(eq(keywordDailyMetrics.id, existingMetric.id));
+        } else {
+          await db.insert(keywordDailyMetrics).values({
+            userId,
+            keywordId: masterId,
+            metricDate: today,
+            ...metricData,
+          });
+        }
         metricsCreated++;
       }
     } catch (err: any) {
@@ -1871,6 +1791,15 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
 
       if (!dailyStatus || !wk.keywordMasterId) continue;
 
+      const [existingMetric] = await db.select({ id: keywordDailyMetrics.id })
+        .from(keywordDailyMetrics)
+        .where(and(
+          eq(keywordDailyMetrics.userId, userId),
+          eq(keywordDailyMetrics.keywordId, wk.keywordMasterId),
+          eq(keywordDailyMetrics.metricDate, today),
+        ))
+        .limit(1);
+
       const metricData = {
         coupangProductCount: N(dailyStatus.productCount),
         coupangAvgPrice: N(dailyStatus.avgPrice),
@@ -1878,15 +1807,18 @@ export async function syncWatchKeywordsToMaster(userId: number): Promise<{
         coupangTop10ReviewDelta: N(dailyStatus.reviewGrowth),
       };
 
-      // ★ v8.5.7: onDuplicateKeyUpdate로 race condition 방지
-      await db.insert(keywordDailyMetrics).values({
-        userId,
-        keywordId: wk.keywordMasterId,
-        metricDate: today,
-        ...metricData,
-      }).onDuplicateKeyUpdate({
-        set: metricData,
-      });
+      if (existingMetric) {
+        await db.update(keywordDailyMetrics)
+          .set(metricData)
+          .where(eq(keywordDailyMetrics.id, existingMetric.id));
+      } else {
+        await db.insert(keywordDailyMetrics).values({
+          userId,
+          keywordId: wk.keywordMasterId,
+          metricDate: today,
+          ...metricData,
+        });
+      }
       metricsCreated++;
     } catch (err: any) {
       console.error(`[syncWatchToMaster] 쿠팡 데이터 갱신 에러 (${wk.keyword}):`, err.message);
