@@ -67,6 +67,7 @@ export const marketDataRouter = router({
 
       if (cached) {
         // DB에 이번 달 데이터가 있으면 API 호출 없이 즉시 반환
+        console.log(`[fetchSearchVolume] 캐시 히트 — "${mainKw}" (totalSearch: ${cached.totalSearch})`);
         return {
           success: true,
           saved: 0,
@@ -83,6 +84,8 @@ export const marketDataRouter = router({
           },
         };
       }
+
+      console.log(`[fetchSearchVolume] 캐시 미스 — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
 
       // 미수집 키워드만 네이버 API 호출
       let naverResults;
@@ -416,6 +419,14 @@ export const marketDataRouter = router({
         searchVolume: volume || null,
         cpc: cpc || null,
         searchVolumeEstimate,
+        _debug: {
+          keyword: input.keyword,
+          hasSnapshot: !!snapshot,
+          hasVolume: !!volume,
+          volumeTotal: volume ? Number(volume.totalSearch ?? 0) : null,
+          hasCpc: !!cpc,
+          estimateModel: searchVolumeEstimate?.model || null,
+        },
       };
     }),
 
