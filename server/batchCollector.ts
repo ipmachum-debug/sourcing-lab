@@ -488,12 +488,12 @@ export async function selectBatchKeywords(
       eq(extWatchKeywords.isActive, true),
     ));
 
-  // ── 3. 오늘 이미 수집된 키워드 목록 (자동 제외용) ──
-  // ★ race condition 방지: roundsToday 무관하게 항상 체크
-  //   autoCollectComplete가 아직 처리 중이라 roundsToday 미증가 상태에서도
-  //   lastCollectedAt 기반으로 이미 수집된 키워드를 확실히 제외
-  const todayCollectedKeywords: Set<string> = new Set();
-  const todayStartStr = todayStr + " 00:00:00";
+  // ── 3. 최근 12시간 이내 수집된 키워드 목록 (자동 제외용) ──
+  // ★ 24시간(자정 기준) → 12시간 슬라이딩 윈도우로 변경
+  //   어제 오후 수집 → 오늘 오전에 다시 수집 대상이 됨
+  const recentCollectedKeywords: Set<string> = new Set();
+  const twelveHoursAgo = new Date(now.getTime() - 12 * 3600 * 1000);
+  const cutoffStr = toMySQLTimestamp(twelveHoursAgo);
 
   // 방법 1: lastCollectedAt 기반 (markKeywordCollected가 수집 중 실시간 갱신)
   const collectedRows = await db.select({
@@ -503,9 +503,9 @@ export async function selectBatchKeywords(
     .where(and(
       eq(extWatchKeywords.userId, userId),
       eq(extWatchKeywords.isActive, true),
-      gte(extWatchKeywords.lastCollectedAt, todayStartStr),
+      gte(extWatchKeywords.lastCollectedAt, cutoffStr),
     ));
-  for (const r of collectedRows) todayCollectedKeywords.add(r.keyword);
+  for (const r of collectedRows) recentCollectedKeywords.add(r.keyword);
 
   // 방법 2: ext_search_events 기반 (saveSearchEvent가 markKeywordCollected보다 먼저 호출)
   // markKeywordCollected 실패해도 이미 수집된 키워드를 잡아냄
@@ -515,21 +515,13 @@ export async function selectBatchKeywords(
     .from(extSearchEvents)
     .where(and(
       eq(extSearchEvents.userId, userId),
-      gte(extSearchEvents.createdAt, todayStartStr),
+      gte(extSearchEvents.createdAt, cutoffStr),
     ))
     .groupBy(extSearchEvents.keyword);
-  for (const r of eventRows) todayCollectedKeywords.add(r.keyword);
+  for (const r of eventRows) recentCollectedKeywords.add(r.keyword);
 
-  // 방법 3: ext_keyword_daily_stats 기반 (runDailyBatch가 통계 생성 시)
-  const validRows = await db.select({
-    keyword: extKeywordDailyStats.query,
-  })
-    .from(extKeywordDailyStats)
-    .where(and(
-      eq(extKeywordDailyStats.userId, userId),
-      eq(extKeywordDailyStats.statDate, todayStr),
-    ));
-  for (const r of validRows) todayCollectedKeywords.add(r.keyword);
+  // 방법 3 제거: daily_stats는 하루 단위 통계이므로 12시간 윈도우와 무관
+  // 같은 날 재수집 시 daily_stats는 upsert로 갱신됨
 
   // ── 공통 select 필드 ──
   const selectFields = {
@@ -627,9 +619,8 @@ export async function selectBatchKeywords(
   ): BatchKeywordSelection | null => {
     if (seenKeywords.has(k.keyword)) return null;
 
-    // 오늘 이미 수집된 키워드 제외 (lastCollectedAt + daily_stats 이중 체크)
-    // ★ roundsToday 무관 — race condition 방지
-    if (todayCollectedKeywords.has(k.keyword)) {
+    // 최근 12시간 이내 수집된 키워드 제외
+    if (recentCollectedKeywords.has(k.keyword)) {
       return null;
     }
 
@@ -695,7 +686,7 @@ export async function selectBatchKeywords(
     if (entry) result.push(entry);
   }
 
-  console.log(`[selectBatchKeywords] userId=${userId} round=${roundsToday + 1} | active=${N(totalActive)} collectedToday=${todayCollectedKeywords.size} | tier1=${pinnedKeywords.length} tier2=${newKeywords.length} tier3=${regularKeywords.length} → selected=${result.length}/${effectiveLimit}`);
+  console.log(`[selectBatchKeywords] userId=${userId} round=${roundsToday + 1} | active=${N(totalActive)} recentlyCollected=${recentCollectedKeywords.size} | tier1=${pinnedKeywords.length} tier2=${newKeywords.length} tier3=${regularKeywords.length} → selected=${result.length}/${effectiveLimit}`);
 
   return {
     keywords: result,
