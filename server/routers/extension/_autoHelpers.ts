@@ -3,6 +3,7 @@
  * autoComputeKeywordDailyStat, autoMatchTrackedProducts
  *
  * ★ v7.6.0: 정규화/판매추정은 단일 서비스(rebuildKeywordDailyStatsForKeyword)로 위임.
+ * ★ v8.5.9: 디바운스 + lightMode로 이벤트 루프 차단 최소화.
  */
 import { getDb } from "../../db";
 import {
@@ -12,13 +13,32 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { rebuildKeywordDailyStatsForKeyword } from "../../lib/keywordDailyStatsService";
 
+// ★ v8.5.9: 디바운스 — 동일 키워드에 대해 60초 이내 중복 rebuildStats 방지
+const recentRebuildMap = new Map<string, number>(); // "userId:keyword" → timestamp
+const REBUILD_DEBOUNCE_MS = 60_000; // 60초
+
+// 메모리 누수 방지: 5분마다 만료된 엔트리 정리
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, ts] of recentRebuildMap) {
+    if (now - ts > REBUILD_DEBOUNCE_MS * 2) recentRebuildMap.delete(key);
+  }
+}, 300_000);
+
 /**
  * 스냅샷 저장/업데이트 후 호출.
  * ext_keyword_daily_stats를 단일 서비스로 재계산.
+ * ★ v8.5.9: lightMode + 디바운스 적용
  */
 export async function autoComputeKeywordDailyStat(userId: number, query: string, db: any) {
   try {
-    await rebuildKeywordDailyStatsForKeyword(db, userId, query);
+    const key = `${userId}:${query}`;
+    const lastRun = recentRebuildMap.get(key);
+    if (lastRun && Date.now() - lastRun < REBUILD_DEBOUNCE_MS) {
+      return; // 60초 이내 중복 → 스킵
+    }
+    recentRebuildMap.set(key, Date.now());
+    await rebuildKeywordDailyStatsForKeyword(db, userId, query, { lightMode: true });
   } catch (err) {
     console.error("[autoComputeKeywordDailyStat]", err);
   }

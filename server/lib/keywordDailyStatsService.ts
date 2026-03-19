@@ -201,6 +201,8 @@ export async function rebuildKeywordDailyStatsForKeyword(
     };
     reviewToSalesFactor?: number;
     windowDays?: number;
+    /** ★ v8.5.9: lightMode — 오늘 데이터만 upsert, 과거 재보정(10단계) 생략 */
+    lightMode?: boolean;
   } = {},
 ): Promise<RebuildResult> {
   const factor = opts.reviewToSalesFactor ?? 20;
@@ -793,6 +795,22 @@ export async function rebuildKeywordDailyStatsForKeyword(
   // ================================================================
   //  10단계: 과거 데이터 재보정
   // ================================================================
+  // ★ v8.5.9: lightMode일 때 과거 재보정 생략 (saveSearchEvent에서 호출 시)
+  // runDailyBatch에서만 fullMode로 호출하여 과거 데이터 정확도 보장
+  if (opts.lightMode) {
+    const spikeLevel = detectSpike(todaySalesEstimate, todayMa7);
+    console.log(`[rebuildStats] "${query}" rGrowth:${todayReviewGrowth} sales:${todaySalesEstimate} ma7:${todayMa7} ma30:${todayMa30} spike:${spikeLevel} demand:${statData.demandScore} kwScore:${statData.keywordScore} finalized:${todayMetric?.isFinalized ?? false} ppdAvg:${avgReliableDelta} ppdCount:${reliableDeltas.length} [LIGHT]`);
+    return {
+      success: true,
+      daysProcessed: 1,
+      reviewGrowth: todayReviewGrowth,
+      salesEstimate: todaySalesEstimate,
+      salesEstimateMa7: todayMa7,
+      salesEstimateMa30: todayMa30,
+      spikeLevel: spikeLevel,
+    };
+  }
+
   // ★ v8.3.1: per-product delta 기반 정확한 값으로 모든 과거 데이터 업데이트
   for (const metric of normalizedMetrics) {
     if (metric.metricDate === todayStr) continue;
