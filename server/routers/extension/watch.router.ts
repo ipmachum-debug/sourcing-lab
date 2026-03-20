@@ -725,22 +725,26 @@ export const watchRouter = router({
           gte(extKeywordDailyStats.statDate, sevenDaysAgoStr),
         ));
 
-      // 이번 달 네이버 검색량 수집된 키워드 수
+      // ★ v8.6.0: 7일 내 네이버 검색량 수집된 키워드 수 (월별 → 7일 캐시)
+      const sevenDaysAgoTs = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        .toISOString().slice(0, 19).replace("T", " ");
       const [volCount] = await db.select({
         count: sql<number>`COUNT(DISTINCT keyword)`,
       })
         .from(keywordSearchVolumeHistory)
         .where(and(
           eq(keywordSearchVolumeHistory.userId, userId),
-          eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
           eq(keywordSearchVolumeHistory.source, "naver"),
+          sql`${keywordSearchVolumeHistory.createdAt} >= ${sevenDaysAgoTs}`,
         ));
 
       const totalActive = N(kwCount?.active);
       const crawledRecently = N(crawlCount?.count);
       const hasVolume = N(volCount?.count);
       const needsVolume = Math.max(0, crawledRecently - hasVolume);
-      const estimatedTimeMinutes = Math.ceil(needsVolume * 5 / 60);
+      // ★ v8.6.0: 분산 수집이므로 예상 시간 = 하루 분량(1/7)만 계산
+      const dailyTarget = Math.ceil(needsVolume / 7);
+      const estimatedTimeMinutes = Math.ceil(dailyTarget * 5 / 60);
 
       // ★ v8.5.7: 실시간 수집 진행 상태
       const syncProg = naverSyncProgress.get(userId);
@@ -753,10 +757,12 @@ export const watchRouter = router({
         totalKeywords: N(kwCount?.total),
         totalActive,
         crawledRecently7d: crawledRecently,
-        hasVolumeThisMonth: hasVolume,
+        hasVolumeThisMonth: hasVolume, // 하위 호환: 7일 캐시 기준
+        hasVolumeLast7d: hasVolume,
         needsVolumeCollection: needsVolume,
         estimatedTimeMinutes,
         yearMonth,
+        cacheTtlDays: 7,
         // 실시간 진행 상태
         syncRunning,
         syncCurrent,

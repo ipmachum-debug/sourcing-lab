@@ -40,19 +40,24 @@ export const marketDataRouter = router({
       now.setHours(now.getHours() + 9);
       const yearMonth = now.toISOString().slice(0, 7);
 
-      // ★ v8.5.6: 이번 달 이미 수집된 키워드는 DB에서 반환 (네이버 API 호출 스킵)
+      // ★ v8.6.0: 7일 캐시 — 최근 7일 내 수집된 데이터가 있으면 API 호출 스킵
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 19).replace("T", " ");
+
       const existing = await db.select({
         keyword: keywordSearchVolumeHistory.keyword,
         totalSearch: keywordSearchVolumeHistory.totalSearch,
         pcSearch: keywordSearchVolumeHistory.pcSearch,
         mobileSearch: keywordSearchVolumeHistory.mobileSearch,
         competitionIndex: keywordSearchVolumeHistory.competitionIndex,
+        yearMonth: keywordSearchVolumeHistory.yearMonth,
+        createdAt: keywordSearchVolumeHistory.createdAt,
       })
         .from(keywordSearchVolumeHistory)
         .where(and(
           eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
           eq(keywordSearchVolumeHistory.source, "naver"),
-          eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
+          sql`${keywordSearchVolumeHistory.createdAt} >= ${sevenDaysAgoStr}`,
         ));
 
       const existingMap = new Map<string, typeof existing[0]>();
@@ -60,18 +65,18 @@ export const marketDataRouter = router({
         existingMap.set(normalizeNaverKeyword(row.keyword), row);
       }
 
-      // 이미 수집된 키워드인지 확인
+      // 이미 수집된 키워드인지 확인 (7일 내 캐시)
       const mainKw = originalKeywords[0];
       const mainClean = normalizeNaverKeyword(mainKw || "");
       const cached = existingMap.get(mainClean);
 
       if (cached) {
-        // DB에 이번 달 데이터가 있으면 API 호출 없이 즉시 반환
-        console.log(`[fetchSearchVolume] 캐시 히트 — "${mainKw}" (totalSearch: ${cached.totalSearch})`);
+        // 7일 내 데이터가 있으면 API 호출 없이 즉시 반환
+        console.log(`[fetchSearchVolume] 캐시 히트(7d) — "${mainKw}" (totalSearch: ${cached.totalSearch})`);
         return {
           success: true,
           saved: 0,
-          yearMonth,
+          yearMonth: cached.yearMonth,
           totalResults: 1,
           naverNotFound: false,
           fromCache: true,
@@ -85,7 +90,7 @@ export const marketDataRouter = router({
         };
       }
 
-      console.log(`[fetchSearchVolume] 캐시 미스 — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
+      console.log(`[fetchSearchVolume] 캐시 미스(7d) — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
 
       // 미수집 키워드만 네이버 API 호출
       let naverResults;

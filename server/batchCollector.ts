@@ -1250,7 +1250,8 @@ export async function runDailyBatch(
  * 크롤링 데이터(ext_keyword_daily_stats)는 있지만 이번 달 네이버 검색량이
  * 아직 없는 키워드만 찾아서 네이버 API로 수집.
  * - 전체 키워드를 보내지 않고 DB 조인으로 미수집분만 추출
- * - 월 1회 수집 (같은 yearMonth면 스킵)
+ * - 7일 1회 수집 (7일 내 수집된 키워드 스킵)
+ * - 키워드 분산 수집 (요일별 1/7씩 로테이션)
  * - 1회 최대 30개로 제한 (API 레이트 리밋 방지)
  */
 export async function syncNaverSearchVolume(
@@ -1298,13 +1299,14 @@ export async function syncNaverSearchVolume(
     ));
   const crawledSet = new Set(crawledRecently.map(r => r.keyword));
 
-  // ── 2) 이번 달에 이미 검색량 수집된 키워드 ──
+  // ── 2) ★ v8.6.0: 7일 내 이미 검색량 수집된 키워드 (월별 → 7일 캐시로 변경) ──
+  const sevenDaysAgoTs = sevenDaysAgo.toISOString().slice(0, 19).replace("T", " ");
   const existing = await db.select({ keyword: keywordSearchVolumeHistory.keyword })
     .from(keywordSearchVolumeHistory)
     .where(and(
       eq(keywordSearchVolumeHistory.userId, userId),
-      eq(keywordSearchVolumeHistory.yearMonth, yearMonth),
       eq(keywordSearchVolumeHistory.source, "naver"),
+      sql`${keywordSearchVolumeHistory.createdAt} >= ${sevenDaysAgoTs}`,
     ));
   const existingSet = new Set(existing.map(r => r.keyword));
 
@@ -1344,6 +1346,30 @@ export async function syncNaverSearchVolume(
   if (filtered.length === 0) {
     console.log(`[syncNaverSearchVolume] 대상 0개 (active=${totalActive}, crawled=${crawledSet.size}, existing=${existingSet.size})`);
     return { ...emptyResult, filterStats };
+  }
+
+  // ★ v8.6.0: 키워드 분산 수집 — 요일별 1/7씩 로테이션 (서버 부하 분산)
+  // forceRefresh나 selected 모드에서는 분산 없이 전체 수집
+  if (!options?.forceRefresh && options?.mode !== "selected") {
+    const dayOfYear = Math.floor(
+      (now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / (24 * 60 * 60 * 1000),
+    );
+    const todaySlot = dayOfYear % 7;
+    // 키워드를 해시값 기반으로 7개 슬롯에 분배
+    const distributed = filtered.filter(kw => {
+      let hash = 0;
+      for (let i = 0; i < kw.length; i++) {
+        hash = ((hash << 5) - hash + kw.charCodeAt(i)) | 0;
+      }
+      return ((hash >>> 0) % 7) === todaySlot;
+    });
+    console.log(`[syncNaverSearchVolume] 분산 수집: slot=${todaySlot}/7, 전체=${filtered.length}, 오늘분=${distributed.length}`);
+    filtered = distributed;
+
+    if (filtered.length === 0) {
+      console.log(`[syncNaverSearchVolume] 오늘 슬롯에 해당하는 키워드 없음 (정상)`);
+      return { ...emptyResult, filterStats: { ...filterStats, finalTarget: 0 } };
+    }
   }
 
   // 1회 최대 30개 제한 (429 방지)
