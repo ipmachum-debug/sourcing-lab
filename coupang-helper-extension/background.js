@@ -796,7 +796,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let naverNotFound = false;
           if (!collector.running) {
             try {
-              const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
+              // ★ v8.6.0: 큐 우회 직접 호출 — 배치 saveSearchEvent 큐에 밀리지 않음
+              const fetchResp = await apiClient.fetchSearchVolumeDirect({ keywords: [message.keyword] });
               naverFetchData = fetchResp?.result?.data;
               naverNotFound = naverFetchData?.naverNotFound === true;
             } catch (e) {
@@ -809,9 +810,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           // 2) 통합 마켓 데이터 조회
+          // ★ v8.6.0: 큐 우회 직접 호출 — 배치 수집 중에도 즉시 서버 응답 수신
           let data = {};
           try {
-            const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+            const resp = await apiClient.getKeywordMarketDataDirect({ keyword: message.keyword });
             data = resp?.result?.data || {};
           } catch (marketErr) {
             console.log('[SH] getKeywordMarketData 실패 (directVolume fallback 사용):', marketErr.message);
