@@ -790,14 +790,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'no_keyword' });
             return;
           }
-          // ★ v8.4.4: 검색량 조회 개선
-          // 1) 먼저 Naver 검색량 fetch (DB에 없으면 API 호출 + directVolume 반환)
+          // ★ v8.5.5: 검색량 조회 — 서버에서 7일 캐시 자동 적용
+          // 서버가 7일 이내 데이터가 있으면 Naver API 호출 없이 캐시 반환 (cached: true)
           let naverFetchData = null;
           let naverNotFound = false;
           try {
             const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
             naverFetchData = fetchResp?.result?.data;
             naverNotFound = naverFetchData?.naverNotFound === true;
+            if (naverFetchData?.cached) {
+              console.log('[SH] 검색량 캐시 사용:', message.keyword, '(7일 이내 데이터)');
+            }
           } catch (e) {
             const errMsg = e.message || '';
             if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {

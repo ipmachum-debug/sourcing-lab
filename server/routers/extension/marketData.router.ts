@@ -28,13 +28,56 @@ export const marketDataRouter = router({
   fetchSearchVolume: protectedProcedure
     .input(z.object({
       keywords: z.array(z.string().min(1).max(255)).min(1).max(20),
+      forceRefresh: z.boolean().optional().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB 연결 실패" });
 
-      // ★ v8.4.4: 원본 키워드 보존 (공백 포함 가능)
+      // ★ v8.5.5: 원본 키워드 보존 (공백 포함 가능)
       const originalKeywords = input.keywords;
+
+      // ★ v8.5.5: 7일 캐시 — 최근 7일 이내 수집된 데이터가 있으면 API 호출 스킵
+      const CACHE_DAYS = 7;
+      const cacheCutoff = new Date();
+      cacheCutoff.setHours(cacheCutoff.getHours() + 9); // KST
+      cacheCutoff.setDate(cacheCutoff.getDate() - CACHE_DAYS);
+      const cacheCutoffStr = cacheCutoff.toISOString().slice(0, 19).replace("T", " ");
+
+      if (!input.forceRefresh && originalKeywords.length === 1) {
+        const kw = originalKeywords[0];
+        const kwClean = kw.replace(/\s+/g, "");
+
+        // DB에서 7일 이내 데이터 조회
+        const [cached] = await db.select()
+          .from(keywordSearchVolumeHistory)
+          .where(and(
+            eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+            sql`${keywordSearchVolumeHistory.keyword} IN (${kw}, ${kwClean})`,
+            eq(keywordSearchVolumeHistory.source, "naver"),
+            gte(keywordSearchVolumeHistory.createdAt, cacheCutoffStr),
+          ))
+          .orderBy(desc(keywordSearchVolumeHistory.createdAt))
+          .limit(1);
+
+        if (cached) {
+          return {
+            success: true,
+            saved: 0,
+            yearMonth: cached.yearMonth,
+            totalResults: 1,
+            naverNotFound: false,
+            cached: true,
+            directVolume: {
+              keyword: kw,
+              pcSearch: Number(cached.pcSearch ?? 0),
+              mobileSearch: Number(cached.mobileSearch ?? 0),
+              totalSearch: Number(cached.totalSearch ?? 0),
+              competitionIndex: cached.competitionIndex || "낮음",
+            },
+          };
+        }
+      }
 
       // 네이버 API 호출 (naverAds.ts에서 공백 자동 제거 + 400 에러 처리)
       let naverResults;
@@ -110,6 +153,7 @@ export const marketDataRouter = router({
         yearMonth,
         totalResults: naverResults.length,
         naverNotFound,
+        cached: false,
         // ★ v8.4.4: 원본 키워드의 검색량을 직접 전달 (DB timing 이슈 우회)
         directVolume: naverResults.length > 0 ? (() => {
           const inputClean = originalKeywords[0]?.replace(/\s+/g, "").toLowerCase();
