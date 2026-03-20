@@ -1409,6 +1409,9 @@ export async function syncNaverSearchVolume(
           avgCpc: String((r.monthlyAvgPcClkCnt || 0) + (r.monthlyAvgMobileClkCnt || 0)),
         };
 
+        // ★ v8.6.0: createdAt도 갱신 — 7일 캐시 TTL이 리셋되도록
+        const upsertSet = { ...upsertValues, createdAt: sql`NOW()` };
+
         // relKeyword로 저장
         await db.insert(keywordSearchVolumeHistory).values({
           userId,
@@ -1416,7 +1419,7 @@ export async function syncNaverSearchVolume(
           source: "naver",
           yearMonth,
           ...upsertValues,
-        }).onDuplicateKeyUpdate({ set: upsertValues });
+        }).onDuplicateKeyUpdate({ set: upsertSet });
         totalSaved++;
 
         // 원본 키워드(공백 포함)로도 저장
@@ -1428,7 +1431,7 @@ export async function syncNaverSearchVolume(
             source: "naver",
             yearMonth,
             ...upsertValues,
-          }).onDuplicateKeyUpdate({ set: upsertValues });
+          }).onDuplicateKeyUpdate({ set: upsertSet });
         }
       }
 

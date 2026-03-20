@@ -139,13 +139,16 @@ export const marketDataRouter = router({
           ),
         };
 
+        // ★ v8.6.0: createdAt도 갱신 — 7일 캐시 TTL이 리셋되도록
+        const upsertSet = { ...upsertValues, createdAt: sql`NOW()` };
+
         await db.insert(keywordSearchVolumeHistory).values({
           userId: ctx.user!.id,
           keyword: r.relKeyword,
           source: "naver",
           yearMonth,
           ...upsertValues,
-        }).onDuplicateKeyUpdate({ set: upsertValues });
+        }).onDuplicateKeyUpdate({ set: upsertSet });
         saved++;
 
         const relClean = normalizeNaverKeyword(r.relKeyword);
@@ -157,7 +160,7 @@ export const marketDataRouter = router({
             source: "naver",
             yearMonth,
             ...upsertValues,
-          }).onDuplicateKeyUpdate({ set: upsertValues });
+          }).onDuplicateKeyUpdate({ set: upsertSet });
         }
       }
 
