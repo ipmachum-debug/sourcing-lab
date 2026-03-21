@@ -242,6 +242,20 @@ export const watchRouter = router({
         .limit(input.limit)
         .offset(input.offset);
 
+      // ★ v8.6.3: 오늘 수집된 키워드 Set — 확장프로그램 "미수집만" 필터용
+      const now = new Date();
+      now.setHours(now.getHours() + 9); // KST
+      const todayStr = now.toISOString().slice(0, 10);
+      const todaySnapshots = await db.select({
+        query: extSearchSnapshots.query,
+      })
+        .from(extSearchSnapshots)
+        .where(and(
+          eq(extSearchSnapshots.userId, ctx.user!.id),
+          sql`DATE(${extSearchSnapshots.createdAt}) = ${todayStr}`,
+        ));
+      const collectedTodaySet = new Set(todaySnapshots.map(s => s.query));
+
       // v7.3.2: daily_stats에서 keywordScore, demandScore 가져오기
       const dailyStatsMap = new Map<string, { keywordScore: number; demandScore: number; reviewGrowth: number; salesEstimate: number; competitionScore: number }>();
       const dailyRows = await db.select({
@@ -300,6 +314,8 @@ export const watchRouter = router({
           dailySalesEstimate: ds?.salesEstimate || 0,
           dailyCompetitionScore: ds?.competitionScore || 0,
           createdAt: r.createdAt,
+          // ★ v8.6.3: 오늘 수집 여부 — 확장프로그램 "미수집만" 필터용
+          collectedToday: collectedTodaySet.has(r.keyword),
         };
       });
 

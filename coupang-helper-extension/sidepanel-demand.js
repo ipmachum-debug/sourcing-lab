@@ -979,10 +979,10 @@ function updateChosungCounts() {
 function filterManualKeywords() {
   var filtered = manualAllKeywords;
 
-  // 미수집만 필터
+  // ★ v8.6.3: 미수집만 필터 — 웹 대시보드와 동일 기준 (오늘 스냅샷 없음)
   if (manualShowUncollectedOnly) {
     filtered = filtered.filter(function(kw) {
-      return !kw.lastSearchedAt;
+      return !kw.collectedToday;
     });
   }
 
