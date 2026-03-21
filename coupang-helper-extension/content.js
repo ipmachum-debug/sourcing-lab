@@ -2033,14 +2033,19 @@
   async function fetchMarketData(keyword) {
     if (!keyword) return { _error: 'no_keyword' };
     const cached = cachedMarketData[keyword];
-    // ★ v8.6.1: 캐시 히트 시 즉시 반환 (10분 캐시)
+    // ★ v8.6.2: 캐시 히트 시 즉시 반환 (10분 캐시)
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
-    // ★ v8.6.1: MV3 Service Worker 응답 누락 대응 — 최대 3회 시도 (간격 증가)
+    // ★ v8.6.2: MV3 Service Worker 응답 누락 대응 — 최대 3회 시도 (간격 증가)
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
         console.log('[SH] fetchMarketData resp:', keyword, 'attempt=' + attempt, JSON.stringify(resp)?.slice(0, 300));
         if (resp?.ok && resp.data) {
+          // ★ v8.6.2: _timeout 응답은 캐시하지 않고, 빈 데이터로 반환 (자동 재시도 트리거)
+          if (resp.data._timeout) {
+            console.log('[SH] 서버 타임아웃 응답, 빈 데이터 반환:', keyword);
+            return resp.data;
+          }
           cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
           return resp.data;
         }
@@ -2051,7 +2056,7 @@
           await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
           continue;
         }
-        // ★ v8.6.1: 실패했지만 이전 캐시가 있으면 만료 캐시라도 반환 (stale data > no data)
+        // ★ v8.6.2: 실패했지만 이전 캐시가 있으면 만료 캐시라도 반환 (stale data > no data)
         if (cached) {
           console.log('[SH] 서버 실패 → 만료 캐시 반환:', keyword);
           return cached.data;
@@ -2060,7 +2065,7 @@
       } catch (e) {
         console.log('[SH] 마켓 데이터 조회 실패:', keyword, 'attempt=' + attempt, e.message);
         if (attempt < 2) { await new Promise(r => setTimeout(r, (attempt + 1) * 1000)); continue; }
-        // ★ v8.6.1: 최종 실패 시에도 이전 캐시 반환
+        // ★ v8.6.2: 최종 실패 시에도 이전 캐시 반환
         if (cached) {
           console.log('[SH] 최종 실패 → 만료 캐시 반환:', keyword);
           return cached.data;
@@ -2068,14 +2073,44 @@
         return { _error: e.message };
       }
     }
-    // ★ v8.6.1: 재시도 모두 실패 시 이전 캐시 반환
+    // ★ v8.6.2: 재시도 모두 실패 시 이전 캐시 반환
     if (cached) return cached.data;
     return { _error: 'max_retries' };
   }
 
-  function renderSearchVolume(marketData) {
+  // ★ v8.6.2: 검색량 자동 재시도 — 타임아웃/에러 시 15초 후 자동 재조회
+  let _svRetryTimer = null;
+  let _svRetryCount = 0;
+  const SV_MAX_AUTO_RETRY = 3;
+
+  function scheduleSearchVolumeRetry(keyword) {
+    if (_svRetryTimer || _svRetryCount >= SV_MAX_AUTO_RETRY) return;
+    _svRetryCount++;
+    const delay = _svRetryCount * 10000; // 10초, 20초, 30초
+    console.log(`[SH] 검색량 자동 재시도 예약: ${keyword} (${_svRetryCount}/${SV_MAX_AUTO_RETRY}, ${delay/1000}초 후)`);
+    _svRetryTimer = setTimeout(async () => {
+      _svRetryTimer = null;
+      // 캐시 무효화 후 재시도
+      delete cachedMarketData[keyword];
+      const data = await fetchMarketData(keyword);
+      renderSearchVolume(data, keyword);
+    }, delay);
+  }
+
+  function renderSearchVolume(marketData, keyword) {
     const el = document.getElementById('sh-sv-section');
     if (!el) return;
+
+    // ★ v8.6.2: _timeout 응답 — 서버 응답 느림, 자동 재시도
+    if (marketData && marketData._timeout) {
+      el.innerHTML = `
+        <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">조회 중</span></div>
+        <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
+          서버 응답 대기 중... 자동 재시도합니다
+        </div>`;
+      if (keyword) scheduleSearchVolumeRetry(keyword);
+      return;
+    }
 
     // 에러 상태 처리
     if (!marketData || marketData._error) {
@@ -2088,16 +2123,15 @@
             서버 로그인 후 조회 가능
           </div>`;
       } else {
-        // ★ v8.5.8: 에러 내용에 따라 차별화 표시
+        // ★ v8.6.2: "서버 통신 지연" 대신 "조회 중" + 자동 재시도
         const isRetryError = errMsg === 'max_retries' || errMsg === 'no_data';
         el.innerHTML = `
-          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">${isRetryError ? '재시도' : '수집 중'}</span></div>
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">${isRetryError ? '조회 중' : '수집 중'}</span></div>
           <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-            ${isRetryError ? '서버 통신 지연 — 페이지 새로고침 시 표시됩니다' : '네이버 검색량 데이터 수집 중...'}
-          </div>
-          <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
-            ${isRetryError ? '(수집 완료 후 자동 표시)' : '데이터가 축적되면 자동으로 표시됩니다'}
+            ${isRetryError ? '검색량 데이터 조회 중... 잠시 후 자동 표시됩니다' : '네이버 검색량 데이터 수집 중...'}
           </div>`;
+        // ★ v8.6.2: 에러 시 자동 재시도
+        if (isRetryError && keyword) scheduleSearchVolumeRetry(keyword);
       }
       return;
     }
@@ -2398,7 +2432,8 @@
 
     // 검색량 비동기 로딩
     if (q) {
-      fetchMarketData(q).then(data => renderSearchVolume(data));
+      _svRetryCount = 0; // 패널 렌더 시 재시도 카운터 리셋
+      fetchMarketData(q).then(data => renderSearchVolume(data, q));
     }
   }
 
