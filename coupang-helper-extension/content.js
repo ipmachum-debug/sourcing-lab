@@ -2389,7 +2389,6 @@
 
     // 검색량 비동기 로딩
     if (q) {
-      _svRetryCount = 0; // 패널 렌더 시 재시도 카운터 리셋
       fetchMarketData(q).then(data => renderSearchVolume(data, q));
     }
   }
