@@ -2033,10 +2033,10 @@
   async function fetchMarketData(keyword) {
     if (!keyword) return { _error: 'no_keyword' };
     const cached = cachedMarketData[keyword];
-    // 10분 캐시
+    // ★ v8.6.1: 캐시 히트 시 즉시 반환 (10분 캐시)
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
-    // ★ v8.5.8: MV3 Service Worker 응답 누락 대응 — 최대 2회 시도
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // ★ v8.6.1: MV3 Service Worker 응답 누락 대응 — 최대 3회 시도 (간격 증가)
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
         console.log('[SH] fetchMarketData resp:', keyword, 'attempt=' + attempt, JSON.stringify(resp)?.slice(0, 300));
@@ -2046,18 +2046,30 @@
         }
         if (resp?.error === 'UNAUTHORIZED') return { _error: 'UNAUTHORIZED' };
         // resp가 undefined → Service Worker 응답 누락, 재시도
-        if (!resp && attempt === 0) {
-          console.log('[SH] 응답 없음, 2초 후 재시도...', keyword);
-          await new Promise(r => setTimeout(r, 2000));
+        if (!resp && attempt < 2) {
+          console.log(`[SH] 응답 없음, ${attempt + 1}초 후 재시도...`, keyword);
+          await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
           continue;
+        }
+        // ★ v8.6.1: 실패했지만 이전 캐시가 있으면 만료 캐시라도 반환 (stale data > no data)
+        if (cached) {
+          console.log('[SH] 서버 실패 → 만료 캐시 반환:', keyword);
+          return cached.data;
         }
         return { _error: resp?.error || 'no_data' };
       } catch (e) {
         console.log('[SH] 마켓 데이터 조회 실패:', keyword, 'attempt=' + attempt, e.message);
-        if (attempt === 0) { await new Promise(r => setTimeout(r, 2000)); continue; }
+        if (attempt < 2) { await new Promise(r => setTimeout(r, (attempt + 1) * 1000)); continue; }
+        // ★ v8.6.1: 최종 실패 시에도 이전 캐시 반환
+        if (cached) {
+          console.log('[SH] 최종 실패 → 만료 캐시 반환:', keyword);
+          return cached.data;
+        }
         return { _error: e.message };
       }
     }
+    // ★ v8.6.1: 재시도 모두 실패 시 이전 캐시 반환
+    if (cached) return cached.data;
     return { _error: 'max_retries' };
   }
 

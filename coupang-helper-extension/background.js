@@ -782,7 +782,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== v8.4: 검색량 조회 (content.js 플로팅 패널용) =====
+    // ===== v8.6.1: 검색량 조회 (content.js 플로팅 패널용) =====
+    // 호출 순서 최적화: getKeywordMarketData(query, 빠름) 먼저 → searchVolume 없을 때만 fetchSearchVolume
     case 'GET_KEYWORD_MARKET_DATA': {
       (async () => {
         try {
@@ -790,71 +791,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'no_keyword' });
             return;
           }
-          // ★ v8.6.0: 배치 수집 중에도 fetchSearchVolume 호출 (7일 캐시 → DB 즉시 반환)
-          // 캐시된 키워드는 네이버 API 호출 없이 DB에서 즉시 반환하므로 429 위험 없음
-          let naverFetchData = null;
-          let naverNotFound = false;
-          try {
-            const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
-            naverFetchData = fetchResp?.result?.data;
-            naverNotFound = naverFetchData?.naverNotFound === true;
-          } catch (e) {
-            const errMsg = e.message || '';
-            if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
-              sendResponse({ ok: false, error: 'UNAUTHORIZED' });
-              return;
-            }
-            console.log('[SH] Naver 검색량 fetch 실패 (계속 진행):', errMsg);
-          }
-          // 2) 통합 마켓 데이터 조회
+
+          // ★ Step 1: 통합 마켓 데이터 먼저 조회 (GET query = 빠름, DB에서 기존 데이터 반환)
           let data = {};
           try {
             const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
             data = resp?.result?.data || {};
           } catch (marketErr) {
-            console.log('[SH] getKeywordMarketData 실패 (directVolume fallback 사용):', marketErr.message);
-            // ★ v8.5.8: getKeywordMarketData 실패해도 directVolume이 있으면 사용
-            if (naverFetchData?.directVolume) {
-              data = { searchVolume: naverFetchData.directVolume, snapshot: null, cpc: null, searchVolumeEstimate: null };
-            } else {
-              throw marketErr; // directVolume도 없으면 에러 전파
+            const errMsg = marketErr.message || '';
+            if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
+              sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+              return;
+            }
+            console.log('[SH] getKeywordMarketData 실패:', errMsg);
+          }
+
+          // ★ Step 2: searchVolume이 없을 때만 fetchSearchVolume 호출 (API 큐 절약)
+          // 이미 searchVolume이 있으면 추가 API 호출 불필요
+          let naverNotFound = false;
+          if (!data.searchVolume || Number(data.searchVolume.totalSearch || 0) === 0) {
+            try {
+              const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
+              const naverFetchData = fetchResp?.result?.data;
+              naverNotFound = naverFetchData?.naverNotFound === true;
+
+              if (naverFetchData?.directVolume) {
+                data.searchVolume = naverFetchData.directVolume;
+                // 추정치 보정
+                if (data.searchVolumeEstimate && data.searchVolumeEstimate.estimatedMonthlySearch === 0) {
+                  const tv = naverFetchData.directVolume.totalSearch || 0;
+                  data.searchVolumeEstimate.estimatedMonthlySearch = Math.round(tv * 0.33);
+                  data.searchVolumeEstimate.components = {
+                    ...(data.searchVolumeEstimate.components || {}),
+                    naverEstimate: Math.round(tv * 0.33),
+                  };
+                }
+              }
+            } catch (e) {
+              const errMsg = e.message || '';
+              if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
+                sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+                return;
+              }
+              console.log('[SH] fetchSearchVolume 실패 (계속 진행):', errMsg);
             }
           }
 
-          // ★ v8.4.4: searchVolume이 null이면 directVolume으로 보충
-          if (!data.searchVolume && naverFetchData?.directVolume) {
-            data.searchVolume = naverFetchData.directVolume;
-            // 추정치도 재계산 (naverTotalSearch가 0이었기 때문)
-            if (data.searchVolumeEstimate && data.searchVolumeEstimate.estimatedMonthlySearch === 0) {
-              const tv = naverFetchData.directVolume.totalSearch || 0;
-              data.searchVolumeEstimate.estimatedMonthlySearch = Math.round(tv * 0.33);
-              data.searchVolumeEstimate.components = {
-                ...(data.searchVolumeEstimate.components || {}),
-                naverEstimate: Math.round(tv * 0.33),
-              };
-            }
-          }
-          // ★ v8.4.4: searchVolume이 여전히 없고 Naver에 해당 키워드가 아예 없는 경우
+          // Naver 미등록 키워드 표시
           if (!data.searchVolume && naverNotFound) {
             data._naverNotFound = true;
           }
-          // ★ v8.4.4: searchVolume이 없고 fetch 결과에 saved > 0이면 재조회 (DB timing 이슈)
-          if (!data.searchVolume && !naverNotFound && naverFetchData?.saved > 0) {
-            try {
-              const retry = await apiClient.getKeywordMarketData({ keyword: message.keyword });
-              const retryData = retry?.result?.data;
-              if (retryData?.searchVolume) {
-                Object.assign(data, retryData);
-                console.log('[SH] 마켓 데이터 재조회 성공:', message.keyword, retryData.searchVolume?.totalSearch);
-              }
-            } catch (_) {}
-          }
+
           console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`,
             `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}, naverNotFound=${naverNotFound}`);
           sendResponse({ ok: true, data });
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
-          // TRPC UNAUTHORIZED 에러 감지
           const errMsg = e.message || '';
           if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
             sendResponse({ ok: false, error: 'UNAUTHORIZED' });
