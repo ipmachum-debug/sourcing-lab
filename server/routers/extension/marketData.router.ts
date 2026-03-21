@@ -10,12 +10,12 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.6.4";
+const EXTENSION_LATEST_VERSION = "8.7";
 const EXTENSION_CHANGELOG = [
-  "SW 워밍업 핑 — 첫 요청 시 undefined 반환 방지",
-  "재시도 타이밍 최적화 (0.5초/1.5초/3초 빠른 재시도)",
-  "자동 재시도 단축 (3초/8초/15초/25초)",
-  "Extension context invalidated 에러 핸들링",
+  "검색량 동기 응답 아키텍처 재설계 — fire-and-forget 제거",
+  "background.js: fetchSearchVolume 완료 후 응답 (첫 로드에 검색량 포함)",
+  "content.js: 복잡한 retry 시스템 제거, 단순 3회 재시도",
+  "DB 인덱스 추가 (검색량 조회 성능 개선)",
 ];
 import { getDb } from "../../db";
 import {
@@ -165,7 +165,7 @@ export const marketDataRouter = router({
       try {
         naverResults = await getNaverKeywords(originalKeywords);
       } catch (err: any) {
-        // ★ v8.6.3: 429 에러 → 기존 캐시가 있으면 그걸로 반환
+        // ★ v8.6.1: 429 에러 → 기존 캐시가 있으면 그걸로 반환
         const errMsg = err?.message || "";
         if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
           console.warn(`[fetchSearchVolume] 429 — "${mainKw}" ${fallbackVolume ? '기존 캐시 반환' : '스킵'}`);

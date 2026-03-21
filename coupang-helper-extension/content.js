@@ -2030,7 +2030,7 @@
   let cachedMarketData = {};  // keyword → { searchVolume, fetchedAt }
   const COUPANG_RATIO = 0.33; // 네이버 → 쿠팡 트래픽 비율
 
-  // ★ v8.6.4: SW 워밍업 — 첫 메시지 전에 SW를 깨워 응답 누락 방지
+  // ★ v8.7: SW 워밍업 — 첫 메시지 전에 SW를 깨워 응답 누락 방지
   let _swReady = false;
   async function ensureSwReady() {
     if (_swReady) return;
@@ -2040,16 +2040,16 @@
     } catch (_) {}
   }
 
+  // ★ v8.7: 단순화된 fetchMarketData — background.js가 검색량 수집까지 완료 후 응답
+  //   복잡한 retry/재시도 제거, SW 워밍업 + 2회 재시도만 유지
   async function fetchMarketData(keyword) {
     if (!keyword) return { _error: 'no_keyword' };
     const cached = cachedMarketData[keyword];
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
 
-    // ★ v8.6.4: SW 워밍업
     await ensureSwReady();
 
-    // ★ v8.6.4: 최대 4회 시도, 빠른 첫 재시도 (0.5초)
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
         console.log('[SH] fetchMarketData resp:', keyword, 'attempt=' + attempt, JSON.stringify(resp)?.slice(0, 300));
@@ -2058,46 +2058,25 @@
           return resp.data;
         }
         if (resp?.error === 'UNAUTHORIZED') return { _error: 'UNAUTHORIZED' };
-        if (!resp && attempt < 3) {
-          const delay = attempt === 0 ? 500 : attempt === 1 ? 1500 : 3000;
-          console.log(`[SH] 응답 없음, ${delay/1000}초 후 재시도...`, keyword);
-          await new Promise(r => setTimeout(r, delay));
+        // resp가 undefined면 SW가 아직 준비 안 됨 → 1초 대기 후 재시도
+        if (!resp && attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000));
+          _swReady = false; // SW 재워밍업
+          await ensureSwReady();
           continue;
         }
-        if (cached) return cached.data;
         return { _error: resp?.error || 'no_data' };
       } catch (e) {
         console.log('[SH] 마켓 데이터 조회 실패:', keyword, 'attempt=' + attempt, e.message);
         if (e.message?.includes('Extension context invalidated')) return { _error: 'context_invalidated' };
-        if (attempt < 3) {
-          const delay = attempt === 0 ? 500 : attempt === 1 ? 1500 : 3000;
-          await new Promise(r => setTimeout(r, delay));
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000));
           continue;
         }
-        if (cached) return cached.data;
         return { _error: e.message };
       }
     }
-    if (cached) return cached.data;
     return { _error: 'max_retries' };
-  }
-
-  // ★ v8.6.4: 검색량 자동 재시도 — 3초/8초/15초/25초 (첫 재시도 단축)
-  let _svRetryTimer = null;
-  let _svRetryCount = 0;
-  const SV_MAX_AUTO_RETRY = 4;
-
-  function scheduleSearchVolumeRetry(keyword) {
-    if (_svRetryTimer || _svRetryCount >= SV_MAX_AUTO_RETRY) return;
-    _svRetryCount++;
-    const delay = _svRetryCount === 1 ? 3000 : _svRetryCount === 2 ? 8000 : _svRetryCount === 3 ? 15000 : 25000;
-    console.log(`[SH] 검색량 자동 재시도 예약: ${keyword} (${_svRetryCount}/${SV_MAX_AUTO_RETRY}, ${delay/1000}초 후)`);
-    _svRetryTimer = setTimeout(async () => {
-      _svRetryTimer = null;
-      delete cachedMarketData[keyword];
-      const data = await fetchMarketData(keyword);
-      renderSearchVolume(data, keyword);
-    }, delay);
   }
 
   function renderSearchVolume(marketData, keyword) {
@@ -2115,19 +2094,16 @@
             서버 로그인 후 조회 가능
           </div>`;
       } else {
-        // ★ v8.6.3: 에러 시 "조회 중" + 자동 재시도 (더 이상 "서버 통신 지연" 표시 안 함)
         el.innerHTML = `
-          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">조회 중</span></div>
-          <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-            검색량 데이터를 불러오는 중입니다
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge na">조회 실패</span></div>
+          <div style="text-align:center !important;padding:10px !important;color:#94a3b8 !important;font-size:11px !important;">
+            새로고침 후 다시 시도해 주세요
           </div>`;
-        if (keyword) scheduleSearchVolumeRetry(keyword);
       }
       return;
     }
 
-    // ★ v8.6.3: 데이터는 받았지만 searchVolume이 없는 경우
-    //   background.js가 비동기로 fetchSearchVolume 수집 중 → 자동 재시도로 해결
+    // ★ v8.7: 데이터는 받았지만 검색량이 없는 경우 (네이버 미등록 or 아직 데이터 없음)
     const hasNaver = marketData.searchVolume && Number(marketData.searchVolume.totalSearch || 0) > 0;
     const hasEstimate = marketData.searchVolumeEstimate && marketData.searchVolumeEstimate.estimatedMonthlySearch > 0;
     if (!hasNaver && !hasEstimate) {
@@ -2143,20 +2119,17 @@
           </div>`;
         return;
       }
-      // ★ v8.6.3: "수집 중" 표시 + 자동 재시도 예약
-      //   background에서 fetchSearchVolume이 비동기로 진행 중이므로 5초 후 재시도
+      // 데이터 없음 — 새로고침 안내
       el.innerHTML = `
-        <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">수집 중</span></div>
-        <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-          네이버 검색량 수집 중... 잠시 후 자동 표시
+        <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge na">데이터 없음</span></div>
+        <div style="text-align:center !important;padding:10px !important;color:#94a3b8 !important;font-size:11px !important;">
+          검색량 데이터가 아직 수집되지 않았습니다
+        </div>
+        <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
+          새로고침하면 자동 수집됩니다
         </div>`;
-      if (keyword) scheduleSearchVolumeRetry(keyword);
       return;
     }
-
-    // ★ v8.6.3: 데이터 성공적 수신 → 재시도 카운터 리셋
-    _svRetryCount = 0;
-    if (_svRetryTimer) { clearTimeout(_svRetryTimer); _svRetryTimer = null; }
 
     const sv = marketData.searchVolume || {};
     const est = marketData.searchVolumeEstimate;
