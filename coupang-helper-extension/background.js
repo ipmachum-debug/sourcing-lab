@@ -788,9 +788,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== v8.6.3: 검색량 조회 (content.js 플로팅 패널용) =====
-    // ★ 핵심: "즉시 응답" — getKeywordMarketData만 기다리고 바로 응답
-    //   fetchSearchVolume은 비동기로 백그라운드에서 실행 (다음 조회 시 반영)
+    // ===== v8.7: 검색량 조회 — 동기 응답 아키텍처 =====
+    // ★ 핵심: searchVolume이 없으면 fetchSearchVolume 완료까지 대기 후 응답
+    //   fire-and-forget 제거 → 첫 응답에 항상 데이터 포함
     case 'GET_KEYWORD_MARKET_DATA': {
       (async () => {
         try {
@@ -799,7 +799,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
 
-          // ★ Step 1: 통합 마켓 데이터 조회 (DB 쿼리만, 보통 50-200ms)
+          // Step 1: 통합 마켓 데이터 조회 (DB 캐시, 보통 50-200ms)
           let data = {};
           try {
             const resp = await apiClient.getKeywordMarketData({ keyword: message.keyword });
@@ -813,23 +813,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log('[SH] getKeywordMarketData 실패:', errMsg);
           }
 
-          // ★ Step 2: 즉시 응답 — searchVolume 유무와 관계없이 현재 데이터 반환
+          // Step 2: searchVolume 없으면 네이버 API 호출 후 재조회
           const hasSearchVolume = data.searchVolume && Number(data.searchVolume.totalSearch || 0) > 0;
+          if (!hasSearchVolume) {
+            console.log(`[SH] 검색량 없음, 네이버 API 호출: ${message.keyword}`);
+            try {
+              const fetchResp = await apiClient.fetchSearchVolume({ keywords: [message.keyword] });
+              const d = fetchResp?.result?.data;
+              console.log(`[SH] 검색량 수집 완료: ${message.keyword}`,
+                `saved=${d?.saved || 0}, naverNotFound=${d?.naverNotFound || false}`);
+
+              // 새 데이터 저장됨 or 캐시 히트 → 재조회하여 최신 데이터 반환
+              if (d?.saved > 0 || d?.fromCache) {
+                const resp2 = await apiClient.getKeywordMarketData({ keyword: message.keyword });
+                const data2 = resp2?.result?.data;
+                if (data2) {
+                  data = data2;
+                  // getKeywordMarketData가 volume을 못 찾았지만 directVolume이 있으면 보충
+                  if (!data.searchVolume && d?.directVolume) {
+                    data.searchVolume = d.directVolume;
+                  }
+                }
+              } else if (d?.naverNotFound) {
+                data._naverNotFound = true;
+              }
+            } catch (fetchErr) {
+              console.log('[SH] 검색량 수집 실패:', fetchErr.message);
+            }
+          }
+
           console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`,
             `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}`);
           sendResponse({ ok: true, data });
-
-          // ★ Step 3: searchVolume 없으면 백그라운드에서 네이버 API 호출 (fire-and-forget)
-          //   다음 조회(자동 재시도 or 새로고침)에서 DB 캐시로 반환됨
-          if (!hasSearchVolume) {
-            apiClient.fetchSearchVolume({ keywords: [message.keyword] })
-              .then(fetchResp => {
-                const d = fetchResp?.result?.data;
-                console.log(`[SH] 백그라운드 검색량 수집 완료: ${message.keyword}`,
-                  `saved=${d?.saved || 0}, naverNotFound=${d?.naverNotFound || false}`);
-              })
-              .catch(e => console.log('[SH] 백그라운드 검색량 수집 실패:', e.message));
-          }
         } catch (e) {
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
           const errMsg = e.message || '';
