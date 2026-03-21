@@ -92,23 +92,74 @@ export const marketDataRouter = router({
 
       console.log(`[fetchSearchVolume] 캐시 미스(7d) — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
 
+      // ★ v8.6.1: 7일 캐시 미스 시, 네이버 API 호출 전에 기존 데이터(기간 무관) 미리 확보
+      // API 실패해도 이 데이터를 directVolume으로 반환
+      let fallbackVolume: {
+        keyword: string;
+        pcSearch: number;
+        mobileSearch: number;
+        totalSearch: number;
+        competitionIndex: string;
+      } | null = null;
+      try {
+        const [oldRow] = await db.select({
+          keyword: keywordSearchVolumeHistory.keyword,
+          totalSearch: keywordSearchVolumeHistory.totalSearch,
+          pcSearch: keywordSearchVolumeHistory.pcSearch,
+          mobileSearch: keywordSearchVolumeHistory.mobileSearch,
+          competitionIndex: keywordSearchVolumeHistory.competitionIndex,
+        })
+          .from(keywordSearchVolumeHistory)
+          .where(and(
+            eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+            eq(keywordSearchVolumeHistory.source, "naver"),
+            sql`REPLACE(${keywordSearchVolumeHistory.keyword}, ' ', '') = REPLACE(${mainKw}, ' ', '')`,
+          ))
+          .orderBy(desc(keywordSearchVolumeHistory.createdAt))
+          .limit(1);
+        if (oldRow && Number(oldRow.totalSearch ?? 0) > 0) {
+          fallbackVolume = {
+            keyword: mainKw,
+            pcSearch: Number(oldRow.pcSearch ?? 0),
+            mobileSearch: Number(oldRow.mobileSearch ?? 0),
+            totalSearch: Number(oldRow.totalSearch ?? 0),
+            competitionIndex: oldRow.competitionIndex || "낮음",
+          };
+          console.log(`[fetchSearchVolume] 기존 캐시 확보 — "${mainKw}" (totalSearch: ${fallbackVolume.totalSearch})`);
+        }
+      } catch (_) {}
+
       // 미수집 키워드만 네이버 API 호출
       let naverResults;
       try {
         naverResults = await getNaverKeywords(originalKeywords);
       } catch (err: any) {
-        // ★ v8.5.6: 429 에러는 조용히 처리 — 다음 배치에서 syncNaverSearchVolume이 수집
+        // ★ v8.6.1: 429 에러 → 기존 캐시가 있으면 그걸로 반환
         const errMsg = err?.message || "";
         if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
-          console.warn(`[fetchSearchVolume] 429 — "${mainKw}" 스킵 (배치에서 재수집)`);
+          console.warn(`[fetchSearchVolume] 429 — "${mainKw}" ${fallbackVolume ? '기존 캐시 반환' : '스킵'}`);
           return {
             success: true,
             saved: 0,
             yearMonth,
-            totalResults: 0,
+            totalResults: fallbackVolume ? 1 : 0,
             naverNotFound: false,
             rateLimited: true,
-            directVolume: null,
+            fromCache: !!fallbackVolume,
+            directVolume: fallbackVolume,
+          };
+        }
+        // 기타 에러도 기존 캐시가 있으면 반환
+        if (fallbackVolume) {
+          console.warn(`[fetchSearchVolume] API 오류 — "${mainKw}" 기존 캐시 반환:`, errMsg);
+          return {
+            success: true,
+            saved: 0,
+            yearMonth,
+            totalResults: 1,
+            naverNotFound: false,
+            fromCache: true,
+            directVolume: fallbackVolume,
           };
         }
         throw new TRPCError({

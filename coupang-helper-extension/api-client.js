@@ -296,14 +296,6 @@ class ApiClient {
     return this._call('extension.getKeywordMarketData', data, 'query');
   }
 
-  // ★ v8.6.0: 큐 우회 직접 호출 — 배치 saveSearchEvent 큐에 밀리지 않고 즉시 실행
-  async getKeywordMarketDataDirect(data) {
-    return this._callInner('extension.getKeywordMarketData', data, 'query');
-  }
-  async fetchSearchVolumeDirect(data) {
-    return this._callInner('extension.fetchSearchVolume', data, 'mutation');
-  }
-
   // ===== v7.2: 내부 통신 (리트라이·타임아웃·인증 갱신 강화) =====
 
   // 동시 요청 큐 — 서버 과부하 방지 (최대 3개)
