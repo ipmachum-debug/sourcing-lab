@@ -782,13 +782,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
-    // ===== v8.6.1: 검색량 조회 (content.js 플로팅 패널용) =====
+    // ===== v8.6.2: 검색량 조회 (content.js 플로팅 패널용) =====
+    // ★ 핵심 변경: 8초 전체 타임아웃으로 SW 종료 전에 반드시 응답
     // 호출 순서 최적화: getKeywordMarketData(query, 빠름) 먼저 → searchVolume 없을 때만 fetchSearchVolume
     case 'GET_KEYWORD_MARKET_DATA': {
       (async () => {
+        let responded = false;
+        const safeRespond = (payload) => {
+          if (responded) return;
+          responded = true;
+          sendResponse(payload);
+        };
+
+        // ★ 8초 안전 타임아웃 — SW 종료(30s) 전에 반드시 응답
+        const safetyTimer = setTimeout(() => {
+          console.warn('[SH] GET_KEYWORD_MARKET_DATA 8초 타임아웃:', message.keyword);
+          safeRespond({ ok: true, data: { _timeout: true } });
+        }, 8000);
+
         try {
           if (!message.keyword) {
-            sendResponse({ ok: false, error: 'no_keyword' });
+            clearTimeout(safetyTimer);
+            safeRespond({ ok: false, error: 'no_keyword' });
             return;
           }
 
@@ -800,11 +815,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } catch (marketErr) {
             const errMsg = marketErr.message || '';
             if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
-              sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+              clearTimeout(safetyTimer);
+              safeRespond({ ok: false, error: 'UNAUTHORIZED' });
               return;
             }
             console.log('[SH] getKeywordMarketData 실패:', errMsg);
           }
+
+          // 이미 타임아웃으로 응답했으면 중단
+          if (responded) return;
 
           // ★ Step 2: searchVolume이 없을 때만 fetchSearchVolume 호출 (API 큐 절약)
           // 이미 searchVolume이 있으면 추가 API 호출 불필요
@@ -830,28 +849,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             } catch (e) {
               const errMsg = e.message || '';
               if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
-                sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+                clearTimeout(safetyTimer);
+                safeRespond({ ok: false, error: 'UNAUTHORIZED' });
                 return;
               }
               console.log('[SH] fetchSearchVolume 실패 (계속 진행):', errMsg);
             }
           }
 
+          // 이미 타임아웃으로 응답했으면 중단
+          if (responded) return;
+
           // Naver 미등록 키워드 표시
           if (!data.searchVolume && naverNotFound) {
             data._naverNotFound = true;
           }
 
+          clearTimeout(safetyTimer);
           console.log(`[SH] 마켓 데이터 응답: ${message.keyword}`,
             `sv=${data.searchVolume?.totalSearch || 'null'}, est=${data.searchVolumeEstimate?.model || 'null'}, snap=${!!data.snapshot}, naverNotFound=${naverNotFound}`);
-          sendResponse({ ok: true, data });
+          safeRespond({ ok: true, data });
         } catch (e) {
+          clearTimeout(safetyTimer);
           console.error('[SH] 마켓 데이터 조회 실패:', e.message);
           const errMsg = e.message || '';
           if (errMsg.includes('UNAUTHORIZED') || errMsg.includes('401') || errMsg.includes('인증')) {
-            sendResponse({ ok: false, error: 'UNAUTHORIZED' });
+            safeRespond({ ok: false, error: 'UNAUTHORIZED' });
           } else {
-            sendResponse({ ok: false, error: errMsg });
+            safeRespond({ ok: false, error: errMsg });
           }
         }
       })();

@@ -415,60 +415,66 @@ export const marketDataRouter = router({
         .orderBy(desc(keywordCpcCache.collectedAt))
         .limit(1);
 
-      // ★ v8.4: 검색량 추정 (자동 전환 Simple → Hybrid)
+      // ★ v8.6.2: 검색량 추정 — 3초 타임아웃 (DB 부하 시 스킵, 핵심 데이터 반환 우선)
       let searchVolumeEstimate = null;
       try {
-        // 최근 90일 일별 통계에서 리뷰 delta 데이터 수집
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-        const dateStr = ninetyDaysAgo.toISOString().slice(0, 10);
+        const estimatePromise = (async () => {
+          const ninetyDaysAgo = new Date();
+          ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+          const dateStr = ninetyDaysAgo.toISOString().slice(0, 10);
 
-        const dailyStats = await db
-          .select({
-            statDate: extKeywordDailyStats.statDate,
-            reviewDeltaUsed: extKeywordDailyStats.reviewDeltaUsed,
-            coverageRatio: extKeywordDailyStats.coverageRatio,
-            dataStatus: extKeywordDailyStats.dataStatus,
-            isProvisional: extKeywordDailyStats.isProvisional,
-          })
-          .from(extKeywordDailyStats)
-          .where(
-            and(
-              eq(extKeywordDailyStats.userId, ctx.user!.id),
-              eq(extKeywordDailyStats.query, input.keyword),
-              gte(extKeywordDailyStats.statDate, dateStr),
-            ),
-          )
-          .orderBy(asc(extKeywordDailyStats.statDate));
+          const dailyStats = await db
+            .select({
+              statDate: extKeywordDailyStats.statDate,
+              reviewDeltaUsed: extKeywordDailyStats.reviewDeltaUsed,
+              coverageRatio: extKeywordDailyStats.coverageRatio,
+              dataStatus: extKeywordDailyStats.dataStatus,
+              isProvisional: extKeywordDailyStats.isProvisional,
+            })
+            .from(extKeywordDailyStats)
+            .where(
+              and(
+                eq(extKeywordDailyStats.userId, ctx.user!.id),
+                eq(extKeywordDailyStats.query, input.keyword),
+                gte(extKeywordDailyStats.statDate, dateStr),
+              ),
+            )
+            .orderBy(asc(extKeywordDailyStats.statDate));
 
-        // 신뢰 delta 필터링 (raw_valid 데이터만)
-        const reliableDeltas = dailyStats.filter(
-          d =>
-            d.dataStatus === "raw_valid" &&
-            !d.isProvisional &&
-            Number(d.reviewDeltaUsed ?? 0) >= 0,
-        );
+          const reliableDeltas = dailyStats.filter(
+            d =>
+              d.dataStatus === "raw_valid" &&
+              !d.isProvisional &&
+              Number(d.reviewDeltaUsed ?? 0) >= 0,
+          );
 
-        const avgMatchRate =
-          reliableDeltas.length > 0
-            ? reliableDeltas.reduce((s, d) => s + Number(d.coverageRatio ?? 0), 0) /
-              reliableDeltas.length
-            : 0;
+          const avgMatchRate =
+            reliableDeltas.length > 0
+              ? reliableDeltas.reduce((s, d) => s + Number(d.coverageRatio ?? 0), 0) /
+                reliableDeltas.length
+              : 0;
 
-        const avgDailyReviewGrowth =
-          reliableDeltas.length > 0
-            ? reliableDeltas.reduce((s, d) => s + Number(d.reviewDeltaUsed ?? 0), 0) /
-              reliableDeltas.length
-            : 0;
+          const avgDailyReviewGrowth =
+            reliableDeltas.length > 0
+              ? reliableDeltas.reduce((s, d) => s + Number(d.reviewDeltaUsed ?? 0), 0) /
+                reliableDeltas.length
+              : 0;
 
-        searchVolumeEstimate = estimateSearchVolume({
-          naverTotalSearch: volume ? Number(volume.totalSearch ?? 0) : 0,
-          avgDailyReviewGrowth,
-          avgMatchRate,
-          dataDays: dailyStats.length,
-          reliableDeltaCount: reliableDeltas.length,
-          autoCompleteCount: 0, // Phase 2: 자동완성 크롤링 추가 시 연결
-        });
+          return estimateSearchVolume({
+            naverTotalSearch: volume ? Number(volume.totalSearch ?? 0) : 0,
+            avgDailyReviewGrowth,
+            avgMatchRate,
+            dataDays: dailyStats.length,
+            reliableDeltaCount: reliableDeltas.length,
+            autoCompleteCount: 0,
+          });
+        })();
+
+        // 3초 타임아웃 — 추정 데이터는 보조 정보이므로 느리면 스킵
+        searchVolumeEstimate = await Promise.race([
+          estimatePromise,
+          new Promise<null>(r => setTimeout(() => r(null), 3000)),
+        ]);
       } catch (e) {
         console.error("[getKeywordMarketData] 검색량 추정 실패:", e);
       }
