@@ -7,7 +7,16 @@
  *   3. 스냅샷 기반 시장 지표 집계 (배송, 가격, 리뷰 분포)
  */
 import { z } from "zod";
-import { protectedProcedure, router } from "../../_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
+
+// ★ v8.6.1: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
+const EXTENSION_LATEST_VERSION = "8.6.1";
+const EXTENSION_CHANGELOG = [
+  "검색량 표시 안정화 (호출 순서 최적화)",
+  "서버 통신 지연 해결 (fallback 캐시)",
+  "7일 캐시 + 키워드 분산 수집",
+  "rebuildStats 경량화 (lightMode)",
+];
 import { getDb } from "../../db";
 import {
   keywordSearchVolumeHistory,
@@ -560,5 +569,17 @@ export const marketDataRouter = router({
       }
 
       return results;
+    }),
+
+  // ============================================================
+  //  5. 확장프로그램 최신 버전 조회 (공개 — 로그인 불필요)
+  // ============================================================
+  getExtensionLatestVersion: publicProcedure
+    .query(() => {
+      return {
+        version: EXTENSION_LATEST_VERSION,
+        changelog: EXTENSION_CHANGELOG,
+        downloadUrl: `/coupang-helper-extension-v${EXTENSION_LATEST_VERSION}.zip`,
+      };
     }),
 });

@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -27,6 +28,76 @@ import {
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
+
+// ★ v8.6.1: 확장프로그램 최신 버전 안내 배너
+function ExtensionUpgradeBanner() {
+  const { data: versionInfo } = trpc.extension.getExtensionLatestVersion.useQuery(
+    undefined,
+    { staleTime: 1000 * 60 * 30, refetchOnWindowFocus: false } // 30분 캐시
+  );
+  const [dismissed, setDismissed] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
+
+  if (!versionInfo || dismissed) return null;
+
+  const latestVersion = versionInfo.version;
+  // 이 버전을 이미 닫았으면 표시하지 않음 (localStorage — 브라우저 종료 후에도 유지)
+  const dismissKey = `sh-upgrade-seen-${latestVersion}`;
+  if (localStorage.getItem(dismissKey)) return null;
+
+  const handleDismiss = () => {
+    localStorage.setItem(dismissKey, '1');
+    setDismissed(true);
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-pink-200 bg-gradient-to-r from-pink-50 to-purple-50 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="text-2xl mt-0.5">🧩</span>
+          <div>
+            <p className="font-semibold text-sm text-pink-800">
+              소싱 헬퍼 확장프로그램 v{latestVersion} 사용 가능
+            </p>
+            {showChangelog && versionInfo.changelog && (
+              <ul className="mt-2 space-y-1">
+                {versionInfo.changelog.map((item: string, i: number) => (
+                  <li key={i} className="text-xs text-pink-600 flex items-center gap-1.5">
+                    <span className="text-pink-400">✦</span> {item}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex items-center gap-3 mt-2.5">
+              <a
+                href={versionInfo.downloadUrl}
+                download
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pink-500 text-white text-xs font-medium hover:bg-pink-600 transition-colors shadow-sm"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                v{latestVersion} 다운로드
+              </a>
+              <button
+                onClick={() => setShowChangelog(!showChangelog)}
+                className="text-xs text-pink-500 hover:text-pink-700 underline decoration-dotted"
+              >
+                {showChangelog ? '변경사항 접기' : '변경사항 보기'}
+              </button>
+              <span className="text-[10px] text-gray-400">ZIP 압축해제 → 덮어쓰기 → chrome://extensions 새로고침</span>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={handleDismiss}
+          className="text-pink-300 hover:text-pink-500 transition-colors shrink-0 mt-0.5"
+          title="닫기"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type MenuItem = {
   icon: any;
@@ -271,7 +342,10 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             </div>
           )}
         </header>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          <ExtensionUpgradeBanner />
+          {children}
+        </main>
       </SidebarInset>
     </>
   );
