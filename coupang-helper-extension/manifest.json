@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.6.2",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.6.2 — 다층 타임아웃, 자동 재시도, SW 종료 방어",
+  "version": "8.6.3",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.6.3 — 즉시 응답 아키텍처, 비동기 수집, 인덱스 최적화",
   "permissions": [
     "storage",
     "tabs",

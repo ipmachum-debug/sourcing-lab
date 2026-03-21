@@ -10,12 +10,12 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.6.2";
+const EXTENSION_LATEST_VERSION = "8.6.3";
 const EXTENSION_CHANGELOG = [
-  "검색량 '서버 통신 지연' 근본 해결 (다층 타임아웃)",
-  "서버 90일 추정 쿼리 3초 타임아웃 (DB 부하 시 스킵)",
-  "Service Worker 8초 안전 타임아웃 (SW 종료 전 응답 보장)",
-  "자동 재시도 (10초→20초→30초 간격, 최대 3회)",
+  "아키텍처 재설계: 즉시 응답 + 비동기 수집 (200ms 내 응답)",
+  "fetchSearchVolume fire-and-forget (백그라운드 수집)",
+  "서버 폴백 쿼리 인덱스 최적화 (REPLACE 풀스캔 제거)",
+  "자동 재시도 (5초→10초→20초→30초, 최대 4회)",
 ];
 import { getDb } from "../../db";
 import {
@@ -101,8 +101,8 @@ export const marketDataRouter = router({
 
       console.log(`[fetchSearchVolume] 캐시 미스(7d) — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
 
-      // ★ v8.6.1: 7일 캐시 미스 시, 네이버 API 호출 전에 기존 데이터(기간 무관) 미리 확보
-      // API 실패해도 이 데이터를 directVolume으로 반환
+      // ★ v8.6.3: 7일 캐시 미스 시, 기존 데이터 확보 (폴백용)
+      // 인덱스 활용: 원본 키워드 → 공백제거 키워드 순으로 조회 (REPLACE 풀스캔 제거)
       let fallbackVolume: {
         keyword: string;
         pcSearch: number;
@@ -111,7 +111,8 @@ export const marketDataRouter = router({
         competitionIndex: string;
       } | null = null;
       try {
-        const [oldRow] = await db.select({
+        // 1차: 원본 키워드로 정확 매칭 (인덱스 활용)
+        let [oldRow] = await db.select({
           keyword: keywordSearchVolumeHistory.keyword,
           totalSearch: keywordSearchVolumeHistory.totalSearch,
           pcSearch: keywordSearchVolumeHistory.pcSearch,
@@ -122,10 +123,31 @@ export const marketDataRouter = router({
           .where(and(
             eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
             eq(keywordSearchVolumeHistory.source, "naver"),
-            sql`REPLACE(${keywordSearchVolumeHistory.keyword}, ' ', '') = REPLACE(${mainKw}, ' ', '')`,
+            eq(keywordSearchVolumeHistory.keyword, mainKw),
           ))
           .orderBy(desc(keywordSearchVolumeHistory.createdAt))
           .limit(1);
+        // 2차: 공백 제거 버전으로 재시도 (인덱스 활용)
+        if (!oldRow || Number(oldRow.totalSearch ?? 0) === 0) {
+          const cleaned = mainKw.replace(/\s+/g, "");
+          if (cleaned !== mainKw) {
+            [oldRow] = await db.select({
+              keyword: keywordSearchVolumeHistory.keyword,
+              totalSearch: keywordSearchVolumeHistory.totalSearch,
+              pcSearch: keywordSearchVolumeHistory.pcSearch,
+              mobileSearch: keywordSearchVolumeHistory.mobileSearch,
+              competitionIndex: keywordSearchVolumeHistory.competitionIndex,
+            })
+              .from(keywordSearchVolumeHistory)
+              .where(and(
+                eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+                eq(keywordSearchVolumeHistory.source, "naver"),
+                eq(keywordSearchVolumeHistory.keyword, cleaned),
+              ))
+              .orderBy(desc(keywordSearchVolumeHistory.createdAt))
+              .limit(1);
+          }
+        }
         if (oldRow && Number(oldRow.totalSearch ?? 0) > 0) {
           fallbackVolume = {
             keyword: mainKw,
@@ -143,7 +165,7 @@ export const marketDataRouter = router({
       try {
         naverResults = await getNaverKeywords(originalKeywords);
       } catch (err: any) {
-        // ★ v8.6.1: 429 에러 → 기존 캐시가 있으면 그걸로 반환
+        // ★ v8.6.3: 429 에러 → 기존 캐시가 있으면 그걸로 반환
         const errMsg = err?.message || "";
         if (errMsg.includes("429") || errMsg.includes("Too Many") || errMsg.includes("toomanyrequest")) {
           console.warn(`[fetchSearchVolume] 429 — "${mainKw}" ${fallbackVolume ? '기존 캐시 반환' : '스킵'}`);
