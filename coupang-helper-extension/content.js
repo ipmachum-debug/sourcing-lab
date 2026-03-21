@@ -2030,57 +2030,59 @@
   let cachedMarketData = {};  // keyword → { searchVolume, fetchedAt }
   const COUPANG_RATIO = 0.33; // 네이버 → 쿠팡 트래픽 비율
 
+  // ★ v8.6.4: SW 워밍업 — 첫 메시지 전에 SW를 깨워 응답 누락 방지
+  let _swReady = false;
+  async function ensureSwReady() {
+    if (_swReady) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'PING' });
+      _swReady = true;
+    } catch (_) {}
+  }
+
   async function fetchMarketData(keyword) {
     if (!keyword) return { _error: 'no_keyword' };
     const cached = cachedMarketData[keyword];
-    // ★ v8.6.2: 캐시 히트 시 즉시 반환 (10분 캐시)
     if (cached && Date.now() - cached.fetchedAt < 600000) return cached.data;
-    // ★ v8.6.2: MV3 Service Worker 응답 누락 대응 — 최대 3회 시도 (간격 증가)
-    for (let attempt = 0; attempt < 3; attempt++) {
+
+    // ★ v8.6.4: SW 워밍업
+    await ensureSwReady();
+
+    // ★ v8.6.4: 최대 4회 시도, 빠른 첫 재시도 (0.5초)
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_KEYWORD_MARKET_DATA', keyword });
         console.log('[SH] fetchMarketData resp:', keyword, 'attempt=' + attempt, JSON.stringify(resp)?.slice(0, 300));
         if (resp?.ok && resp.data) {
-          // ★ v8.6.2: _timeout 응답은 캐시하지 않고, 빈 데이터로 반환 (자동 재시도 트리거)
-          if (resp.data._timeout) {
-            console.log('[SH] 서버 타임아웃 응답, 빈 데이터 반환:', keyword);
-            return resp.data;
-          }
           cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
           return resp.data;
         }
         if (resp?.error === 'UNAUTHORIZED') return { _error: 'UNAUTHORIZED' };
-        // resp가 undefined → Service Worker 응답 누락, 재시도
-        if (!resp && attempt < 2) {
-          console.log(`[SH] 응답 없음, ${attempt + 1}초 후 재시도...`, keyword);
-          await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
+        if (!resp && attempt < 3) {
+          const delay = attempt === 0 ? 500 : attempt === 1 ? 1500 : 3000;
+          console.log(`[SH] 응답 없음, ${delay/1000}초 후 재시도...`, keyword);
+          await new Promise(r => setTimeout(r, delay));
           continue;
         }
-        // ★ v8.6.2: 실패했지만 이전 캐시가 있으면 만료 캐시라도 반환 (stale data > no data)
-        if (cached) {
-          console.log('[SH] 서버 실패 → 만료 캐시 반환:', keyword);
-          return cached.data;
-        }
+        if (cached) return cached.data;
         return { _error: resp?.error || 'no_data' };
       } catch (e) {
         console.log('[SH] 마켓 데이터 조회 실패:', keyword, 'attempt=' + attempt, e.message);
-        if (attempt < 2) { await new Promise(r => setTimeout(r, (attempt + 1) * 1000)); continue; }
-        // ★ v8.6.2: 최종 실패 시에도 이전 캐시 반환
-        if (cached) {
-          console.log('[SH] 최종 실패 → 만료 캐시 반환:', keyword);
-          return cached.data;
+        if (e.message?.includes('Extension context invalidated')) return { _error: 'context_invalidated' };
+        if (attempt < 3) {
+          const delay = attempt === 0 ? 500 : attempt === 1 ? 1500 : 3000;
+          await new Promise(r => setTimeout(r, delay));
+          continue;
         }
+        if (cached) return cached.data;
         return { _error: e.message };
       }
     }
-    // ★ v8.6.2: 재시도 모두 실패 시 이전 캐시 반환
     if (cached) return cached.data;
     return { _error: 'max_retries' };
   }
 
-  // ★ v8.6.3: 검색량 자동 재시도 — 데이터 없을 때 5초 후 자동 재조회
-  //   background.js가 즉시 응답하고 searchVolume을 비동기로 수집하므로,
-  //   첫 응답에 searchVolume이 없으면 5초 후 재시도하면 DB에 들어와 있을 가능성 높음
+  // ★ v8.6.4: 검색량 자동 재시도 — 3초/8초/15초/25초 (첫 재시도 단축)
   let _svRetryTimer = null;
   let _svRetryCount = 0;
   const SV_MAX_AUTO_RETRY = 4;
@@ -2088,12 +2090,10 @@
   function scheduleSearchVolumeRetry(keyword) {
     if (_svRetryTimer || _svRetryCount >= SV_MAX_AUTO_RETRY) return;
     _svRetryCount++;
-    // 5초, 10초, 20초, 30초 — 첫 재시도를 빠르게 (fetchSearchVolume 완료 대기)
-    const delay = _svRetryCount === 1 ? 5000 : _svRetryCount === 2 ? 10000 : _svRetryCount * 10000;
+    const delay = _svRetryCount === 1 ? 3000 : _svRetryCount === 2 ? 8000 : _svRetryCount === 3 ? 15000 : 25000;
     console.log(`[SH] 검색량 자동 재시도 예약: ${keyword} (${_svRetryCount}/${SV_MAX_AUTO_RETRY}, ${delay/1000}초 후)`);
     _svRetryTimer = setTimeout(async () => {
       _svRetryTimer = null;
-      // 캐시 무효화 후 재시도
       delete cachedMarketData[keyword];
       const data = await fetchMarketData(keyword);
       renderSearchVolume(data, keyword);
