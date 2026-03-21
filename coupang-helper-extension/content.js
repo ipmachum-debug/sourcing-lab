@@ -2078,15 +2078,18 @@
     return { _error: 'max_retries' };
   }
 
-  // ★ v8.6.2: 검색량 자동 재시도 — 타임아웃/에러 시 15초 후 자동 재조회
+  // ★ v8.6.3: 검색량 자동 재시도 — 데이터 없을 때 5초 후 자동 재조회
+  //   background.js가 즉시 응답하고 searchVolume을 비동기로 수집하므로,
+  //   첫 응답에 searchVolume이 없으면 5초 후 재시도하면 DB에 들어와 있을 가능성 높음
   let _svRetryTimer = null;
   let _svRetryCount = 0;
-  const SV_MAX_AUTO_RETRY = 3;
+  const SV_MAX_AUTO_RETRY = 4;
 
   function scheduleSearchVolumeRetry(keyword) {
     if (_svRetryTimer || _svRetryCount >= SV_MAX_AUTO_RETRY) return;
     _svRetryCount++;
-    const delay = _svRetryCount * 10000; // 10초, 20초, 30초
+    // 5초, 10초, 20초, 30초 — 첫 재시도를 빠르게 (fetchSearchVolume 완료 대기)
+    const delay = _svRetryCount === 1 ? 5000 : _svRetryCount === 2 ? 10000 : _svRetryCount * 10000;
     console.log(`[SH] 검색량 자동 재시도 예약: ${keyword} (${_svRetryCount}/${SV_MAX_AUTO_RETRY}, ${delay/1000}초 후)`);
     _svRetryTimer = setTimeout(async () => {
       _svRetryTimer = null;
@@ -2101,17 +2104,6 @@
     const el = document.getElementById('sh-sv-section');
     if (!el) return;
 
-    // ★ v8.6.2: _timeout 응답 — 서버 응답 느림, 자동 재시도
-    if (marketData && marketData._timeout) {
-      el.innerHTML = `
-        <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">조회 중</span></div>
-        <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-          서버 응답 대기 중... 자동 재시도합니다
-        </div>`;
-      if (keyword) scheduleSearchVolumeRetry(keyword);
-      return;
-    }
-
     // 에러 상태 처리
     if (!marketData || marketData._error) {
       const errMsg = (marketData?._error || '').toString();
@@ -2123,20 +2115,19 @@
             서버 로그인 후 조회 가능
           </div>`;
       } else {
-        // ★ v8.6.2: "서버 통신 지연" 대신 "조회 중" + 자동 재시도
-        const isRetryError = errMsg === 'max_retries' || errMsg === 'no_data';
+        // ★ v8.6.3: 에러 시 "조회 중" + 자동 재시도 (더 이상 "서버 통신 지연" 표시 안 함)
         el.innerHTML = `
-          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">${isRetryError ? '조회 중' : '수집 중'}</span></div>
+          <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">조회 중</span></div>
           <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-            ${isRetryError ? '검색량 데이터 조회 중... 잠시 후 자동 표시됩니다' : '네이버 검색량 데이터 수집 중...'}
+            검색량 데이터를 불러오는 중입니다
           </div>`;
-        // ★ v8.6.2: 에러 시 자동 재시도
-        if (isRetryError && keyword) scheduleSearchVolumeRetry(keyword);
+        if (keyword) scheduleSearchVolumeRetry(keyword);
       }
       return;
     }
 
-    // 네이버 데이터도 없고 추정 데이터도 없는 경우
+    // ★ v8.6.3: 데이터는 받았지만 searchVolume이 없는 경우
+    //   background.js가 비동기로 fetchSearchVolume 수집 중 → 자동 재시도로 해결
     const hasNaver = marketData.searchVolume && Number(marketData.searchVolume.totalSearch || 0) > 0;
     const hasEstimate = marketData.searchVolumeEstimate && marketData.searchVolumeEstimate.estimatedMonthlySearch > 0;
     if (!hasNaver && !hasEstimate) {
@@ -2152,22 +2143,20 @@
           </div>`;
         return;
       }
-      const est = marketData.searchVolumeEstimate;
-      const progress = est?.maturityProgress;
+      // ★ v8.6.3: "수집 중" 표시 + 자동 재시도 예약
+      //   background에서 fetchSearchVolume이 비동기로 진행 중이므로 5초 후 재시도
       el.innerHTML = `
         <div class="sh-hero-title">🔍 검색량 <span class="sh-hero-badge collecting">수집 중</span></div>
         <div style="text-align:center !important;padding:10px !important;color:#64748b !important;font-size:11px !important;">
-          네이버 검색량 데이터 수집 대기 중
-        </div>
-        ${progress ? `
-        <div class="sh-maturity-box">
-          <div class="sh-maturity-title">데이터 축적: ${progress.days.current}일 / ${progress.days.required}일</div>
-          <div class="sh-maturity-bar-row">
-            <div class="sh-maturity-track">
-              <div class="sh-maturity-fill" style="width:${Math.min(100, Math.round(progress.days.current / progress.days.required * 100))}% !important;background:linear-gradient(90deg,#6366f1,#8b5cf6) !important;"></div>
-            </div>
-          </div>
-        </div>` : ''}
+          네이버 검색량 수집 중... 잠시 후 자동 표시
+        </div>`;
+      if (keyword) scheduleSearchVolumeRetry(keyword);
+      return;
+    }
+
+    // ★ v8.6.3: 데이터 성공적 수신 → 재시도 카운터 리셋
+    _svRetryCount = 0;
+    if (_svRetryTimer) { clearTimeout(_svRetryTimer); _svRetryTimer = null; }
         <div style="font-size:9px !important;color:#b0b8c4 !important;margin-top:4px !important;text-align:center !important;">
           데이터가 축적되면 자동으로 검색량이 표시됩니다
         </div>`;

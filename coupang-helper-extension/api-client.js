@@ -341,10 +341,9 @@ class ApiClient {
       options.body = JSON.stringify({ json: input });
     }
 
-    // v8.6.2: 타임아웃 — 검색량 조회 6초(SW 8초 타임아웃 내 완료), 배치/AI 60초, 일반 15초
-    const isSearchVolume = procedure.includes('getKeywordMarketData') || procedure.includes('fetchSearchVolume');
+    // v8.6.3: 타임아웃 — 일반 15초, 배치/AI 60초
     const isBatch = procedure.includes('Batch') || procedure.includes('batch') || procedure.includes('ai');
-    const timeout = isSearchVolume ? 6000 : isBatch ? 60000 : 15000;
+    const timeout = isBatch ? 60000 : 15000;
     const controller = new AbortController();
     options.signal = controller.signal;
     const timer = setTimeout(() => controller.abort(), timeout);

@@ -92,8 +92,8 @@ export const marketDataRouter = router({
 
       console.log(`[fetchSearchVolume] 캐시 미스(7d) — "${mainKw}" (정규화: "${mainClean}") 네이버 API 호출`);
 
-      // ★ v8.6.1: 7일 캐시 미스 시, 네이버 API 호출 전에 기존 데이터(기간 무관) 미리 확보
-      // API 실패해도 이 데이터를 directVolume으로 반환
+      // ★ v8.6.3: 7일 캐시 미스 시, 기존 데이터 확보 (폴백용)
+      // 인덱스 활용: 원본 키워드 → 공백제거 키워드 순으로 조회 (REPLACE 풀스캔 제거)
       let fallbackVolume: {
         keyword: string;
         pcSearch: number;
@@ -102,7 +102,8 @@ export const marketDataRouter = router({
         competitionIndex: string;
       } | null = null;
       try {
-        const [oldRow] = await db.select({
+        // 1차: 원본 키워드로 정확 매칭 (인덱스 활용)
+        let [oldRow] = await db.select({
           keyword: keywordSearchVolumeHistory.keyword,
           totalSearch: keywordSearchVolumeHistory.totalSearch,
           pcSearch: keywordSearchVolumeHistory.pcSearch,
@@ -113,10 +114,31 @@ export const marketDataRouter = router({
           .where(and(
             eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
             eq(keywordSearchVolumeHistory.source, "naver"),
-            sql`REPLACE(${keywordSearchVolumeHistory.keyword}, ' ', '') = REPLACE(${mainKw}, ' ', '')`,
+            eq(keywordSearchVolumeHistory.keyword, mainKw),
           ))
           .orderBy(desc(keywordSearchVolumeHistory.createdAt))
           .limit(1);
+        // 2차: 공백 제거 버전으로 재시도 (인덱스 활용)
+        if (!oldRow || Number(oldRow.totalSearch ?? 0) === 0) {
+          const cleaned = mainKw.replace(/\s+/g, "");
+          if (cleaned !== mainKw) {
+            [oldRow] = await db.select({
+              keyword: keywordSearchVolumeHistory.keyword,
+              totalSearch: keywordSearchVolumeHistory.totalSearch,
+              pcSearch: keywordSearchVolumeHistory.pcSearch,
+              mobileSearch: keywordSearchVolumeHistory.mobileSearch,
+              competitionIndex: keywordSearchVolumeHistory.competitionIndex,
+            })
+              .from(keywordSearchVolumeHistory)
+              .where(and(
+                eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
+                eq(keywordSearchVolumeHistory.source, "naver"),
+                eq(keywordSearchVolumeHistory.keyword, cleaned),
+              ))
+              .orderBy(desc(keywordSearchVolumeHistory.createdAt))
+              .limit(1);
+          }
+        }
         if (oldRow && Number(oldRow.totalSearch ?? 0) > 0) {
           fallbackVolume = {
             keyword: mainKw,
