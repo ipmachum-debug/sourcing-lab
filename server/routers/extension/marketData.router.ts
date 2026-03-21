@@ -10,12 +10,12 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.6.3";
+const EXTENSION_LATEST_VERSION = "8.6.4";
 const EXTENSION_CHANGELOG = [
-  "아키텍처 재설계: 즉시 응답 + 비동기 수집 (200ms 내 응답)",
-  "fetchSearchVolume fire-and-forget (백그라운드 수집)",
-  "서버 폴백 쿼리 인덱스 최적화 (REPLACE 풀스캔 제거)",
-  "자동 재시도 (5초→10초→20초→30초, 최대 4회)",
+  "SW 워밍업 핑 — 첫 요청 시 undefined 반환 방지",
+  "재시도 타이밍 최적화 (0.5초/1.5초/3초 빠른 재시도)",
+  "자동 재시도 단축 (3초/8초/15초/25초)",
+  "Extension context invalidated 에러 핸들링",
 ];
 import { getDb } from "../../db";
 import {

@@ -137,7 +137,7 @@ export default function SourcingHelper() {
             </div>
             <p className="text-xs text-gray-500">설치 방법, 기능 설명, 워크플로우</p>
           </button>
-          <a href="/coupang-helper-extension-v8.6.3.zip" download
+          <a href="/coupang-helper-extension-v8.6.4.zip" download
             className="text-left border rounded-xl p-4 hover:shadow-md hover:border-green-200 transition-all bg-gradient-to-br from-green-50 to-white group">
             <div className="flex items-center gap-2 mb-2">
               <Download className="w-5 h-5 text-green-500" />

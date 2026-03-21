@@ -159,6 +159,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message?.type) return false;
 
   switch (message.type) {
+    // ★ v8.6.4: SW 워밍업 핑 — content.js가 첫 요청 전에 SW 활성화 확인용
+    case 'PING': {
+      sendResponse({ ok: true });
+      return false;
+    }
+
     // ===== 검색 결과 파싱 =====
     case 'SEARCH_RESULTS_PARSED': {
       if (!sender.tab?.id) break;
