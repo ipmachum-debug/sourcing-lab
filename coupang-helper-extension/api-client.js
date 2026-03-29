@@ -352,15 +352,17 @@ class ApiClient {
       const resp = await fetch(url, options);
       clearTimeout(timer);
 
-      // v7.2: 401 인증 만료 → 자동 재인증 시도 (1회)
+      // v8.7.1: 401 인증 만료 → 저장된 자격증명으로 재로그인 시도 (1회)
       if (resp.status === 401 && _retryCount === 0) {
-        console.warn('[API] 인증 만료 감지, 재인증 시도...');
+        console.warn('[API] 인증 만료 감지, 재로그인 시도...');
         const { serverEmail, serverPassword } = await chrome.storage.local.get(['serverEmail', 'serverPassword']);
-        if (serverEmail) {
+        if (serverEmail && serverPassword) {
           try {
-            await this.checkAuth();
+            await this.login(serverEmail, serverPassword);
+            console.log('[API] 재로그인 성공, 원래 요청 재시도');
             return this._callInner(procedure, input, type, 1);
-          } catch (_) {
+          } catch (loginErr) {
+            console.warn('[API] 재로그인 실패:', loginErr.message);
             await chrome.storage.local.set({ serverLoggedIn: false });
           }
         }

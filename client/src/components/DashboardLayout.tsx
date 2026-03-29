@@ -29,7 +29,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 
-// ★ v8.7: 확장프로그램 최신 버전 안내 배너
+// ★ v8.7.1: 확장프로그램 최신 버전 안내 배너
 function ExtensionUpgradeBanner() {
   const { data: versionInfo } = trpc.extension.getExtensionLatestVersion.useQuery(
     undefined,

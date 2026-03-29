@@ -13,7 +13,7 @@ import {
   Gem, Activity, FileText, Settings, Shield,
 } from "lucide-react";
 
-const EXTENSION_VERSION = "8.7";
+const EXTENSION_VERSION = "8.7.1";
 const EXTENSION_ZIP_URL = `/coupang-helper-extension-v${EXTENSION_VERSION}.zip`;
 const EXTENSION_FILE_SIZE = "688KB";
 
@@ -834,7 +834,7 @@ export default function ExtensionGuide() {
               <div className="space-y-3 mt-3">
                 {[
                   {
-                    version: "v8.7",
+                    version: "v8.7.1",
                     date: "2026-03-17",
                     badge: "Latest",
                     changes: [

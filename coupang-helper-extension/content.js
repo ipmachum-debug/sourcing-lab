@@ -2057,7 +2057,14 @@
           cachedMarketData[keyword] = { data: resp.data, fetchedAt: Date.now() };
           return resp.data;
         }
-        if (resp?.error === 'UNAUTHORIZED') return { _error: 'UNAUTHORIZED' };
+        // v8.7.1: UNAUTHORIZED도 1회 재시도 (재로그인 완료 후 성공할 수 있음)
+        if (resp?.error === 'UNAUTHORIZED') {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          return { _error: 'UNAUTHORIZED' };
+        }
         // resp가 undefined면 SW가 아직 준비 안 됨 → 1초 대기 후 재시도
         if (!resp && attempt < 2) {
           await new Promise(r => setTimeout(r, 1000));

@@ -10,12 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.7";
+const EXTENSION_LATEST_VERSION = "8.7.1";
 const EXTENSION_CHANGELOG = [
-  "검색량 동기 응답 아키텍처 재설계 — fire-and-forget 제거",
-  "background.js: fetchSearchVolume 완료 후 응답 (첫 로드에 검색량 포함)",
-  "content.js: 복잡한 retry 시스템 제거, 단순 3회 재시도",
-  "DB 인덱스 추가 (검색량 조회 성능 개선)",
+  "검색량 '로그인 필요' 간헐적 표시 수정 — 401 재로그인 로직 복원",
+  "수동수집 페이지 단위 일괄 선택 기능 추가",
+  "UNAUTHORIZED 응답 시 2초 대기 후 1회 재시도",
 ];
 import { getDb } from "../../db";
 import {
