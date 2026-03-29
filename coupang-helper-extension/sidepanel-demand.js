@@ -1083,6 +1083,18 @@ function renderManualKeywords() {
 function updateManualSelectedCount() {
   var el = document.querySelector('#manualSelectedCount');
   if (el) el.textContent = manualSelectedIds.size + '개 선택';
+
+  // 페이지 전체 선택 체크박스 상태 동기화
+  var selectAllCb = document.querySelector('#manualSelectAllPage');
+  if (selectAllCb) {
+    var total = manualFilteredKeywords.length;
+    var totalPages = Math.max(1, Math.ceil(total / MANUAL_PER_PAGE));
+    var start = (manualPage - 1) * MANUAL_PER_PAGE;
+    var pageItems = manualFilteredKeywords.slice(start, start + MANUAL_PER_PAGE);
+    var allChecked = pageItems.length > 0 && pageItems.every(function(kw) { return manualSelectedIds.has(kw.id); });
+    selectAllCb.checked = allChecked;
+    selectAllCb.indeterminate = !allChecked && pageItems.some(function(kw) { return manualSelectedIds.has(kw.id); });
+  }
 }
 
 // 초성 필터 클릭
@@ -1116,6 +1128,41 @@ document.querySelector('#manualKwSearch').addEventListener('input', function(e) 
 (function() {
   var cb = document.querySelector('#manualUncollectedOnly');
   if (cb) cb.addEventListener('change', function() { filterManualKeywords(); });
+})();
+
+// ★ v8.7.1: 페이지 전체 선택 체크박스 — 현재 페이지 50개 일괄 체크/해제
+// 페이지 전환 시 기존 선택 유지 (병합)
+(function() {
+  var selectAllCb = document.querySelector('#manualSelectAllPage');
+  if (selectAllCb) {
+    selectAllCb.addEventListener('change', function(e) {
+      var total = manualFilteredKeywords.length;
+      var start = (manualPage - 1) * MANUAL_PER_PAGE;
+      var pageItems = manualFilteredKeywords.slice(start, start + MANUAL_PER_PAGE);
+
+      pageItems.forEach(function(kw) {
+        if (e.target.checked) {
+          manualSelectedIds.add(kw.id);
+        } else {
+          manualSelectedIds.delete(kw.id);
+        }
+      });
+
+      // DOM 체크박스 동기화
+      var checkboxes = document.querySelectorAll('#manualKeywordList .demand-kw-item');
+      checkboxes.forEach(function(el) {
+        var kwId = Number(el.dataset.kwId);
+        var cb = el.querySelector('input[type="checkbox"]');
+        if (cb) {
+          cb.checked = manualSelectedIds.has(kwId);
+          if (manualSelectedIds.has(kwId)) el.classList.add('selected');
+          else el.classList.remove('selected');
+        }
+      });
+
+      updateManualSelectedCount();
+    });
+  }
 })();
 
 // 새로고침
