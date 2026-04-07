@@ -37,7 +37,7 @@ export const channelsRouter = router({
         accountId: input.accountId || null,
         accessToken: input.accessToken || null,
         refreshToken: input.refreshToken || null,
-        meta: input.meta || {},
+        meta: input.meta && Object.keys(input.meta).length ? input.meta : null,
         status: "active",
       });
       const insertId = Number((result as any)?.[0]?.insertId);

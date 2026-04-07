@@ -49,7 +49,7 @@ const copyLibraryRouter = router({
         platform: input.platform || null,
         text: input.text,
         performanceScore: input.performanceScore || null,
-        tags: input.tags || [],
+        tags: input.tags?.length ? input.tags : null,
       });
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
@@ -134,7 +134,7 @@ const mediaRouter = router({
         width: input.width || null,
         height: input.height || null,
         duration: input.duration || null,
-        tags: input.tags || [],
+        tags: input.tags?.length ? input.tags : null,
         folder: input.folder || null,
       });
       const insertId = Number((result as any)?.[0]?.insertId);

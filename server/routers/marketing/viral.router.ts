@@ -153,7 +153,7 @@ const reviewsRouter = router({
         reviewerName: input.reviewerName || null,
         rating: input.rating || null,
         content: input.content,
-        imageUrls: input.imageUrls || [],
+        imageUrls: input.imageUrls?.length ? input.imageUrls : null,
       });
       const insertId = Number((result as any)?.[0]?.insertId);
 
@@ -225,7 +225,7 @@ const autoResponseRouter = router({
         name: input.name,
         platform: input.platform,
         triggerType: input.triggerType || "all",
-        triggerKeywords: input.triggerKeywords || [],
+        triggerKeywords: input.triggerKeywords?.length ? input.triggerKeywords : null,
         responseTemplate: input.responseTemplate,
         includeLink: input.includeLink || false,
         linkUrl: input.linkUrl || null,
@@ -294,7 +294,7 @@ const boostRouter = router({
         dailyBudgetKrw: input.dailyBudgetKrw || 10000,
         maxBudgetPerPostKrw: input.maxBudgetPerPostKrw || 50000,
         boostDurationHours: input.boostDurationHours || 48,
-        targetAudience: input.targetAudience || {},
+        targetAudience: input.targetAudience && Object.keys(input.targetAudience).length ? input.targetAudience : null,
         isActive: false, // 기본 비활성 (안전)
       });
       const insertId = Number((result as any)?.[0]?.insertId);
