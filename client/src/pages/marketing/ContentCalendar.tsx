@@ -89,7 +89,7 @@ export default function ContentCalendar() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 space-y-4 max-w-full mx-auto">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={prevMonth}><ChevronLeft className="h-4 w-4" /></Button>

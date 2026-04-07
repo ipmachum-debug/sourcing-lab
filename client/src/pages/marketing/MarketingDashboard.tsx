@@ -23,7 +23,7 @@ export default function MarketingDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 space-y-4 max-w-full mx-auto">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">마케팅 Today</h1>
