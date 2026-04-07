@@ -48,25 +48,15 @@ export const mktProductsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const vals: Record<string, any> = {
-        userId: ctx.user.id,
-        brandId: input.brandId,
-        name: input.name,
-        description: input.description || null,
-        targetAudience: input.targetAudience || null,
-        price: input.price || null,
-        landingUrl: input.landingUrl || null,
-        category: input.category || null,
-        seasonality: input.seasonality || null,
-      };
-      if (input.features && input.features.length > 0) {
-        vals.features = sql`CAST(${JSON.stringify(input.features)} AS JSON)`;
-      }
-      if (input.imageUrls && input.imageUrls.length > 0) {
-        vals.imageUrls = sql`CAST(${JSON.stringify(input.imageUrls)} AS JSON)`;
-      }
+      const features = input.features?.length ? JSON.stringify(input.features) : null;
+      const imageUrls = input.imageUrls?.length ? JSON.stringify(input.imageUrls) : null;
 
-      const result = await db.insert(mktProducts).values(vals);
+      const result = await db.execute(sql`
+        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, image_urls, category, seasonality)
+        VALUES (${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
+                ${features}, ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
+                ${imageUrls}, ${input.category || null}, ${input.seasonality || null})
+      `);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
     }),
