@@ -53,11 +53,11 @@ export const mktProductsRouter = router({
         brandId: input.brandId,
         name: input.name,
         description: input.description || null,
-        features: input.features || [],
+        features: input.features?.length ? input.features : null,
         targetAudience: input.targetAudience || null,
         price: input.price || null,
         landingUrl: input.landingUrl || null,
-        imageUrls: input.imageUrls || [],
+        imageUrls: input.imageUrls?.length ? input.imageUrls : null,
         category: input.category || null,
         seasonality: input.seasonality || null,
       });

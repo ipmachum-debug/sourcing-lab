@@ -141,7 +141,7 @@ export const contentRouter = router({
         masterTitle: input.masterTitle || null,
         masterHook: input.masterHook || null,
         masterBody: input.masterBody || null,
-        hashtags: input.hashtags || [],
+        hashtags: input.hashtags?.length ? input.hashtags : null,
         script: input.script || null,
         status: input.status || "draft",
       });
