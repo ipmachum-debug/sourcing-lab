@@ -74,7 +74,7 @@ export default function AbTestPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-5xl mx-auto">
+      <div className="p-4 space-y-4 max-w-full mx-auto">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">A/B 테스트</h1>
