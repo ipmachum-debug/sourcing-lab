@@ -49,13 +49,14 @@ export const mktProductsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const features = input.features?.length ? JSON.stringify(input.features) : null;
+      const imgUrls = input.imageUrls?.length ? JSON.stringify(input.imageUrls) : null;
 
       const result = await db.execute(sql`
-        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, category, seasonality)
+        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, image_urls, category, seasonality)
         VALUES (
           ${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
           CAST(${features} AS JSON), ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
-          ${input.category || null}, ${input.seasonality || null}
+          CAST(${imgUrls} AS JSON), ${input.category || null}, ${input.seasonality || null}
         )
       `);
       const insertId = Number((result as any)?.[0]?.insertId);
