@@ -27,6 +27,17 @@ import SearchDemand from "./pages/SearchDemand";
 import MarginCalculator from "./pages/MarginCalculator";
 import NicheFinder from "./pages/NicheFinder";
 import ProductDiscovery from "./pages/ProductDiscovery";
+import MarketingDashboard from "./pages/marketing/MarketingDashboard";
+import ContentManager from "./pages/marketing/ContentManager";
+import PublishQueue from "./pages/marketing/PublishQueue";
+import MarketingAnalytics from "./pages/marketing/MarketingAnalytics";
+import MarketingSettings from "./pages/marketing/MarketingSettings";
+import AiBriefing from "./pages/marketing/AiBriefing";
+import ContentCalendar from "./pages/marketing/ContentCalendar";
+import ClientManager from "./pages/marketing/ClientManager";
+import AbTestPage from "./pages/marketing/AbTestPage";
+import ReportsPage from "./pages/marketing/ReportsPage";
+import LibraryPage from "./pages/marketing/LibraryPage";
 
 function Router() {
   return (
@@ -56,6 +67,17 @@ function Router() {
       <Route path="/extension" component={ExtensionDashboard} />
       <Route path="/extension-guide" component={ExtensionGuide} />
       <Route path="/manual" component={Manual} />
+      <Route path="/marketing" component={MarketingDashboard} />
+      <Route path="/marketing/content" component={ContentManager} />
+      <Route path="/marketing/queue" component={PublishQueue} />
+      <Route path="/marketing/analytics" component={MarketingAnalytics} />
+      <Route path="/marketing/settings" component={MarketingSettings} />
+      <Route path="/marketing/briefing" component={AiBriefing} />
+      <Route path="/marketing/calendar" component={ContentCalendar} />
+      <Route path="/marketing/clients" component={ClientManager} />
+      <Route path="/marketing/ab-test" component={AbTestPage} />
+      <Route path="/marketing/reports" component={ReportsPage} />
+      <Route path="/marketing/library" component={LibraryPage} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

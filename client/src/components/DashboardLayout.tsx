@@ -23,7 +23,8 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
-  Activity, Target, Search, Calculator, Gem,
+  Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -125,6 +126,18 @@ const menuItems: MenuItem[] = [
   { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰", group: "판매 관리" },
   { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️", group: "판매 관리" },
   { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅", group: "판매 관리" },
+  // 마케팅
+  { icon: Megaphone, label: "마케팅 Today", path: "/marketing", emoji: "📢", group: "마케팅" },
+  { icon: PenTool, label: "콘텐츠 생성", path: "/marketing/content", emoji: "✍️", group: "마케팅" },
+  { icon: Send, label: "발행 큐", path: "/marketing/queue", emoji: "📤", group: "마케팅" },
+  { icon: BarChart3, label: "성과 분석", path: "/marketing/analytics", emoji: "📊", group: "마케팅" },
+  { icon: Bot, label: "AI 브리핑", path: "/marketing/briefing", emoji: "🤖", group: "마케팅" },
+  { icon: Calendar, label: "콘텐츠 캘린더", path: "/marketing/calendar", emoji: "📅", group: "마케팅" },
+  { icon: Flask, label: "A/B 테스트", path: "/marketing/ab-test", emoji: "🧪", group: "마케팅" },
+  { icon: FileBarChart, label: "성과 리포트", path: "/marketing/reports", emoji: "📋", group: "마케팅" },
+  { icon: Library, label: "자료실", path: "/marketing/library", emoji: "📚", group: "마케팅" },
+  { icon: Building, label: "고객사 관리", path: "/marketing/clients", emoji: "🏢", group: "마케팅" },
+  { icon: Sliders, label: "마케팅 설정", path: "/marketing/settings", emoji: "⚙️", group: "마케팅" },
   // 도구
   { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "🧩", group: "도구" },
   { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖", group: "도구" },
@@ -133,7 +146,7 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", group: "도구" },
 ];
 
-const menuGroups = ["소싱", "시장 분석", "판매 관리", "도구"];
+const menuGroups = ["소싱", "시장 분석", "판매 관리", "마케팅", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 260;
