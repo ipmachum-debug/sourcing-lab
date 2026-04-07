@@ -52,9 +52,11 @@ export const mktProductsRouter = router({
 
       const result = await db.execute(sql`
         INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, category, season_keywords)
-        VALUES (${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
-                ${features}, ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
-                ${input.category || null}, ${input.seasonality || null})
+        VALUES (
+          ${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
+          CAST(${features} AS JSON), ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
+          ${input.category || null}, ${input.seasonality || null}
+        )
       `);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };

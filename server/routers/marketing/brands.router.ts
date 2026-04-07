@@ -48,8 +48,10 @@ export const brandsRouter = router({
 
       const result = await db.execute(sql`
         INSERT INTO mkt_brands (user_id, name, description, tone_of_voice, keywords, forbidden_words, cta_style)
-        VALUES (${ctx.user.id}, ${input.name}, ${input.description || null}, ${input.toneOfVoice || "friendly"},
-                ${kw}, ${fw}, ${input.ctaStyle || "purchase"})
+        VALUES (
+          ${ctx.user.id}, ${input.name}, ${input.description || null}, ${input.toneOfVoice || "friendly"},
+          CAST(${kw} AS JSON), CAST(${fw} AS JSON), ${input.ctaStyle || "purchase"}
+        )
       `);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
