@@ -290,6 +290,11 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+
+    // 마케팅 자동화 스케줄러 시작
+    import("../modules/marketing/publishScheduler").then(m => m.startPublishScheduler()).catch(() => {});
+    import("../modules/marketing/analyticsCollector").then(m => m.startAnalyticsCollector()).catch(() => {});
+    import("../modules/marketing/feedbackAnalyzer").then(m => m.startFeedbackAnalyzer()).catch(() => {});
   });
 }
 

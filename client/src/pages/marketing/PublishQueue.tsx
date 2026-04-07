@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Send, XCircle, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
+import { RefreshCw, Send, XCircle, Clock, CheckCircle2, AlertTriangle, Zap, BarChart3 } from "lucide-react";
 
 const PLATFORM_LABELS: Record<string, { label: string; emoji: string }> = {
   instagram: { label: "인스타그램", emoji: "📸" },
@@ -41,6 +41,22 @@ export default function PublishQueue() {
     onSuccess: () => {
       toast.success("상태가 변경되었습니다.");
       utils.marketing.channels.listPosts.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const triggerPublish = trpc.marketing.scheduler.triggerPublish.useMutation({
+    onSuccess: () => {
+      toast.success("발행이 완료되었습니다!");
+      utils.marketing.channels.listPosts.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const collectAnalytics = trpc.marketing.scheduler.collectAnalytics.useMutation({
+    onSuccess: (data) => {
+      if (data.success) toast.success("성과 데이터를 수집했습니다.");
+      else toast.error("성과 수집에 실패했습니다.");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -141,11 +157,27 @@ export default function PublishQueue() {
                       )}
                     </div>
                     <div className="flex items-center gap-1 ml-2">
+                      {post.publishStatus === "queued" && (
+                        <Button variant="default" size="sm"
+                          disabled={triggerPublish.isPending}
+                          onClick={() => triggerPublish.mutate({ postId: post.id })}>
+                          <Zap className="h-3 w-3 mr-1" />
+                          즉시 발행
+                        </Button>
+                      )}
                       {post.publishStatus === "failed" && (
                         <Button variant="outline" size="sm"
                           onClick={() => updateStatus.mutate({ id: post.id, publishStatus: "queued" })}>
                           <RefreshCw className="h-3 w-3 mr-1" />
                           재시도
+                        </Button>
+                      )}
+                      {post.publishStatus === "published" && (
+                        <Button variant="ghost" size="sm"
+                          disabled={collectAnalytics.isPending}
+                          onClick={() => collectAnalytics.mutate({ postId: post.id })}>
+                          <BarChart3 className="h-3 w-3 mr-1" />
+                          성과 수집
                         </Button>
                       )}
                       {post.publishStatus === "queued" && (
