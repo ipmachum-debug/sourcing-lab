@@ -364,7 +364,7 @@ function CompetitorsTab() {
 export default function LibraryPage() {
   return (
     <DashboardLayout>
-      <div className="p-4 space-y-4 max-w-full mx-auto">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold">자료실</h1>
           <p className="text-muted-foreground text-sm mt-1">베스트 카피, 미디어, 경쟁사 분석을 한곳에서 관리</p>

@@ -30,7 +30,7 @@ export default function AiBriefing() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 space-y-4 max-w-5xl mx-auto">
+      <div className="space-y-4 max-w-5xl">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">AI 브리핑</h1>

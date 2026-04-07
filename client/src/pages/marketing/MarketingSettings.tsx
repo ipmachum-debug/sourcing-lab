@@ -306,7 +306,7 @@ function AccountsTab() {
 export default function MarketingSettings() {
   return (
     <DashboardLayout>
-      <div className="p-4 space-y-4 max-w-5xl mx-auto">
+      <div className="space-y-4 max-w-5xl">
         <div>
           <h1 className="text-2xl font-bold">마케팅 설정</h1>
           <p className="text-muted-foreground text-sm mt-1">브랜드, 상품, 소셜 계정을 관리합니다</p>
