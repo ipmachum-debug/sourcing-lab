@@ -214,7 +214,7 @@ export default function ContentManager() {
                     {(content.hashtags as string[])?.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {(content.hashtags as string[]).slice(0, 5).map((tag, i) => (
-                          <span key={i} className="text-xs text-blue-600 dark:text-blue-400">#{tag}</span>
+                          <span key={i} className="text-xs text-blue-600 dark:text-blue-400">{tag.startsWith("#") ? tag : `#${tag}`}</span>
                         ))}
                         {(content.hashtags as string[]).length > 5 && (
                           <span className="text-xs text-muted-foreground">+{(content.hashtags as string[]).length - 5}</span>
