@@ -53,11 +53,11 @@ export const mktProductsRouter = router({
         brandId: input.brandId,
         name: input.name,
         description: input.description || null,
-        features: input.features?.length ? input.features : null,
+        features: (Array.isArray(input.features) && input.features.length) ? JSON.stringify(input.features) : null,
         targetAudience: input.targetAudience || null,
         price: input.price || null,
         landingUrl: input.landingUrl || null,
-        imageUrls: input.imageUrls?.length ? input.imageUrls : null,
+        imageUrls: (Array.isArray(input.imageUrls) && input.imageUrls.length) ? JSON.stringify(input.imageUrls) : null,
         category: input.category || null,
         seasonality: input.seasonality || null,
       });
