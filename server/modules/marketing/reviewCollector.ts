@@ -41,8 +41,8 @@ export async function analyzeReview(reviewId: number): Promise<any> {
     .limit(1);
   if (!review) return null;
 
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiUrl || !apiKey) return null;
 
   try {
@@ -113,8 +113,8 @@ export async function convertReviewToContent(
     .limit(1);
   if (!review) return null;
 
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiUrl || !apiKey) return null;
 
   try {

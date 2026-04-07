@@ -66,8 +66,8 @@ export const reportsRouter = router({
         .groupBy(mktAnalytics.platform);
 
       // AI로 요약 생성
-      const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-      const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+      const apiUrl = "https://api.openai.com/v1/chat/completions";
+      const apiKey = process.env.OPENAI_API_KEY;
 
       let summary = `${input.periodStart} ~ ${input.periodEnd} 기간 마케팅 리포트입니다. 총 ${publishedPosts.length}건 발행.`;
       let highlights: any[] = [];

@@ -116,11 +116,11 @@ ${customPrompt ? `\n추가 요구사항: ${customPrompt}` : ""}
 }
 
 async function callLLM(systemPrompt: string, userPrompt: string): Promise<any> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiUrl || !apiKey) {
-    throw new Error("AI API 설정이 없습니다. BUILT_IN_FORGE_API_URL과 BUILT_IN_FORGE_API_KEY를 확인하세요.");
+    throw new Error("AI API 설정이 없습니다. OPENAI_API_KEY를 확인하세요.");
   }
 
   const response = await fetch(apiUrl, {

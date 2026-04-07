@@ -40,8 +40,8 @@ async function analyzeAll() {
     const db = await getDb();
     if (!db) return;
 
-    const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-    const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+    const apiUrl = "https://api.openai.com/v1/chat/completions";
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiUrl || !apiKey) return;
 
     // 최근 3일 내 발행되었고, 아직 피드백이 없는 콘텐츠
@@ -193,8 +193,8 @@ ${input.stats ? `
  * 특정 콘텐츠에 대해 즉시 피드백 생성
  */
 export async function analyzeSingle(contentItemId: number, platform: string): Promise<FeedbackResult | null> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiUrl || !apiKey) return null;
 
   const db = await getDb();

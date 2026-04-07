@@ -51,8 +51,8 @@ async function detectTrends() {
     const trendResults = await fetchNaverTrends([...brandKeywords].slice(0, 20));
 
     // AI로 관련성 분석 + 액션 추천
-    const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-    const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+    const apiUrl = "https://api.openai.com/v1/chat/completions";
+    const apiKey = process.env.OPENAI_API_KEY;
 
     for (const trend of trendResults) {
       let suggestedAction = null;
@@ -167,8 +167,8 @@ async function fetchNaverTrends(keywords: string[]): Promise<TrendResult[]> {
 }
 
 async function generateAiTrends(keywords: string[]): Promise<TrendResult[]> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiUrl || !apiKey) return [];
 
   try {
