@@ -187,22 +187,51 @@ JSON 응답: {"prompt": "영어 프롬프트"}`,
 }
 
 /**
+ * Kling API JWT 토큰 생성
+ */
+async function generateKlingToken(): Promise<string> {
+  const accessKey = process.env.KLING_ACCESS_KEY;
+  const secretKey = process.env.KLING_SECRET_KEY;
+  if (!accessKey || !secretKey) throw new Error("KLING_ACCESS_KEY/KLING_SECRET_KEY 없음");
+
+  // JWT 수동 생성 (jose 라이브러리 없이)
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(JSON.stringify({
+    iss: accessKey,
+    exp: now + 1800, // 30분
+    nbf: now - 5,
+  })).toString("base64url");
+
+  const crypto = await import("crypto");
+  const signature = crypto
+    .createHmac("sha256", secretKey)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+
+  return `${header}.${payload}.${signature}`;
+}
+
+/**
  * Step 4: Kling API 호출
  */
 export async function callKlingApi(
   imageUrl: string, prompt: string, duration: number = 5
 ): Promise<{ taskId: string } | { error: string }> {
-  const apiKey = process.env.KLING_API_KEY;
-  if (!apiKey) {
-    return { error: "KLING_API_KEY가 설정되지 않았습니다. .env에 추가하세요." };
+  const accessKey = process.env.KLING_ACCESS_KEY;
+  const secretKey = process.env.KLING_SECRET_KEY;
+  if (!accessKey || !secretKey) {
+    return { error: "KLING_ACCESS_KEY와 KLING_SECRET_KEY를 .env에 추가하세요." };
   }
 
   try {
+    const token = await generateKlingToken();
+
     const res = await fetch("https://api.klingai.com/v1/videos/image2video", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         model_name: "kling-v1",
@@ -238,12 +267,10 @@ export async function checkKlingStatus(taskId: string): Promise<{
   videoUrl?: string;
   error?: string;
 }> {
-  const apiKey = process.env.KLING_API_KEY;
-  if (!apiKey) return { status: "error", error: "API key missing" };
-
   try {
+    const token = await generateKlingToken();
     const res = await fetch(`https://api.klingai.com/v1/videos/image2video/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     if (!res.ok) return { status: "error", error: `${res.status}` };
