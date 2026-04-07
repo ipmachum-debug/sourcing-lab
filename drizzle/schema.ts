@@ -1655,3 +1655,155 @@ export const mktCompetitors = mysqlTable("mkt_competitors", {
 
 export type MktCompetitor = typeof mktCompetitors.$inferSelect;
 export type InsertMktCompetitor = typeof mktCompetitors.$inferInsert;
+
+// ============================================================
+// ==================== Viral Loop Engine ====================
+// ============================================================
+
+// ==================== Viral: 트렌드 감지 (mkt_trends) ====================
+export const mktTrends = mysqlTable("mkt_trends", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao", "all"]).notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  category: mysqlEnum("category", ["hashtag", "keyword", "topic", "sound", "challenge"]).default("keyword").notNull(),
+  trendScore: int("trend_score").default(0).notNull(), // 0-100
+  volume: int("volume"), // 검색/언급량
+  volumeChange: decimal("volume_change", { precision: 5, scale: 2 }), // 전일 대비 변화율 %
+  relatedKeywords: json("related_keywords"), // string[]
+  suggestedAction: text("suggested_action"), // AI 추천 ("이 키워드로 콘텐츠 만드세요")
+  isActionable: boolean("is_actionable").default(false).notNull(), // 내 브랜드에 관련 있는지
+  detectedAt: timestamp("detected_at", tsOpts).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", tsOpts), // 트렌드 유효기간
+});
+
+export type MktTrend = typeof mktTrends.$inferSelect;
+export type InsertMktTrend = typeof mktTrends.$inferInsert;
+
+// ==================== Viral: 바이럴 스코어 (mkt_viral_scores) ====================
+// 게시물별 확산 속도를 실시간 추적
+export const mktViralScores = mysqlTable("mkt_viral_scores", {
+  id: int("id").autoincrement().primaryKey(),
+  channelPostId: int("channel_post_id").notNull(),
+  userId: int("user_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  viralScore: int("viral_score").default(0).notNull(), // 0-100 확산 점수
+  velocity: decimal("velocity", { precision: 8, scale: 2 }), // 시간당 반응 증가율
+  engagementRate: decimal("engagement_rate", { precision: 5, scale: 2 }), // 참여율 %
+  shareRatio: decimal("share_ratio", { precision: 5, scale: 2 }), // 공유/조회 비율
+  isViral: boolean("is_viral").default(false).notNull(), // 바이럴 임계치 초과 여부
+  isBoosted: boolean("is_boosted").default(false).notNull(), // 부스팅 전환 여부
+  peakAt: timestamp("peak_at", tsOpts), // 최고 반응 시점
+  measuredAt: timestamp("measured_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktViralScore = typeof mktViralScores.$inferSelect;
+export type InsertMktViralScore = typeof mktViralScores.$inferInsert;
+
+// ==================== Viral: 리뷰/후기 수집 (mkt_reviews) ====================
+export const mktReviews = mysqlTable("mkt_reviews", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  brandId: int("brand_id"),
+  productId: int("product_id"),
+  source: mysqlEnum("source", ["coupang", "naver_store", "naver_blog", "instagram", "youtube", "manual"]).notNull(),
+  sourceUrl: text("source_url"), // 원본 URL
+  reviewerName: varchar("reviewer_name", { length: 100 }),
+  rating: int("rating"), // 1-5 별점
+  content: text("content").notNull(), // 후기 본문
+  imageUrls: json("image_urls"), // string[] — 고객 사진
+  sentiment: mysqlEnum("sentiment", ["positive", "neutral", "negative"]), // AI 감성 분석
+  keywords: json("keywords"), // string[] — AI 추출 키워드 (쫀득, 선물, 포장)
+  isUsable: boolean("is_usable").default(false).notNull(), // 마케팅 소재로 사용 가능
+  isUsed: boolean("is_used").default(false).notNull(), // 이미 콘텐츠에 활용됨
+  usedInContentId: int("used_in_content_id"), // 활용된 콘텐츠 ID
+  collectedAt: timestamp("collected_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktReview = typeof mktReviews.$inferSelect;
+export type InsertMktReview = typeof mktReviews.$inferInsert;
+
+// ==================== Viral: 크로스 포스팅 (mkt_cross_posts) ====================
+// 잘 된 콘텐츠를 다른 채널로 자동 변환
+export const mktCrossPosts = mysqlTable("mkt_cross_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  sourcePostId: int("source_post_id").notNull(), // 원본 mkt_channel_posts.id
+  sourcePlatform: mysqlEnum("source_platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  targetPlatform: mysqlEnum("target_platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  targetPostId: int("target_post_id"), // 생성된 mkt_channel_posts.id
+  conversionType: mysqlEnum("conversion_type", ["auto", "manual"]).default("auto").notNull(),
+  status: mysqlEnum("status", ["pending", "converting", "ready", "published", "failed"]).default("pending").notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktCrossPost = typeof mktCrossPosts.$inferSelect;
+export type InsertMktCrossPost = typeof mktCrossPosts.$inferInsert;
+
+// ==================== Viral: 자동 응답 규칙 (mkt_auto_responses) ====================
+export const mktAutoResponses = mysqlTable("mkt_auto_responses", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  brandId: int("brand_id"),
+  name: varchar("name", { length: 255 }).notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao", "all"]).notNull(),
+  triggerType: mysqlEnum("trigger_type", ["keyword", "question", "mention", "dm", "comment", "all"]).default("all").notNull(),
+  triggerKeywords: json("trigger_keywords"), // string[] — 트리거 키워드
+  responseTemplate: text("response_template").notNull(), // 응답 템플릿 (변수 치환 가능)
+  includeLink: boolean("include_link").default(false).notNull(), // 구매 링크 포함
+  linkUrl: text("link_url"),
+  useAi: boolean("use_ai").default(true).notNull(), // AI로 자연스럽게 변환
+  isActive: boolean("is_active").default(true).notNull(),
+  responseCount: int("response_count").default(0).notNull(), // 총 응답 횟수
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktAutoResponse = typeof mktAutoResponses.$inferSelect;
+export type InsertMktAutoResponse = typeof mktAutoResponses.$inferInsert;
+
+// ==================== Viral: 부스팅 규칙 (mkt_boost_rules) ====================
+export const mktBoostRules = mysqlTable("mkt_boost_rules", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  brandId: int("brand_id"),
+  name: varchar("name", { length: 255 }).notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok"]).notNull(),
+  // 자동 부스팅 조건
+  minViralScore: int("min_viral_score").default(70).notNull(), // 이 점수 이상이면 부스팅
+  minEngagementRate: decimal("min_engagement_rate", { precision: 5, scale: 2 }), // 최소 참여율
+  // 예산
+  dailyBudgetKrw: int("daily_budget_krw").default(10000).notNull(), // 일 예산 (원)
+  maxBudgetPerPostKrw: int("max_budget_per_post_krw").default(50000).notNull(), // 게시물당 최대
+  boostDurationHours: int("boost_duration_hours").default(48).notNull(), // 부스팅 기간
+  // 타겟
+  targetAudience: json("target_audience"), // { age, gender, interests, location }
+  isActive: boolean("is_active").default(false).notNull(), // 기본 비활성 (안전)
+  totalSpentKrw: int("total_spent_krw").default(0).notNull(),
+  totalBoosted: int("total_boosted").default(0).notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktBoostRule = typeof mktBoostRules.$inferSelect;
+export type InsertMktBoostRule = typeof mktBoostRules.$inferInsert;
+
+// ==================== Viral: 바이럴 로그 (mkt_viral_log) ====================
+// 전체 바이럴 활동 타임라인
+export const mktViralLog = mysqlTable("mkt_viral_log", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  eventType: mysqlEnum("event_type", [
+    "content_created", "content_published", "viral_detected",
+    "boost_triggered", "cross_posted", "review_collected",
+    "trend_detected", "auto_responded", "feedback_generated",
+  ]).notNull(),
+  summary: text("summary").notNull(), // "인스타 릴스 #흑임자설기 바이럴 감지 (스코어 85)"
+  relatedId: int("related_id"), // 관련 레코드 ID
+  relatedType: varchar("related_type", { length: 50 }), // "channel_post", "review", "trend" 등
+  metadata: json("metadata"), // 추가 데이터
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktViralLogEntry = typeof mktViralLog.$inferSelect;
+export type InsertMktViralLogEntry = typeof mktViralLog.$inferInsert;

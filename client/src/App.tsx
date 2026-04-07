@@ -38,6 +38,9 @@ import ClientManager from "./pages/marketing/ClientManager";
 import AbTestPage from "./pages/marketing/AbTestPage";
 import ReportsPage from "./pages/marketing/ReportsPage";
 import LibraryPage from "./pages/marketing/LibraryPage";
+import ViralMonitor from "./pages/marketing/ViralMonitor";
+import TrendsPage from "./pages/marketing/TrendsPage";
+import ReviewsPage from "./pages/marketing/ReviewsPage";
 
 function Router() {
   return (
@@ -78,6 +81,9 @@ function Router() {
       <Route path="/marketing/ab-test" component={AbTestPage} />
       <Route path="/marketing/reports" component={ReportsPage} />
       <Route path="/marketing/library" component={LibraryPage} />
+      <Route path="/marketing/viral" component={ViralMonitor} />
+      <Route path="/marketing/trends" component={TrendsPage} />
+      <Route path="/marketing/reviews" component={ReviewsPage} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
