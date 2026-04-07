@@ -1,7 +1,7 @@
 import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import { mktBrands, mktProducts } from "../../../drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
@@ -51,9 +51,13 @@ export const brandsRouter = router({
         logoUrl: input.logoUrl || null,
         colorPrimary: input.colorPrimary || null,
       };
-      // JSON 컬럼: 값이 있을 때만 포함 (undefined/빈배열 제외)
-      if (input.keywords && input.keywords.length > 0) vals.keywords = input.keywords;
-      if (input.forbiddenWords && input.forbiddenWords.length > 0) vals.forbiddenWords = input.forbiddenWords;
+      // JSON 컬럼: sql`CAST(... AS JSON)`으로 명시적 변환
+      if (input.keywords && input.keywords.length > 0) {
+        vals.keywords = sql`CAST(${JSON.stringify(input.keywords)} AS JSON)`;
+      }
+      if (input.forbiddenWords && input.forbiddenWords.length > 0) {
+        vals.forbiddenWords = sql`CAST(${JSON.stringify(input.forbiddenWords)} AS JSON)`;
+      }
 
       const result = await db.insert(mktBrands).values(vals);
       const insertId = Number((result as any)?.[0]?.insertId);
