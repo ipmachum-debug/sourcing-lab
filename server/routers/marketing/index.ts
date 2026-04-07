@@ -12,6 +12,7 @@ import { clientsRouter } from "./clients.router";
 import { abTestRouter } from "./abtest.router";
 import { reportsRouter } from "./reports.router";
 import { libraryRouter } from "./library.router";
+import { viralRouter } from "./viral.router";
 
 export const marketingRouter = router({
   brands: brandsRouter,
@@ -27,4 +28,5 @@ export const marketingRouter = router({
   abTest: abTestRouter,
   reports: reportsRouter,
   library: libraryRouter,
+  viral: viralRouter,
 });

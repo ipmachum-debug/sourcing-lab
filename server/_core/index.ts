@@ -295,6 +295,12 @@ async function startServer() {
     import("../modules/marketing/publishScheduler").then(m => m.startPublishScheduler()).catch(() => {});
     import("../modules/marketing/analyticsCollector").then(m => m.startAnalyticsCollector()).catch(() => {});
     import("../modules/marketing/feedbackAnalyzer").then(m => m.startFeedbackAnalyzer()).catch(() => {});
+
+    // 바이럴 루프 엔진 시작
+    import("../modules/marketing/trendDetector").then(m => m.startTrendDetector()).catch(() => {});
+    import("../modules/marketing/viralScorer").then(m => m.startViralScorer()).catch(() => {});
+    import("../modules/marketing/reviewCollector").then(m => m.startReviewCollector()).catch(() => {});
+    import("../modules/marketing/crossPoster").then(m => m.startCrossPoster()).catch(() => {});
   });
 }
 

@@ -25,6 +25,7 @@ import {
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
   Calendar, Building, FlaskConical as Flask, FileBarChart, Library,
+  Flame, TrendingUp as TrendIcon, MessageSquare,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -136,6 +137,11 @@ const menuItems: MenuItem[] = [
   { icon: Flask, label: "A/B 테스트", path: "/marketing/ab-test", emoji: "🧪", group: "마케팅" },
   { icon: FileBarChart, label: "성과 리포트", path: "/marketing/reports", emoji: "📋", group: "마케팅" },
   { icon: Library, label: "자료실", path: "/marketing/library", emoji: "📚", group: "마케팅" },
+  // 바이럴
+  { icon: Flame, label: "바이럴 모니터", path: "/marketing/viral", emoji: "🔥", group: "바이럴" },
+  { icon: TrendIcon, label: "트렌드 감지", path: "/marketing/trends", emoji: "📈", group: "바이럴" },
+  { icon: MessageSquare, label: "리뷰/후기", path: "/marketing/reviews", emoji: "💬", group: "바이럴" },
+  // 마케팅 설정
   { icon: Building, label: "고객사 관리", path: "/marketing/clients", emoji: "🏢", group: "마케팅" },
   { icon: Sliders, label: "마케팅 설정", path: "/marketing/settings", emoji: "⚙️", group: "마케팅" },
   // 도구
@@ -146,7 +152,7 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", group: "도구" },
 ];
 
-const menuGroups = ["소싱", "시장 분석", "판매 관리", "마케팅", "도구"];
+const menuGroups = ["소싱", "시장 분석", "판매 관리", "마케팅", "바이럴", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 260;
