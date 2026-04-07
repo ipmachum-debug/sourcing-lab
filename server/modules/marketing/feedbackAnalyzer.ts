@@ -20,11 +20,11 @@ export function startFeedbackAnalyzer() {
     return;
   }
 
-  console.log("[Marketing Feedback] Starting (6hr interval)...");
-  // 6시간마다 분석 (하루 4회)
-  analyzerInterval = setInterval(analyzeAll, 6 * 60 * 60_000);
-  // 10분 후 첫 실행
-  setTimeout(analyzeAll, 10 * 60_000);
+  console.log("[Marketing Feedback] Starting (12hr interval)...");
+  // 12시간마다 분석 (하루 2회)
+  analyzerInterval = setInterval(analyzeAll, 12 * 60 * 60_000);
+  // 30분 후 첫 실행
+  setTimeout(analyzeAll, 30 * 60_000);
 }
 
 export function stopFeedbackAnalyzer() {

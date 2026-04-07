@@ -7,6 +7,11 @@ import { channelsRouter } from "./channels.router";
 import { analyticsRouter } from "./analytics.router";
 import { briefingRouter } from "./briefing.router";
 import { schedulerRouter } from "./scheduler.router";
+import { calendarRouter } from "./calendar.router";
+import { clientsRouter } from "./clients.router";
+import { abTestRouter } from "./abtest.router";
+import { reportsRouter } from "./reports.router";
+import { libraryRouter } from "./library.router";
 
 export const marketingRouter = router({
   brands: brandsRouter,
@@ -17,4 +22,9 @@ export const marketingRouter = router({
   analytics: analyticsRouter,
   briefing: briefingRouter,
   scheduler: schedulerRouter,
+  calendar: calendarRouter,
+  clients: clientsRouter,
+  abTest: abTestRouter,
+  reports: reportsRouter,
+  library: libraryRouter,
 });
