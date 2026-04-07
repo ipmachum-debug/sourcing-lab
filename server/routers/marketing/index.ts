@@ -6,6 +6,7 @@ import { contentRouter } from "./content.router";
 import { channelsRouter } from "./channels.router";
 import { analyticsRouter } from "./analytics.router";
 import { briefingRouter } from "./briefing.router";
+import { schedulerRouter } from "./scheduler.router";
 
 export const marketingRouter = router({
   brands: brandsRouter,
@@ -15,4 +16,5 @@ export const marketingRouter = router({
   channels: channelsRouter,
   analytics: analyticsRouter,
   briefing: briefingRouter,
+  scheduler: schedulerRouter,
 });
