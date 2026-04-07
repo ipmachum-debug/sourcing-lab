@@ -19,10 +19,10 @@ export function startAnalyticsCollector() {
     return;
   }
 
-  console.log("[Marketing Analytics] Starting (30min interval)...");
-  collectorInterval = setInterval(collectAll, 30 * 60_000);
-  // 5분 후 첫 실행 (서버 시작 직후 부하 방지)
-  setTimeout(collectAll, 5 * 60_000);
+  console.log("[Marketing Analytics] Starting (2hr interval)...");
+  collectorInterval = setInterval(collectAll, 2 * 60 * 60_000);
+  // 10분 후 첫 실행 (서버 시작 직후 부하 방지)
+  setTimeout(collectAll, 10 * 60_000);
 }
 
 export function stopAnalyticsCollector() {

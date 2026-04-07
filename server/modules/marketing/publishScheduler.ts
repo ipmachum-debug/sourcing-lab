@@ -21,8 +21,8 @@ export function startPublishScheduler() {
     return;
   }
 
-  console.log("[Marketing Scheduler] Starting (60s interval)...");
-  schedulerInterval = setInterval(processQueue, 60_000);
+  console.log("[Marketing Scheduler] Starting (5min interval)...");
+  schedulerInterval = setInterval(processQueue, 5 * 60_000);
   // 즉시 한번 실행
   processQueue();
 }
