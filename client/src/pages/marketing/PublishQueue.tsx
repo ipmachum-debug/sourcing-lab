@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Send, XCircle, Clock, CheckCircle2, AlertTriangle, Zap, BarChart3 } from "lucide-react";
+import { RefreshCw, Send, XCircle, Clock, CheckCircle2, AlertTriangle, Zap, BarChart3, Trash2 } from "lucide-react";
 
 const PLATFORM_LABELS: Record<string, { label: string; emoji: string }> = {
   instagram: { label: "인스타그램", emoji: "📸" },
@@ -28,6 +28,7 @@ const STATUS_ICONS: Record<string, any> = {
 export default function PublishQueue() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const utils = trpc.useUtils();
   const posts = trpc.marketing.channels.listPosts.useQuery(
@@ -61,6 +62,41 @@ export default function PublishQueue() {
     onError: (err) => toast.error(err.message),
   });
 
+  const deletePost = trpc.marketing.channels.deletePost.useMutation({
+    onSuccess: () => {
+      toast.success("삭제되었습니다.");
+      utils.marketing.channels.listPosts.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const deletePosts = trpc.marketing.channels.deletePosts.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.deleted}건 삭제되었습니다.`);
+      setSelectedIds(new Set());
+      utils.marketing.channels.listPosts.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (!posts.data) return;
+    if (selectedIds.size === posts.data.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(posts.data.map(p => p.id)));
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-4">
@@ -69,10 +105,24 @@ export default function PublishQueue() {
             <h1 className="text-2xl font-bold">발행 큐</h1>
             <p className="text-muted-foreground text-sm mt-1">예약/대기/발행된 콘텐츠를 관리합니다</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => posts.refetch()}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            새로고침
-          </Button>
+          <div className="flex gap-2">
+            {selectedIds.size > 0 && (
+              <Button variant="destructive" size="sm"
+                disabled={deletePosts.isPending}
+                onClick={() => {
+                  if (confirm(`${selectedIds.size}건을 삭제하시겠습니까?`)) {
+                    deletePosts.mutate({ ids: Array.from(selectedIds) });
+                  }
+                }}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                {selectedIds.size}건 삭제
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => posts.refetch()}>
+              <RefreshCw className="h-4 w-4 mr-1" />
+              새로고침
+            </Button>
+          </div>
         </div>
 
         {/* 필터 */}
@@ -103,6 +153,18 @@ export default function PublishQueue() {
           </Select>
         </div>
 
+        {/* 전체 선택 */}
+        {(posts.data?.length ?? 0) > 0 && (
+          <div className="flex items-center gap-2">
+            <input type="checkbox" className="h-4 w-4 rounded border-gray-300"
+              checked={posts.data ? selectedIds.size === posts.data.length : false}
+              onChange={toggleSelectAll} />
+            <span className="text-sm text-muted-foreground">
+              전체 선택 ({selectedIds.size}/{posts.data?.length || 0})
+            </span>
+          </div>
+        )}
+
         {/* 발행 목록 */}
         {posts.data?.length === 0 && (
           <Card>
@@ -123,9 +185,12 @@ export default function PublishQueue() {
             const mediaImages = (post.mediaPaths as string[]) || [];
 
             return (
-              <Card key={post.id}>
+              <Card key={post.id} className={selectedIds.has(post.id) ? "ring-2 ring-primary" : ""}>
                 <CardContent className="p-3">
                   <div className="flex items-start gap-3">
+                    <input type="checkbox" className="h-4 w-4 mt-1 rounded border-gray-300 shrink-0"
+                      checked={selectedIds.has(post.id)}
+                      onChange={() => toggleSelect(post.id)} />
                     {/* 사진 썸네일 */}
                     {mediaImages.length > 0 && (
                       <div className="flex gap-1 shrink-0">
@@ -201,6 +266,15 @@ export default function PublishQueue() {
                           <XCircle className="h-4 w-4" />
                         </Button>
                       )}
+                      <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                        disabled={deletePost.isPending}
+                        onClick={() => {
+                          if (confirm("이 게시물을 삭제하시겠습니까?")) {
+                            deletePost.mutate({ id: post.id });
+                          }
+                        }}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
                 </CardContent>

@@ -112,6 +112,32 @@ export const channelsRouter = router({
       return { success: true };
     }),
 
+  // 게시물 삭제
+  deletePost: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(mktChannelPosts)
+        .where(and(eq(mktChannelPosts.id, input.id), eq(mktChannelPosts.userId, ctx.user.id)));
+      return { success: true };
+    }),
+
+  // 여러 게시물 일괄 삭제
+  deletePosts: protectedProcedure
+    .input(z.object({ ids: z.array(z.number()).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      let deleted = 0;
+      for (const id of input.ids) {
+        await db.delete(mktChannelPosts)
+          .where(and(eq(mktChannelPosts.id, id), eq(mktChannelPosts.userId, ctx.user.id)));
+        deleted++;
+      }
+      return { success: true, deleted };
+    }),
+
   // 예약 시간 설정
   schedulePost: protectedProcedure
     .input(z.object({
