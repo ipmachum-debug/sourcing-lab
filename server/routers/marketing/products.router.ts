@@ -1,7 +1,7 @@
 import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import { mktProducts } from "../../../drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
@@ -59,8 +59,12 @@ export const mktProductsRouter = router({
         category: input.category || null,
         seasonality: input.seasonality || null,
       };
-      if (input.features && input.features.length > 0) vals.features = input.features;
-      if (input.imageUrls && input.imageUrls.length > 0) vals.imageUrls = input.imageUrls;
+      if (input.features && input.features.length > 0) {
+        vals.features = sql`CAST(${JSON.stringify(input.features)} AS JSON)`;
+      }
+      if (input.imageUrls && input.imageUrls.length > 0) {
+        vals.imageUrls = sql`CAST(${JSON.stringify(input.imageUrls)} AS JSON)`;
+      }
 
       const result = await db.insert(mktProducts).values(vals);
       const insertId = Number((result as any)?.[0]?.insertId);
