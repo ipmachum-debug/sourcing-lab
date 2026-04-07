@@ -88,15 +88,19 @@ export const contentRouter = router({
       `);
       const contentId = Number((result as any)?.[0]?.insertId);
 
+      // 상품 이미지를 채널 포스트에 연결
+      const productImages = product.imageUrls as string[] || [];
+      const mediaPaths = productImages.length > 0 ? JSON.stringify(productImages) : null;
+
       // 채널별 변환 결과 저장
       for (const post of generated.channelPosts) {
         const postTags = post.hashtags?.length ? JSON.stringify(post.hashtags) : null;
         await db.execute(sql`
-          INSERT INTO mkt_channel_posts (content_item_id, user_id, platform, title, caption, description, hashtags, publish_status)
+          INSERT INTO mkt_channel_posts (content_item_id, user_id, platform, title, caption, description, hashtags, media_paths, publish_status)
           VALUES (
             ${contentId}, ${ctx.user.id}, ${post.platform}, ${post.title || null},
             ${post.caption || null}, ${post.description || null},
-            CAST(${postTags} AS JSON), ${"queued"}
+            CAST(${postTags} AS JSON), CAST(${mediaPaths} AS JSON), ${"queued"}
           )
         `);
       }

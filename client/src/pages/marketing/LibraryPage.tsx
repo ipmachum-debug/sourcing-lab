@@ -374,10 +374,16 @@ export default function LibraryPage() {
             <TabsTrigger value="copy">베스트 카피</TabsTrigger>
             <TabsTrigger value="media">미디어</TabsTrigger>
             <TabsTrigger value="competitors">경쟁사</TabsTrigger>
+            <TabsTrigger value="reviews">리뷰/후기</TabsTrigger>
           </TabsList>
           <TabsContent value="copy" className="mt-4"><CopyLibraryTab /></TabsContent>
           <TabsContent value="media" className="mt-4"><MediaLibraryTab /></TabsContent>
           <TabsContent value="competitors" className="mt-4"><CompetitorsTab /></TabsContent>
+          <TabsContent value="reviews" className="mt-4">
+            <div className="text-center text-muted-foreground py-4 text-sm">
+              <a href="/marketing/reviews" className="text-blue-600 hover:underline">리뷰/후기 관리 →</a>
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>

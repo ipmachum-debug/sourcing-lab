@@ -41,6 +41,7 @@ import LibraryPage from "./pages/marketing/LibraryPage";
 import ViralMonitor from "./pages/marketing/ViralMonitor";
 import TrendsPage from "./pages/marketing/TrendsPage";
 import ReviewsPage from "./pages/marketing/ReviewsPage";
+import VideoStudio from "./pages/marketing/VideoStudio";
 
 function Router() {
   return (
@@ -84,6 +85,7 @@ function Router() {
       <Route path="/marketing/viral" component={ViralMonitor} />
       <Route path="/marketing/trends" component={TrendsPage} />
       <Route path="/marketing/reviews" component={ReviewsPage} />
+      <Route path="/marketing/video" component={VideoStudio} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

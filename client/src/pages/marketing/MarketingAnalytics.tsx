@@ -26,10 +26,14 @@ export default function MarketingAnalytics() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">성과 분석</h1>
-            <p className="text-muted-foreground text-sm mt-1">채널별/콘텐츠별 마케팅 성과를 분석합니다</p>
+            <h1 className="text-2xl font-bold">성과 / 바이럴</h1>
+            <p className="text-muted-foreground text-sm mt-1">채널별 성과 + 바이럴 모니터 + 트렌드</p>
           </div>
-          <Select value={period} onValueChange={setPeriod}>
+          <div className="flex items-center gap-2">
+            <a href="/marketing/viral"><Badge variant="outline" className="cursor-pointer hover:bg-muted">🔥 바이럴</Badge></a>
+            <a href="/marketing/trends"><Badge variant="outline" className="cursor-pointer hover:bg-muted">📈 트렌드</Badge></a>
+            <a href="/marketing/reports"><Badge variant="outline" className="cursor-pointer hover:bg-muted">📋 리포트</Badge></a>
+            <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
@@ -40,6 +44,7 @@ export default function MarketingAnalytics() {
               <SelectItem value="90">최근 90일</SelectItem>
             </SelectContent>
           </Select>
+          </div>
         </div>
 
         {/* 종합 요약 */}

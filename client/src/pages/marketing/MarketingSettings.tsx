@@ -121,6 +121,8 @@ function ProductsTab() {
   const [features, setFeatures] = useState("");
   const [target, setTarget] = useState("");
   const [price, setPrice] = useState("");
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const utils = trpc.useUtils();
   const brands = trpc.marketing.brands.list.useQuery();
@@ -130,6 +132,7 @@ function ProductsTab() {
       toast.success("상품이 등록되었습니다.");
       setShowAdd(false);
       setName(""); setDesc(""); setFeatures(""); setTarget(""); setPrice("");
+      setUploadedImages([]);
       utils.marketing.products.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -141,6 +144,44 @@ function ProductsTab() {
     },
   });
 
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (uploadedImages.length + files.length > 10) {
+      toast.error("최대 10장까지 업로드 가능합니다.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const base64Images: string[] = [];
+      for (const file of Array.from(files)) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        base64Images.push(base64);
+      }
+      const res = await fetch("/api/marketing/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: base64Images, brandId: brandId ? Number(brandId) : undefined }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUploadedImages(prev => [...prev, ...data.urls]);
+        toast.success(`${data.count}장 업로드 완료`);
+      } else {
+        toast.error(data.error || "업로드 실패");
+      }
+    } catch (err: any) {
+      toast.error("업로드 실패: " + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -149,7 +190,7 @@ function ProductsTab() {
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" />상품 추가</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>상품 등록</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <Select value={brandId} onValueChange={setBrandId}>
@@ -165,6 +206,31 @@ function ProductsTab() {
               <Input placeholder="특징 (쉼표 구분: 쫀득함, 무설탕, 수제)" value={features} onChange={e => setFeatures(e.target.value)} />
               <Input placeholder="타겟 고객 (예: 30~40대 여성)" value={target} onChange={e => setTarget(e.target.value)} />
               <Input placeholder="가격" type="number" value={price} onChange={e => setPrice(e.target.value)} />
+
+              {/* 사진 업로드 */}
+              <div>
+                <label className="text-sm font-medium mb-1 block">상품 사진 (최대 10장)</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {uploadedImages.map((url, i) => (
+                    <div key={i} className="relative w-16 h-16 rounded-md overflow-hidden border group">
+                      <img src={url} alt={`상품 사진 ${i + 1}`} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setUploadedImages(prev => prev.filter((_, idx) => idx !== i))}
+                        className="absolute inset-0 bg-black/50 text-white text-xs opacity-0 group-hover:opacity-100 flex items-center justify-center transition"
+                      >삭제</button>
+                    </div>
+                  ))}
+                  {uploadedImages.length < 10 && (
+                    <label className="w-16 h-16 rounded-md border-2 border-dashed flex items-center justify-center cursor-pointer hover:bg-muted/50 transition">
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageSelect} disabled={uploading} />
+                      {uploading ? <span className="text-xs">...</span> : <Plus className="h-5 w-5 text-muted-foreground" />}
+                    </label>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{uploadedImages.length}/10장 · 인스타/블로그에 직접 사용하거나 AI 영상 생성 소재로 활용됩니다</p>
+              </div>
+
               <Button className="w-full" disabled={!brandId || !name || createProduct.isPending}
                 onClick={() => createProduct.mutate({
                   brandId: Number(brandId), name,
@@ -172,6 +238,7 @@ function ProductsTab() {
                   features: features ? features.split(",").map(f => f.trim()).filter(Boolean) : undefined,
                   targetAudience: target || undefined,
                   price: price || undefined,
+                  imageUrls: uploadedImages.length > 0 ? uploadedImages : undefined,
                 })}>
                 {createProduct.isPending ? "등록 중..." : "등록"}
               </Button>
@@ -182,30 +249,52 @@ function ProductsTab() {
       {products.data?.length === 0 && (
         <Card><CardContent className="p-8 text-center text-muted-foreground text-sm">등록된 상품이 없습니다. 브랜드를 먼저 등록하세요.</CardContent></Card>
       )}
-      {products.data?.map(product => (
-        <Card key={product.id}>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">{product.name}</span>
-                {product.price && <Badge variant="outline" className="text-xs">{Number(product.price).toLocaleString()}원</Badge>}
-              </div>
-              {product.description && <p className="text-xs text-muted-foreground mt-1">{product.description}</p>}
-              {(product.features as string[])?.length > 0 && (
-                <div className="flex gap-1 mt-1">
-                  {(product.features as string[]).map((f, i) => (
-                    <Badge key={i} variant="secondary" className="text-xs">{f}</Badge>
-                  ))}
+      {products.data?.map(product => {
+        const images = (product.imageUrls as string[]) || [];
+        return (
+          <Card key={product.id}>
+            <CardContent className="p-3">
+              <div className="flex items-start gap-3">
+                {/* 사진 썸네일 */}
+                {images.length > 0 ? (
+                  <div className="flex gap-1 shrink-0">
+                    {images.slice(0, 3).map((url, i) => (
+                      <img key={i} src={url} alt="" className="w-12 h-12 rounded object-cover border" />
+                    ))}
+                    {images.length > 3 && (
+                      <div className="w-12 h-12 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                        +{images.length - 3}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded border bg-muted flex items-center justify-center shrink-0">
+                    <Package className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{product.name}</span>
+                    {product.price && <Badge variant="outline" className="text-xs">{Number(product.price).toLocaleString()}원</Badge>}
+                    <span className="text-xs text-muted-foreground">{images.length}장</span>
+                  </div>
+                  {product.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{product.description}</p>}
+                  {(product.features as string[])?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(product.features as string[]).map((f, i) => (
+                        <Badge key={i} variant="secondary" className="text-xs">{f}</Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => deleteProduct.mutate({ id: product.id })}>
-              <Trash2 className="h-4 w-4 text-red-500" />
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+                <Button variant="ghost" size="sm" onClick={() => deleteProduct.mutate({ id: product.id })}>
+                  <Trash2 className="h-4 w-4 text-red-500" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -316,10 +405,16 @@ export default function MarketingSettings() {
             <TabsTrigger value="brands">브랜드</TabsTrigger>
             <TabsTrigger value="products">상품</TabsTrigger>
             <TabsTrigger value="accounts">계정 연동</TabsTrigger>
+            <TabsTrigger value="schedule">스케줄</TabsTrigger>
           </TabsList>
           <TabsContent value="brands" className="mt-4"><BrandsTab /></TabsContent>
           <TabsContent value="products" className="mt-4"><ProductsTab /></TabsContent>
           <TabsContent value="accounts" className="mt-4"><AccountsTab /></TabsContent>
+          <TabsContent value="schedule" className="mt-4">
+            <div className="text-center text-muted-foreground py-8 text-sm">
+              채널별 예약 발행 규칙은 <a href="/marketing/calendar" className="text-blue-600 hover:underline">콘텐츠 캘린더</a>에서 관리합니다.
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>

@@ -1807,3 +1807,41 @@ export const mktViralLog = mysqlTable("mkt_viral_log", {
 
 export type MktViralLogEntry = typeof mktViralLog.$inferSelect;
 export type InsertMktViralLogEntry = typeof mktViralLog.$inferInsert;
+
+// ============================================================
+// ==================== Video Production Pipeline ==============
+// ============================================================
+
+// ==================== 영상 제작 작업 (mkt_video_jobs) ====================
+export const mktVideoJobs = mysqlTable("mkt_video_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  productId: int("product_id"),
+  contentItemId: int("content_item_id"),
+  // 입력 이미지
+  sourceImages: json("source_images"), // string[] — 업로드된 전체 이미지
+  selectedImages: json("selected_images"), // string[] — AI가 선택한 베스트 컷
+  // 스토리/프롬프트
+  storyScript: text("story_script"), // AI 생성 스토리 대본
+  videoPrompt: text("video_prompt"), // Kling API용 프롬프트
+  videoStyle: mysqlEnum("video_style", ["instagram_reel", "tiktok", "youtube_shorts", "product_showcase", "unboxing", "review"]).default("instagram_reel").notNull(),
+  videoDuration: int("video_duration").default(15).notNull(), // 초
+  // Kling API 결과
+  klingTaskId: varchar("kling_task_id", { length: 255 }), // Kling API task ID
+  rawVideoUrl: text("raw_video_url"), // 생성된 원본 영상 URL
+  // 후처리
+  subtitleText: text("subtitle_text"), // 자막 텍스트 (SRT 형식)
+  bgmTrack: varchar("bgm_track", { length: 255 }), // 선택된 BGM
+  bgmMood: mysqlEnum("bgm_mood", ["upbeat", "calm", "luxury", "cute", "trendy", "emotional"]).default("trendy"),
+  // 최종 결과
+  finalVideoUrl: text("final_video_url"), // 자막+BGM 합성 완료 영상
+  thumbnailUrl: text("thumbnail_url"), // 썸네일
+  // 상태
+  status: mysqlEnum("status", ["selecting", "scripting", "prompting", "generating", "processing", "completed", "failed"]).default("selecting").notNull(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktVideoJob = typeof mktVideoJobs.$inferSelect;
+export type InsertMktVideoJob = typeof mktVideoJobs.$inferInsert;

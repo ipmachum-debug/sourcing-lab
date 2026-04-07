@@ -265,6 +265,55 @@ async function startServer() {
     });
   });
 
+  // ============================================================
+  // Marketing: 이미지 업로드 API
+  // ============================================================
+  const mktUploadsDir = path.join(process.cwd(), "uploads", "marketing");
+  if (!fs.existsSync(mktUploadsDir)) {
+    fs.mkdirSync(mktUploadsDir, { recursive: true });
+  }
+  app.use("/uploads/marketing", express.static(mktUploadsDir, {
+    maxAge: "30d",
+    setHeaders: (res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Cache-Control", "public, max-age=2592000");
+    },
+  }));
+
+  // 이미지 업로드 (base64 방식 — multer 없이)
+  app.post("/api/marketing/upload", express.json({ limit: "20mb" }), async (req, res) => {
+    try {
+      const { images, productId, brandId } = req.body;
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        return res.status(400).json({ error: "이미지가 없습니다." });
+      }
+      if (images.length > 10) {
+        return res.status(400).json({ error: "최대 10장까지 업로드 가능합니다." });
+      }
+
+      const uploadedUrls: string[] = [];
+      const subDir = productId ? `product_${productId}` : brandId ? `brand_${brandId}` : "general";
+      const targetDir = path.join(mktUploadsDir, subDir);
+      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+      for (const img of images) {
+        // base64 데이터 처리
+        const match = img.match(/^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/);
+        if (!match) continue;
+        const ext = match[1] === "jpeg" ? "jpg" : match[1];
+        const buffer = Buffer.from(match[2], "base64");
+        const filename = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}.${ext}`;
+        const filePath = path.join(targetDir, filename);
+        fs.writeFileSync(filePath, buffer);
+        uploadedUrls.push(`/uploads/marketing/${subDir}/${filename}`);
+      }
+
+      res.json({ success: true, urls: uploadedUrls, count: uploadedUrls.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
