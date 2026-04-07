@@ -13,6 +13,7 @@ import { abTestRouter } from "./abtest.router";
 import { reportsRouter } from "./reports.router";
 import { libraryRouter } from "./library.router";
 import { viralRouter } from "./viral.router";
+import { videoRouter } from "./video.router";
 
 export const marketingRouter = router({
   brands: brandsRouter,
@@ -29,4 +30,5 @@ export const marketingRouter = router({
   reports: reportsRouter,
   library: libraryRouter,
   viral: viralRouter,
+  video: videoRouter,
 });

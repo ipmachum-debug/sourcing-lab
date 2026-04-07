@@ -25,7 +25,7 @@ import {
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
   Calendar, Building, FlaskConical as Flask, FileBarChart, Library,
-  Flame, TrendingUp as TrendIcon, MessageSquare,
+  Flame, TrendingUp as TrendIcon, MessageSquare, Video,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -138,6 +138,7 @@ const menuItems: MenuItem[] = [
   { icon: FileBarChart, label: "성과 리포트", path: "/marketing/reports", emoji: "📋", group: "마케팅" },
   { icon: Library, label: "자료실", path: "/marketing/library", emoji: "📚", group: "마케팅" },
   // 바이럴
+  { icon: Video, label: "영상 스튜디오", path: "/marketing/video", emoji: "🎬", group: "마케팅" },
   { icon: Flame, label: "바이럴 모니터", path: "/marketing/viral", emoji: "🔥", group: "바이럴" },
   { icon: TrendIcon, label: "트렌드 감지", path: "/marketing/trends", emoji: "📈", group: "바이럴" },
   { icon: MessageSquare, label: "리뷰/후기", path: "/marketing/reviews", emoji: "💬", group: "바이럴" },
