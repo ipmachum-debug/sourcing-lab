@@ -47,9 +47,9 @@ export const brandsRouter = router({
       const fw = input.forbiddenWords?.length ? JSON.stringify(input.forbiddenWords) : null;
 
       const result = await db.execute(sql`
-        INSERT INTO mkt_brands (user_id, name, description, tone_of_voice, keywords, forbidden_words, cta_style, logo_url, color_primary)
+        INSERT INTO mkt_brands (user_id, name, description, tone_of_voice, keywords, forbidden_words, cta_style)
         VALUES (${ctx.user.id}, ${input.name}, ${input.description || null}, ${input.toneOfVoice || "friendly"},
-                ${kw}, ${fw}, ${input.ctaStyle || "purchase"}, ${input.logoUrl || null}, ${input.colorPrimary || null})
+                ${kw}, ${fw}, ${input.ctaStyle || "purchase"})
       `);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
