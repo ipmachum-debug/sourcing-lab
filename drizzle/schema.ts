@@ -1294,3 +1294,205 @@ export const extBatchState = mysqlTable("ext_batch_state", {
 });
 
 export type ExtBatchState = typeof extBatchState.$inferSelect;
+
+// ============================================================
+// ==================== Marketing Automation ====================
+// ============================================================
+
+// ==================== Marketing: 소셜 계정 연동 (mkt_accounts) ====================
+export const mktAccounts = mysqlTable("mkt_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  accountName: varchar("account_name", { length: 255 }).notNull(),
+  accountId: varchar("account_id", { length: 255 }), // 플랫폼별 고유 ID
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at", tsOpts),
+  meta: json("meta"), // pageId, businessId, channelId 등
+  status: mysqlEnum("status", ["active", "expired", "error", "disconnected"]).default("active").notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktAccount = typeof mktAccounts.$inferSelect;
+export type InsertMktAccount = typeof mktAccounts.$inferInsert;
+
+// ==================== Marketing: 브랜드 (mkt_brands) ====================
+export const mktBrands = mysqlTable("mkt_brands", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  toneOfVoice: mysqlEnum("tone_of_voice", ["casual", "premium", "friendly", "professional", "b2b"]).default("friendly").notNull(),
+  keywords: json("keywords"), // string[] — 대표 키워드
+  forbiddenWords: json("forbidden_words"), // string[] — 금칙어
+  ctaStyle: mysqlEnum("cta_style", ["purchase", "inquiry", "visit", "follow", "custom"]).default("purchase").notNull(),
+  logoUrl: text("logo_url"),
+  colorPrimary: varchar("color_primary", { length: 7 }), // #hex
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktBrand = typeof mktBrands.$inferSelect;
+export type InsertMktBrand = typeof mktBrands.$inferInsert;
+
+// ==================== Marketing: 상품/서비스 (mkt_products) ====================
+export const mktProducts = mysqlTable("mkt_products", {
+  id: int("id").autoincrement().primaryKey(),
+  brandId: int("brand_id").notNull(),
+  userId: int("user_id").notNull(),
+  name: varchar("name", { length: 500 }).notNull(),
+  description: text("description"),
+  features: json("features"), // string[] — 특징 (쫀득함, 무설탕 등)
+  targetAudience: text("target_audience"),
+  price: decimal("price", { precision: 12, scale: 0 }),
+  landingUrl: text("landing_url"),
+  imageUrls: json("image_urls"), // string[]
+  category: varchar("category", { length: 100 }),
+  seasonality: varchar("seasonality", { length: 100 }), // 봄, 추석, 연중 등
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktProduct = typeof mktProducts.$inferSelect;
+export type InsertMktProduct = typeof mktProducts.$inferInsert;
+
+// ==================== Marketing: 캠페인 (mkt_campaigns) ====================
+export const mktCampaigns = mysqlTable("mkt_campaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  brandId: int("brand_id").notNull(),
+  userId: int("user_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  goal: mysqlEnum("goal", ["sales", "inquiry", "followers", "launch", "awareness", "engagement"]).default("sales").notNull(),
+  startDate: varchar("start_date", { length: 10 }), // YYYY-MM-DD
+  endDate: varchar("end_date", { length: 10 }),
+  status: mysqlEnum("status", ["draft", "active", "paused", "completed"]).default("draft").notNull(),
+  memo: text("memo"),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktCampaign = typeof mktCampaigns.$inferSelect;
+export type InsertMktCampaign = typeof mktCampaigns.$inferInsert;
+
+// ==================== Marketing: 콘텐츠 원본 (mkt_content_items) ====================
+export const mktContentItems = mysqlTable("mkt_content_items", {
+  id: int("id").autoincrement().primaryKey(),
+  campaignId: int("campaign_id"),
+  productId: int("product_id"),
+  userId: int("user_id").notNull(),
+  sourceType: mysqlEnum("source_type", ["product", "event", "manual", "ai_generated"]).default("ai_generated").notNull(),
+  masterTitle: varchar("master_title", { length: 500 }),
+  masterHook: text("master_hook"), // 훅 문구
+  masterBody: text("master_body"), // 본문
+  hashtags: json("hashtags"), // string[]
+  script: text("script"), // 영상 대본
+  imagePrompt: text("image_prompt"), // AI 이미지 생성용
+  videoPrompt: text("video_prompt"), // AI 영상 생성용
+  status: mysqlEnum("status", ["draft", "approved", "scheduled", "published", "failed", "archived"]).default("draft").notNull(),
+  aiScore: int("ai_score"), // AI 품질 점수 (0-100)
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktContentItem = typeof mktContentItems.$inferSelect;
+export type InsertMktContentItem = typeof mktContentItems.$inferInsert;
+
+// ==================== Marketing: 채널별 발행 (mkt_channel_posts) ====================
+export const mktChannelPosts = mysqlTable("mkt_channel_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  contentItemId: int("content_item_id").notNull(),
+  accountId: int("account_id"), // mkt_accounts.id
+  userId: int("user_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  title: varchar("title", { length: 500 }),
+  caption: text("caption"),
+  description: text("description"),
+  hashtags: json("hashtags"), // string[]
+  mediaPaths: json("media_paths"), // string[] — 업로드할 미디어 경로
+  scheduledAt: timestamp("scheduled_at", tsOpts),
+  publishedAt: timestamp("published_at", tsOpts),
+  remotePostId: varchar("remote_post_id", { length: 255 }), // 플랫폼에서 받은 게시물 ID
+  remotePostUrl: text("remote_post_url"),
+  publishStatus: mysqlEnum("publish_status", ["queued", "publishing", "published", "failed", "cancelled"]).default("queued").notNull(),
+  errorMessage: text("error_message"),
+  retryCount: int("retry_count").default(0).notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktChannelPost = typeof mktChannelPosts.$inferSelect;
+export type InsertMktChannelPost = typeof mktChannelPosts.$inferInsert;
+
+// ==================== Marketing: 성과 스냅샷 (mkt_analytics) ====================
+export const mktAnalytics = mysqlTable("mkt_analytics", {
+  id: int("id").autoincrement().primaryKey(),
+  channelPostId: int("channel_post_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  views: int("views").default(0).notNull(),
+  likes: int("likes").default(0).notNull(),
+  comments: int("comments").default(0).notNull(),
+  shares: int("shares").default(0).notNull(),
+  clicks: int("clicks").default(0).notNull(),
+  conversions: int("conversions").default(0).notNull(),
+  reach: int("reach").default(0),
+  impressions: int("impressions").default(0),
+  ctr: decimal("ctr", { precision: 5, scale: 2 }), // Click-through rate %
+  capturedAt: timestamp("captured_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktAnalytic = typeof mktAnalytics.$inferSelect;
+export type InsertMktAnalytic = typeof mktAnalytics.$inferInsert;
+
+// ==================== Marketing: AI 학습 피드백 (mkt_ai_feedback) ====================
+export const mktAiFeedback = mysqlTable("mkt_ai_feedback", {
+  id: int("id").autoincrement().primaryKey(),
+  contentItemId: int("content_item_id").notNull(),
+  userId: int("user_id").notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  score: int("score"), // 1-10 성과 점수
+  reason: text("reason"), // AI 분석 이유
+  bestHook: text("best_hook"), // 잘 먹힌 훅
+  badPattern: text("bad_pattern"), // 실패 패턴
+  recommendedAction: text("recommended_action"), // 다음 추천 액션
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktAiFeedback = typeof mktAiFeedback.$inferSelect;
+export type InsertMktAiFeedback = typeof mktAiFeedback.$inferInsert;
+
+// ==================== Marketing: AI 브리핑 (mkt_briefings) ====================
+export const mktBriefings = mysqlTable("mkt_briefings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  briefingDate: varchar("briefing_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  summary: text("summary").notNull(), // AI 요약 텍스트
+  actionItems: json("action_items"), // { type, title, description, priority, link }[]
+  alerts: json("alerts"), // { level, message, productId? }[]
+  recommendations: json("recommendations"), // { type, content, reason }[]
+  isRead: boolean("is_read").default(false).notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MktBriefing = typeof mktBriefings.$inferSelect;
+export type InsertMktBriefing = typeof mktBriefings.$inferInsert;
+
+// ==================== Marketing: 예약 발행 규칙 (mkt_schedule_rules) ====================
+export const mktScheduleRules = mysqlTable("mkt_schedule_rules", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  brandId: int("brand_id"),
+  name: varchar("name", { length: 255 }).notNull(),
+  platform: mysqlEnum("platform", ["instagram", "youtube", "tiktok", "naver_blog", "naver_cafe", "kakao"]).notNull(),
+  frequency: mysqlEnum("frequency", ["daily", "weekdays", "weekly", "biweekly", "monthly", "custom"]).default("daily").notNull(),
+  preferredTimes: json("preferred_times"), // string[] — ["09:00", "12:00", "18:00"]
+  maxPostsPerDay: int("max_posts_per_day").default(3).notNull(),
+  autoApprove: boolean("auto_approve").default(false).notNull(), // 자동 승인 모드
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MktScheduleRule = typeof mktScheduleRules.$inferSelect;
+export type InsertMktScheduleRule = typeof mktScheduleRules.$inferInsert;
