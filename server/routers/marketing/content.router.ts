@@ -79,11 +79,11 @@ export const contentRouter = router({
       // 마스터 콘텐츠 저장
       const htags = generated.hashtags?.length ? JSON.stringify(generated.hashtags) : null;
       const result = await db.execute(sql`
-        INSERT INTO mkt_content_items (user_id, product_id, campaign_id, source_type, master_title, master_hook, master_body, hashtags, script, status, ai_score)
+        INSERT INTO mkt_content_items (user_id, product_id, campaign_id, source_type, master_title, master_hook, master_body, hashtags, script, status)
         VALUES (
           ${ctx.user.id}, ${input.productId}, ${input.campaignId || null}, ${"ai_generated"},
           ${generated.masterTitle}, ${generated.masterHook}, ${generated.masterBody},
-          CAST(${htags} AS JSON), ${generated.script || null}, ${"draft"}, ${generated.aiScore || null}
+          CAST(${htags} AS JSON), ${generated.script || null}, ${"draft"}
         )
       `);
       const contentId = Number((result as any)?.[0]?.insertId);
