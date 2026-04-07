@@ -48,19 +48,21 @@ export const mktProductsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const result = await db.insert(mktProducts).values({
+      const vals: Record<string, any> = {
         userId: ctx.user.id,
         brandId: input.brandId,
         name: input.name,
         description: input.description || null,
-        features: (Array.isArray(input.features) && input.features.length) ? JSON.stringify(input.features) : null,
         targetAudience: input.targetAudience || null,
         price: input.price || null,
         landingUrl: input.landingUrl || null,
-        imageUrls: (Array.isArray(input.imageUrls) && input.imageUrls.length) ? JSON.stringify(input.imageUrls) : null,
         category: input.category || null,
         seasonality: input.seasonality || null,
-      });
+      };
+      if (input.features && input.features.length > 0) vals.features = input.features;
+      if (input.imageUrls && input.imageUrls.length > 0) vals.imageUrls = input.imageUrls;
+
+      const result = await db.insert(mktProducts).values(vals);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
     }),

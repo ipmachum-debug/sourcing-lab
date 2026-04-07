@@ -42,20 +42,20 @@ export const brandsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      // JSON 컬럼은 반드시 유효한 JSON 또는 null
-      const safeJson = (v: any) => (Array.isArray(v) && v.length > 0) ? JSON.stringify(v) : null;
-
-      const result = await db.insert(mktBrands).values({
+      const vals: Record<string, any> = {
         userId: ctx.user.id,
         name: input.name,
         description: input.description || null,
         toneOfVoice: input.toneOfVoice || "friendly",
-        keywords: safeJson(input.keywords),
-        forbiddenWords: safeJson(input.forbiddenWords),
         ctaStyle: input.ctaStyle || "purchase",
         logoUrl: input.logoUrl || null,
         colorPrimary: input.colorPrimary || null,
-      });
+      };
+      // JSON 컬럼: 값이 있을 때만 포함 (undefined/빈배열 제외)
+      if (input.keywords && input.keywords.length > 0) vals.keywords = input.keywords;
+      if (input.forbiddenWords && input.forbiddenWords.length > 0) vals.forbiddenWords = input.forbiddenWords;
+
+      const result = await db.insert(mktBrands).values(vals);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
     }),
