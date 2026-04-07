@@ -405,10 +405,16 @@ export default function MarketingSettings() {
             <TabsTrigger value="brands">브랜드</TabsTrigger>
             <TabsTrigger value="products">상품</TabsTrigger>
             <TabsTrigger value="accounts">계정 연동</TabsTrigger>
+            <TabsTrigger value="schedule">스케줄</TabsTrigger>
           </TabsList>
           <TabsContent value="brands" className="mt-4"><BrandsTab /></TabsContent>
           <TabsContent value="products" className="mt-4"><ProductsTab /></TabsContent>
           <TabsContent value="accounts" className="mt-4"><AccountsTab /></TabsContent>
+          <TabsContent value="schedule" className="mt-4">
+            <div className="text-center text-muted-foreground py-8 text-sm">
+              채널별 예약 발행 규칙은 <a href="/marketing/calendar" className="text-blue-600 hover:underline">콘텐츠 캘린더</a>에서 관리합니다.
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>

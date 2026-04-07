@@ -84,8 +84,16 @@ export default function ContentManager() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">콘텐츠 관리</h1>
-            <p className="text-muted-foreground text-sm mt-1">AI로 마케팅 콘텐츠를 생성하고 관리합니다</p>
+            <h1 className="text-2xl font-bold">콘텐츠 제작</h1>
+            <p className="text-muted-foreground text-sm mt-1">AI 카피 생성 + 영상 제작</p>
+          </div>
+          <div className="flex gap-2">
+            <a href="/marketing/video">
+              <Button variant="outline" size="sm">🎬 영상 스튜디오</Button>
+            </a>
+            <a href="/marketing/calendar">
+              <Button variant="outline" size="sm">📅 캘린더</Button>
+            </a>
           </div>
           <Dialog open={showGenerate} onOpenChange={setShowGenerate}>
             <DialogTrigger asChild>
