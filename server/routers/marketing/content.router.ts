@@ -1,7 +1,7 @@
 import { protectedProcedure, router } from "../../_core/trpc";
 import { getDb } from "../../db";
 import { mktContentItems, mktChannelPosts, mktProducts, mktBrands } from "../../../drizzle/schema";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { generateContent } from "../../modules/marketing/contentGenerator";
@@ -77,33 +77,28 @@ export const contentRouter = router({
       });
 
       // 마스터 콘텐츠 저장
-      const result = await db.insert(mktContentItems).values({
-        userId: ctx.user.id,
-        productId: input.productId,
-        campaignId: input.campaignId || null,
-        sourceType: "ai_generated",
-        masterTitle: generated.masterTitle,
-        masterHook: generated.masterHook,
-        masterBody: generated.masterBody,
-        hashtags: generated.hashtags,
-        script: generated.script || null,
-        status: "draft",
-        aiScore: generated.aiScore || null,
-      });
+      const htags = generated.hashtags?.length ? JSON.stringify(generated.hashtags) : null;
+      const result = await db.execute(sql`
+        INSERT INTO mkt_content_items (user_id, product_id, campaign_id, source_type, master_title, master_hook, master_body, hashtags, script, status, ai_score)
+        VALUES (
+          ${ctx.user.id}, ${input.productId}, ${input.campaignId || null}, ${"ai_generated"},
+          ${generated.masterTitle}, ${generated.masterHook}, ${generated.masterBody},
+          CAST(${htags} AS JSON), ${generated.script || null}, ${"draft"}, ${generated.aiScore || null}
+        )
+      `);
       const contentId = Number((result as any)?.[0]?.insertId);
 
       // 채널별 변환 결과 저장
       for (const post of generated.channelPosts) {
-        await db.insert(mktChannelPosts).values({
-          contentItemId: contentId,
-          userId: ctx.user.id,
-          platform: post.platform,
-          title: post.title || null,
-          caption: post.caption || null,
-          description: post.description || null,
-          hashtags: post.hashtags || [],
-          publishStatus: "queued",
-        });
+        const postTags = post.hashtags?.length ? JSON.stringify(post.hashtags) : null;
+        await db.execute(sql`
+          INSERT INTO mkt_channel_posts (content_item_id, user_id, platform, title, caption, description, hashtags, publish_status)
+          VALUES (
+            ${contentId}, ${ctx.user.id}, ${post.platform}, ${post.title || null},
+            ${post.caption || null}, ${post.description || null},
+            CAST(${postTags} AS JSON), ${"queued"}
+          )
+        `);
       }
 
       return { success: true, id: contentId, generated };
