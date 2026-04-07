@@ -42,24 +42,15 @@ export const brandsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const vals: Record<string, any> = {
-        userId: ctx.user.id,
-        name: input.name,
-        description: input.description || null,
-        toneOfVoice: input.toneOfVoice || "friendly",
-        ctaStyle: input.ctaStyle || "purchase",
-        logoUrl: input.logoUrl || null,
-        colorPrimary: input.colorPrimary || null,
-      };
-      // JSON 컬럼: sql`CAST(... AS JSON)`으로 명시적 변환
-      if (input.keywords && input.keywords.length > 0) {
-        vals.keywords = sql`CAST(${JSON.stringify(input.keywords)} AS JSON)`;
-      }
-      if (input.forbiddenWords && input.forbiddenWords.length > 0) {
-        vals.forbiddenWords = sql`CAST(${JSON.stringify(input.forbiddenWords)} AS JSON)`;
-      }
 
-      const result = await db.insert(mktBrands).values(vals);
+      const kw = input.keywords?.length ? JSON.stringify(input.keywords) : null;
+      const fw = input.forbiddenWords?.length ? JSON.stringify(input.forbiddenWords) : null;
+
+      const result = await db.execute(sql`
+        INSERT INTO mkt_brands (user_id, name, description, tone_of_voice, keywords, forbidden_words, cta_style, logo_url, color_primary)
+        VALUES (${ctx.user.id}, ${input.name}, ${input.description || null}, ${input.toneOfVoice || "friendly"},
+                ${kw}, ${fw}, ${input.ctaStyle || "purchase"}, ${input.logoUrl || null}, ${input.colorPrimary || null})
+      `);
       const insertId = Number((result as any)?.[0]?.insertId);
       return { success: true, id: insertId };
     }),
