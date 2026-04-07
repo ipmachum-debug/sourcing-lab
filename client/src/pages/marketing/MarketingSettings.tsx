@@ -87,17 +87,17 @@ function BrandsTab() {
       )}
       {brands.data?.map(brand => (
         <Card key={brand.id}>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
+          <CardContent className="p-3 flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span className="font-medium">{brand.name}</span>
                 <Badge variant="outline" className="text-xs">{brand.toneOfVoice}</Badge>
               </div>
               {brand.description && <p className="text-xs text-muted-foreground mt-1">{brand.description}</p>}
               {(brand.keywords as string[])?.length > 0 && (
-                <div className="flex gap-1 mt-1">
-                  {(brand.keywords as string[]).map((k, i) => (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {[...new Set(brand.keywords as string[])].map((k, i) => (
                     <Badge key={i} variant="secondary" className="text-xs">{k}</Badge>
                   ))}
                 </div>
@@ -306,7 +306,7 @@ function AccountsTab() {
 export default function MarketingSettings() {
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      <div className="p-4 space-y-4 max-w-5xl mx-auto">
         <div>
           <h1 className="text-2xl font-bold">마케팅 설정</h1>
           <p className="text-muted-foreground text-sm mt-1">브랜드, 상품, 소셜 계정을 관리합니다</p>
