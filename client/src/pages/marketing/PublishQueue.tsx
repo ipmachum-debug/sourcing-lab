@@ -120,10 +120,25 @@ export default function PublishQueue() {
             const StatusIcon = s.icon;
             const pl = PLATFORM_LABELS[post.platform] || { label: post.platform, emoji: "📱" };
 
+            const mediaImages = (post.mediaPaths as string[]) || [];
+
             return (
               <Card key={post.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
+                <CardContent className="p-3">
+                  <div className="flex items-start gap-3">
+                    {/* 사진 썸네일 */}
+                    {mediaImages.length > 0 && (
+                      <div className="flex gap-1 shrink-0">
+                        {mediaImages.slice(0, 2).map((url, i) => (
+                          <img key={i} src={url} alt="" className="w-14 h-14 rounded object-cover border" />
+                        ))}
+                        {mediaImages.length > 2 && (
+                          <div className="w-14 h-14 rounded border bg-muted flex items-center justify-center text-xs">
+                            +{mediaImages.length - 2}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <StatusIcon className={`h-4 w-4 ${s.color}`} />
