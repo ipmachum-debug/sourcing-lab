@@ -51,7 +51,7 @@ export const mktProductsRouter = router({
       const features = input.features?.length ? JSON.stringify(input.features) : null;
 
       const result = await db.execute(sql`
-        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, category, season_keywords)
+        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, category, seasonality)
         VALUES (
           ${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
           CAST(${features} AS JSON), ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
