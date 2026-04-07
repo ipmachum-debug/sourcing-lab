@@ -43,7 +43,7 @@ export const brandsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const kw = input.keywords?.length ? JSON.stringify(input.keywords) : null;
+      const kw = input.keywords?.length ? JSON.stringify([...new Set(input.keywords)]) : null;
       const fw = input.forbiddenWords?.length ? JSON.stringify(input.forbiddenWords) : null;
 
       const result = await db.execute(sql`
