@@ -200,14 +200,14 @@ export async function callVideoApi(
   }
 
   try {
-    const res = await fetch("https://api.minimaxi.chat/v1/video_generation", {
+    const res = await fetch("https://api.minimax.io/v1/video_generation", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "video-01",
+        model: "MiniMax-Hailuo-02",
         first_frame_image: imageUrl,
         prompt,
       }),
@@ -245,7 +245,7 @@ export async function checkVideoStatus(taskId: string): Promise<{
   if (!apiKey) return { status: "error", error: "API key missing" };
 
   try {
-    const res = await fetch(`https://api.minimaxi.chat/v1/query/video_generation?task_id=${taskId}`, {
+    const res = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
 
