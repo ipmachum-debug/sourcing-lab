@@ -13,12 +13,12 @@ import {
 } from "lucide-react";
 
 const STYLE_OPTIONS = [
-  { value: "instagram_reel", label: "인스타 릴스", desc: "감성적, 15초" },
-  { value: "tiktok", label: "틱톡", desc: "훅 강조, 트렌디, 15초" },
-  { value: "youtube_shorts", label: "유튜브 쇼츠", desc: "정보성+재미, 30초" },
+  { value: "instagram_reel", label: "인스타 릴스", desc: "감성적, 세로형" },
+  { value: "tiktok", label: "틱톡", desc: "훅 강조, 트렌디" },
+  { value: "youtube_shorts", label: "유튜브 쇼츠", desc: "정보성+재미" },
   { value: "product_showcase", label: "상품 쇼케이스", desc: "고급 조명, 슬로우모션" },
-  { value: "unboxing", label: "언박싱", desc: "기대감 조성, 30초" },
-  { value: "review", label: "후기/체험", desc: "리얼 리뷰, 30초" },
+  { value: "unboxing", label: "언박싱", desc: "기대감 조성" },
+  { value: "review", label: "후기/체험", desc: "리얼 리뷰" },
 ];
 
 const MOOD_OPTIONS = [
@@ -62,7 +62,23 @@ export default function VideoStudio() {
 
   const startGen = trpc.marketing.video.startGeneration.useMutation({
     onSuccess: () => {
-      toast.success("Kling AI 영상 생성 시작! 1~5분 소요됩니다.");
+      toast.success("Minimax 영상 생성 시작! 3~10분 소요됩니다.");
+      utils.marketing.video.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const postProcess = trpc.marketing.video.postProcess.useMutation({
+    onSuccess: (data) => {
+      toast.success("자막/BGM/CTA 합성 완료!");
+      utils.marketing.video.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const createSlideshow = trpc.marketing.video.createSlideshow.useMutation({
+    onSuccess: (data) => {
+      toast.success("슬라이드쇼 영상이 생성되었습니다!");
       utils.marketing.video.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -165,7 +181,20 @@ export default function VideoStudio() {
                   {createJob.isPending ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" />AI가 준비 중...</>
                   ) : (
-                    <><Sparkles className="h-4 w-4 mr-1" />영상 제작 시작</>
+                    <><Sparkles className="h-4 w-4 mr-1" />AI 영상 제작 (Minimax)</>
+                  )}
+                </Button>
+                <div className="text-center text-xs text-muted-foreground">또는</div>
+                <Button variant="outline" className="w-full" disabled={!productId || createSlideshow.isPending}
+                  onClick={() => createSlideshow.mutate({
+                    productId: Number(productId),
+                    brandName: "미미스상회",
+                    ctaText: "지금 바로 주문하세요!",
+                  })}>
+                  {createSlideshow.isPending ? (
+                    <><Loader2 className="h-4 w-4 mr-1 animate-spin" />슬라이드쇼 생성 중...</>
+                  ) : (
+                    <><Image className="h-4 w-4 mr-1" />사진 슬라이드쇼 (무료)</>
                   )}
                 </Button>
               </div>
@@ -270,6 +299,17 @@ export default function VideoStudio() {
                       {job.status === "generating" && (
                         <Button size="sm" variant="outline" onClick={() => utils.marketing.video.list.invalidate()}>
                           <RefreshCw className="h-3 w-3 mr-1" />상태 확인
+                        </Button>
+                      )}
+                      {job.status === "completed" && job.rawVideoUrl && !job.finalVideoUrl && (
+                        <Button size="sm" variant="outline"
+                          disabled={postProcess.isPending}
+                          onClick={() => postProcess.mutate({ jobId: job.id, ctaText: "지금 바로 주문하세요!" })}>
+                          {postProcess.isPending ? (
+                            <><Loader2 className="h-3 w-3 mr-1 animate-spin" />합성 중</>
+                          ) : (
+                            <><Type className="h-3 w-3 mr-1" />자막/BGM 합성</>
+                          )}
                         </Button>
                       )}
                       {job.status === "completed" && job.finalVideoUrl && (
