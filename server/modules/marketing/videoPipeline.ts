@@ -213,14 +213,19 @@ export async function callVideoApi(
       }),
     });
 
+    const responseText = await res.text();
+    console.log("[Minimax API] Response:", res.status, responseText);
+
     if (!res.ok) {
-      const err = await res.text();
-      return { error: `Minimax API 에러: ${res.status} — ${err}` };
+      return { error: `Minimax API 에러: ${res.status} — ${responseText}` };
     }
 
-    const data = await res.json();
-    const taskId = data.task_id;
-    if (!taskId) return { error: "Minimax API에서 task_id를 받지 못했습니다." };
+    let data: any;
+    try { data = JSON.parse(responseText); } catch { return { error: `Minimax 응답 파싱 실패: ${responseText.slice(0, 200)}` }; }
+
+    // task_id 위치가 다를 수 있음
+    const taskId = data.task_id || data.data?.task_id || data.id || data.data?.id;
+    if (!taskId) return { error: `Minimax task_id 없음. 응답: ${JSON.stringify(data).slice(0, 300)}` };
 
     return { taskId };
   } catch (err: any) {
