@@ -221,8 +221,13 @@ export async function callVideoApi(
     }
 
     const data = await res.json();
+    console.log("[Minimax API] response:", JSON.stringify(data));
     const taskId = data.task_id;
-    if (!taskId) return { error: "Minimax API에서 task_id를 받지 못했습니다." };
+    if (!taskId) {
+      const msg = data.base_resp?.status_msg || "알 수 없는 에러";
+      const code = data.base_resp?.status_code || "";
+      return { error: `Minimax API 실패 (${code}): ${msg}` };
+    }
 
     return { taskId };
   } catch (err: any) {
