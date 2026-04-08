@@ -240,7 +240,7 @@ export async function callKlingApi(
         negative_prompt: "blurry, low quality, distorted, ugly, watermark, text overlay",
         cfg_scale: 0.5,
         mode: "std",
-        duration: String(duration),
+        duration: duration <= 5 ? "5" : "10",
       }),
     });
 
