@@ -54,8 +54,8 @@ export async function generateBriefing(userId: number): Promise<BriefingData> {
   ]);
 
   // AI 요약 시도
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
 
   if (apiUrl && apiKey) {
     try {

@@ -210,8 +210,8 @@ const competitorsRouter = router({
         .limit(1);
       if (!comp) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-      const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+      const apiUrl = "https://api.openai.com/v1/chat/completions";
+      const apiKey = process.env.OPENAI_API_KEY;
       if (!apiUrl || !apiKey) throw new TRPCError({ code: "BAD_REQUEST", message: "AI API 설정이 필요합니다." });
 
       const response = await fetch(apiUrl, {

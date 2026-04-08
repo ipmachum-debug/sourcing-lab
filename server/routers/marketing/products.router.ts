@@ -49,13 +49,14 @@ export const mktProductsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const features = input.features?.length ? JSON.stringify(input.features) : null;
+      const imgUrls = input.imageUrls?.length ? JSON.stringify(input.imageUrls) : null;
 
       const result = await db.execute(sql`
-        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, category, seasonality)
+        INSERT INTO mkt_products (user_id, brand_id, name, description, features, target_audience, price, landing_url, image_urls, category, seasonality)
         VALUES (
           ${ctx.user.id}, ${input.brandId}, ${input.name}, ${input.description || null},
           CAST(${features} AS JSON), ${input.targetAudience || null}, ${input.price || null}, ${input.landingUrl || null},
-          ${input.category || null}, ${input.seasonality || null}
+          CAST(${imgUrls} AS JSON), ${input.category || null}, ${input.seasonality || null}
         )
       `);
       const insertId = Number((result as any)?.[0]?.insertId);
@@ -68,8 +69,27 @@ export const mktProductsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, ...data } = input;
-      await db.update(mktProducts).set(data as any)
-        .where(and(eq(mktProducts.id, id), eq(mktProducts.userId, ctx.user.id)));
+      const features = data.features !== undefined
+        ? (data.features?.length ? JSON.stringify(data.features) : null)
+        : undefined;
+      const imgUrls = data.imageUrls !== undefined
+        ? (data.imageUrls?.length ? JSON.stringify(data.imageUrls) : null)
+        : undefined;
+
+      await db.execute(sql`
+        UPDATE mkt_products SET
+          brand_id = COALESCE(${data.brandId ?? null}, brand_id),
+          name = COALESCE(${data.name ?? null}, name),
+          description = ${data.description !== undefined ? (data.description || null) : sql`description`},
+          features = ${features !== undefined ? sql`CAST(${features} AS JSON)` : sql`features`},
+          target_audience = ${data.targetAudience !== undefined ? (data.targetAudience || null) : sql`target_audience`},
+          price = ${data.price !== undefined ? (data.price || null) : sql`price`},
+          landing_url = ${data.landingUrl !== undefined ? (data.landingUrl || null) : sql`landing_url`},
+          image_urls = ${imgUrls !== undefined ? sql`CAST(${imgUrls} AS JSON)` : sql`image_urls`},
+          category = ${data.category !== undefined ? (data.category || null) : sql`category`},
+          seasonality = ${data.seasonality !== undefined ? (data.seasonality || null) : sql`seasonality`}
+        WHERE id = ${id} AND user_id = ${ctx.user.id}
+      `);
       return { success: true };
     }),
 

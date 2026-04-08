@@ -115,6 +115,7 @@ function BrandsTab() {
 
 function ProductsTab() {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<any>(null);
   const [brandId, setBrandId] = useState("");
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
@@ -130,9 +131,15 @@ function ProductsTab() {
   const createProduct = trpc.marketing.products.create.useMutation({
     onSuccess: () => {
       toast.success("상품이 등록되었습니다.");
-      setShowAdd(false);
-      setName(""); setDesc(""); setFeatures(""); setTarget(""); setPrice("");
-      setUploadedImages([]);
+      resetForm();
+      utils.marketing.products.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const updateProduct = trpc.marketing.products.update.useMutation({
+    onSuccess: () => {
+      toast.success("상품이 수정되었습니다.");
+      resetForm();
       utils.marketing.products.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -143,6 +150,42 @@ function ProductsTab() {
       utils.marketing.products.list.invalidate();
     },
   });
+
+  const resetForm = () => {
+    setShowAdd(false);
+    setEditingProduct(null);
+    setName(""); setDesc(""); setFeatures(""); setTarget(""); setPrice("");
+    setBrandId(""); setUploadedImages([]);
+  };
+
+  const startEdit = (product: any) => {
+    setEditingProduct(product);
+    setName(product.name || "");
+    setDesc(product.description || "");
+    setFeatures((product.features as string[])?.join(", ") || "");
+    setTarget(product.targetAudience || "");
+    setPrice(product.price ? String(Number(product.price)) : "");
+    setBrandId(product.brandId ? String(product.brandId) : "");
+    setUploadedImages((product.imageUrls as string[]) || []);
+    setShowAdd(true);
+  };
+
+  const handleSubmit = () => {
+    const payload = {
+      brandId: Number(brandId),
+      name,
+      description: desc || undefined,
+      features: features ? features.split(",").map(f => f.trim()).filter(Boolean) : undefined,
+      targetAudience: target || undefined,
+      price: price || undefined,
+      imageUrls: uploadedImages.length > 0 ? uploadedImages : undefined,
+    };
+    if (editingProduct) {
+      updateProduct.mutate({ id: editingProduct.id, ...payload });
+    } else {
+      createProduct.mutate(payload);
+    }
+  };
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -186,12 +229,12 @@ function ProductsTab() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="font-medium">등록된 상품</h3>
-        <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <Dialog open={showAdd} onOpenChange={(open) => { if (!open) resetForm(); else setShowAdd(true); }}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" />상품 추가</Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>상품 등록</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{editingProduct ? "상품 수정" : "상품 등록"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <Select value={brandId} onValueChange={setBrandId}>
                 <SelectTrigger><SelectValue placeholder="브랜드 선택" /></SelectTrigger>
@@ -231,16 +274,11 @@ function ProductsTab() {
                 <p className="text-xs text-muted-foreground">{uploadedImages.length}/10장 · 인스타/블로그에 직접 사용하거나 AI 영상 생성 소재로 활용됩니다</p>
               </div>
 
-              <Button className="w-full" disabled={!brandId || !name || createProduct.isPending}
-                onClick={() => createProduct.mutate({
-                  brandId: Number(brandId), name,
-                  description: desc || undefined,
-                  features: features ? features.split(",").map(f => f.trim()).filter(Boolean) : undefined,
-                  targetAudience: target || undefined,
-                  price: price || undefined,
-                  imageUrls: uploadedImages.length > 0 ? uploadedImages : undefined,
-                })}>
-                {createProduct.isPending ? "등록 중..." : "등록"}
+              <Button className="w-full" disabled={!brandId || !name || createProduct.isPending || updateProduct.isPending}
+                onClick={handleSubmit}>
+                {(createProduct.isPending || updateProduct.isPending)
+                  ? (editingProduct ? "수정 중..." : "등록 중...")
+                  : (editingProduct ? "수정" : "등록")}
               </Button>
             </div>
           </DialogContent>
@@ -287,9 +325,14 @@ function ProductsTab() {
                     </div>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => deleteProduct.mutate({ id: product.id })}>
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="ghost" size="sm" onClick={() => startEdit(product)}>
+                    <Edit2 className="h-4 w-4 text-blue-500" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => deleteProduct.mutate({ id: product.id })}>
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

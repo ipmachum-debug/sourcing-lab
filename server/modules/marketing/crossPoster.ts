@@ -77,8 +77,8 @@ async function convertAndQueue(db: any, crossPost: any) {
   }
 
   // AI로 타겟 플랫폼에 맞게 변환
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
 
   let convertedCaption = sourcePost.caption || "";
   let convertedTitle = sourcePost.title || "";
