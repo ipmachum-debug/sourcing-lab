@@ -208,12 +208,40 @@ export default function VideoStudio() {
                   {createSlideshow.isPending ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" />슬라이드쇼 생성 중...</>
                   ) : (
-                    <><Image className="h-4 w-4 mr-1" />사진 슬라이드쇼 (무료)</>
+                    <><Image className="h-4 w-4 mr-1" />릴스/쇼츠 영상 (무료)</>
                   )}
                 </Button>
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* 외부 영상 업로드 */}
+          <label>
+            <input type="file" accept="video/*" className="hidden" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              if (file.size > 100 * 1024 * 1024) { toast.error("100MB 이하만 가능합니다."); return; }
+              toast.info("영상 업로드 중...");
+              const reader = new FileReader();
+              reader.onload = async () => {
+                try {
+                  const res = await fetch("/api/marketing/upload-video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ video: reader.result, filename: file.name }),
+                  });
+                  const data = await res.json();
+                  if (data.success) {
+                    toast.success("업로드 완료! 발행 큐에서 채널을 선택하세요.");
+                    utils.marketing.video.list.invalidate();
+                  } else { toast.error(data.error); }
+                } catch (err: any) { toast.error("업로드 실패: " + err.message); }
+              };
+              reader.readAsDataURL(file);
+              e.target.value = "";
+            }} />
+            <Button variant="outline" asChild><span>📁 외부 영상 업로드</span></Button>
+          </label>
         </div>
 
         {/* 파이프라인 설명 */}

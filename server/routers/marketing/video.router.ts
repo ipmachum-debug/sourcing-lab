@@ -8,7 +8,7 @@ import {
   selectBestCuts, generateStory, generateVideoPrompt,
   callVideoApi, checkVideoStatus, selectBgm,
 } from "../../modules/marketing/videoPipeline";
-import { postProcessVideo, createSlideshowVideo } from "../../modules/marketing/videoPostProcess";
+import { postProcessVideo, createShortsVideo } from "../../modules/marketing/videoPostProcess";
 
 export const videoRouter = router({
   // 영상 작업 목록
@@ -249,10 +249,11 @@ export const videoRouter = router({
       }
     }),
 
-  // 사진 슬라이드쇼 영상 (Minimax 없이)
+  // 프로급 숏폼 영상 (릴스/쇼츠 스타일, 무료)
   createSlideshow: protectedProcedure
     .input(z.object({
       productId: z.number(),
+      hookText: z.string().optional(),
       ctaText: z.string().optional(),
       brandName: z.string().optional(),
       secondsPerImage: z.number().min(2).max(5).optional(),
@@ -277,12 +278,13 @@ export const videoRouter = router({
       const { subtitles } = await generateStory(images, product, brand, "product_showcase");
       const subtitleLines = subtitles ? subtitles.split("\n").filter((l: string) => l.trim()) : [];
 
-      // 슬라이드쇼 생성
-      const result = await createSlideshowVideo(images, subtitleLines, {
-        secondsPerImage: input.secondsPerImage || 3,
+      // 프로급 숏폼 영상 생성
+      const result = await createShortsVideo(images, subtitleLines, {
+        secondsPerImage: input.secondsPerImage || 2.5,
+        hookText: input.hookText || `${product.name}`,
         brandName: input.brandName || brand?.name || undefined,
         ctaText: input.ctaText || "지금 바로 주문하세요!",
-        outputFormat: "vertical",
+        productName: product.name,
       });
 
       if (!result.success) {

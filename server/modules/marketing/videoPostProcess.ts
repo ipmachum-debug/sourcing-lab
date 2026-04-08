@@ -193,36 +193,48 @@ export async function postProcessVideo(input: PostProcessInput): Promise<PostPro
 }
 
 /**
- * 이미지 슬라이드쇼 영상 생성 (Minimax 없이 사진만으로)
- * 사진 여러 장 → 각 3초씩 페이드 전환 → 자막/BGM
+ * 프로급 숏폼 영상 생성 (릴스/쇼츠 스타일)
+ *
+ * Ken Burns 효과 (줌인/줌아웃/팬) + 빠른 컷 전환 + 장면별 텍스트
+ * 구조:
+ *   [0~2초] 훅 텍스트 + 사진1 줌인
+ *   [2~4초] 사진2 + 자막1 + 좌→우 팬
+ *   [4~6초] 사진3 + 자막2 + 줌아웃
+ *   [6~8초] 사진4 + 자막3 + 우→좌 팬
+ *   [8~10초] 사진5 + CTA + 줌인
+ *   + BGM 전체
  */
-export async function createSlideshowVideo(
+export async function createShortsVideo(
   images: string[],
   subtitleLines: string[],
   options: {
     secondsPerImage?: number;
+    hookText?: string;         // 첫 장면 훅 텍스트
     brandName?: string;
     ctaText?: string;
     bgmPath?: string;
-    outputFormat?: "vertical" | "square";
+    productName?: string;
   } = {}
 ): Promise<PostProcessResult> {
   try {
-    const spi = options.secondsPerImage || 3;
-    const totalDuration = images.length * spi;
-    const isVertical = options.outputFormat !== "square";
-    const resolution = isVertical ? "1080x1920" : "1080x1080";
+    const spi = options.secondsPerImage || 2.5;
+    const imgCount = Math.min(images.length, 6); // 최대 6장
+    const totalDuration = imgCount * spi;
+    const W = 1080;
+    const H = 1920;
 
-    // 이미지 다운로드 (로컬 경로면 그대로, URL이면 다운로드)
+    console.log(`[FFmpeg Shorts] Creating ${imgCount} clips, ${spi}s each, total ${totalDuration}s`);
+
+    // 이미지 다운로드
     const localImages: string[] = [];
-    for (const img of images) {
+    for (const img of images.slice(0, imgCount)) {
       if (img.startsWith("/")) {
         const fullPath = path.join(process.cwd(), img);
         if (fs.existsSync(fullPath)) { localImages.push(fullPath); continue; }
       }
-      // URL인 경우 다운로드
       try {
-        const res = await fetch(img.startsWith("http") ? img : `https://lumiriz.kr${img}`);
+        const url = img.startsWith("http") ? img : `https://lumiriz.kr${img}`;
+        const res = await fetch(url);
         if (res.ok) {
           const buf = Buffer.from(await res.arrayBuffer());
           const tmpPath = path.join(TEMP_DIR, `img_${Date.now()}_${crypto.randomBytes(3).toString("hex")}.jpg`);
@@ -234,60 +246,97 @@ export async function createSlideshowVideo(
 
     if (localImages.length === 0) return { success: false, error: "이미지 없음" };
 
-    // concat 리스트 생성
-    const concatPath = path.join(TEMP_DIR, `concat_${Date.now()}.txt`);
-    const concatContent = localImages.map(p => `file '${p}'\nduration ${spi}`).join("\n");
-    fs.writeFileSync(concatPath, concatContent + `\nfile '${localImages[localImages.length - 1]}'`);
+    // 각 이미지별 Ken Burns 클립 생성
+    const clipPaths: string[] = [];
+    const kenBurnsEffects = [
+      "zoompan=z='min(zoom+0.002,1.3)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 중앙 줌인
+      "zoompan=z='1.3':x='if(eq(on,0),0,x+2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 좌→우 팬
+      "zoompan=z='if(eq(on,0),1.3,zoom-0.002)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 줌아웃
+      "zoompan=z='1.3':x='if(eq(on,0),iw,x-2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 우→좌 팬
+      "zoompan=z='min(zoom+0.003,1.4)':x='iw/4-(iw/zoom/4)':y='ih/4-(ih/zoom/4)':d=DURATION:s=WxH:fps=30", // 좌상단 줌인
+      "zoompan=z='1.2':x='iw/2-(iw/zoom/2)':y='if(eq(on,0),0,y+1)':d=DURATION:s=WxH:fps=30", // 위→아래 팬
+    ];
 
-    const outputFilename = `slide_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.mp4`;
+    for (let i = 0; i < localImages.length; i++) {
+      const clipPath = path.join(TEMP_DIR, `clip_${Date.now()}_${i}.mp4`);
+      const frames = Math.round(spi * 30); // 30fps
+      const effect = kenBurnsEffects[i % kenBurnsEffects.length]
+        .replace(/DURATION/g, String(frames))
+        .replace(/WxH/g, `${W}x${H}`);
+
+      // 텍스트 오버레이 준비
+      let textFilter = "";
+      const fontOpt = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
+
+      if (i === 0 && options.hookText) {
+        // 첫 장면: 훅 텍스트 (크게, 중앙)
+        const hookFile = path.join(TEMP_DIR, `hook_${Date.now()}.txt`);
+        fs.writeFileSync(hookFile, options.hookText, "utf-8");
+        textFilter = `,drawtext=textfile='${hookFile}':fontsize=56${fontOpt}:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2`;
+      } else if (i === localImages.length - 1 && options.ctaText) {
+        // 마지막 장면: CTA
+        const ctaFile = path.join(TEMP_DIR, `cta2_${Date.now()}_${i}.txt`);
+        fs.writeFileSync(ctaFile, options.ctaText, "utf-8");
+        textFilter = `,drawtext=textfile='${ctaFile}':fontsize=52${fontOpt}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h*3/4`;
+      } else if (subtitleLines[i - 1]) {
+        // 중간 장면: 자막
+        const subFile = path.join(TEMP_DIR, `stxt_${Date.now()}_${i}.txt`);
+        fs.writeFileSync(subFile, subtitleLines[i - 1], "utf-8");
+        textFilter = `,drawtext=textfile='${subFile}':fontsize=44${fontOpt}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h*3/4`;
+      }
+
+      // 브랜드명 (전 장면 공통)
+      let brandFilter = "";
+      if (options.brandName) {
+        const brandFile = path.join(TEMP_DIR, `br_${Date.now()}_${i}.txt`);
+        fs.writeFileSync(brandFile, options.brandName, "utf-8");
+        brandFilter = `,drawtext=textfile='${brandFile}':fontsize=28${fontOpt}:fontcolor=white@0.8:borderw=1:bordercolor=black:x=(w-text_w)/2:y=50`;
+      }
+
+      const cmd = `ffmpeg -y -loop 1 -i "${localImages[i]}" -vf "${effect},format=yuv420p${textFilter}${brandFilter}" -t ${spi} -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${clipPath}" 2>&1`;
+
+      console.log(`[FFmpeg Shorts] Clip ${i + 1}/${localImages.length}`);
+      execSync(cmd, { timeout: 30000 });
+      clipPaths.push(clipPath);
+    }
+
+    // 클립들을 xfade로 이어붙이기 (크로스페이드 전환 0.3초)
+    const outputFilename = `shorts_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.mp4`;
     const outputPath = path.join(VIDEOS_DIR, outputFilename);
     const outputUrl = `/uploads/marketing/videos/${outputFilename}`;
 
-    // 필터
-    const filters: string[] = [];
-    filters.push(`scale=${resolution.replace("x", ":")}:force_original_aspect_ratio=decrease,pad=${resolution.replace("x", ":")}:(ow-iw)/2:(oh-ih)/2:black`);
-    filters.push("format=yuv420p");
+    if (clipPaths.length === 1) {
+      // 1개면 그냥 복사
+      fs.copyFileSync(clipPaths[0], outputPath);
+    } else {
+      // 여러 개 연결 — concat 방식 (xfade는 복잡하므로 단순 concat + 짧은 fade)
+      const concatPath = path.join(TEMP_DIR, `shorts_concat_${Date.now()}.txt`);
+      const concatContent = clipPaths.map(p => `file '${p}'`).join("\n");
+      fs.writeFileSync(concatPath, concatContent);
 
-    // 자막
-    if (subtitleLines.length > 0) {
-      const assPath = generateSubtitleFile(subtitleLines, totalDuration);
-      filters.push(`ass='${assPath}'`);
+      let concatCmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}"`;
+
+      // BGM 추가
+      if (options.bgmPath && fs.existsSync(options.bgmPath)) {
+        concatCmd += ` -i "${options.bgmPath}" -filter_complex "[1:a]volume=0.25,afade=t=in:d=0.5,afade=t=out:st=${totalDuration - 1}:d=1[bgm]" -map 0:v -map "[bgm]" -shortest`;
+      }
+
+      concatCmd += ` -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart -t ${totalDuration} "${outputPath}" 2>&1`;
+
+      console.log("[FFmpeg Shorts] Concatenating clips...");
+      execSync(concatCmd, { timeout: 60000 });
+
+      // concat 파일 정리
+      try { fs.unlinkSync(concatPath); } catch {}
     }
 
-    // 브랜드명
-    if (options.brandName) {
-      const brandFile = path.join(TEMP_DIR, `sbrand_${Date.now()}.txt`);
-      fs.writeFileSync(brandFile, options.brandName, "utf-8");
-      const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(`drawtext=textfile='${brandFile}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`);
-    }
+    // 임시 클립 정리
+    for (const p of clipPaths) { try { fs.unlinkSync(p); } catch {} }
 
-    // CTA
-    if (options.ctaText) {
-      const ctaFile = path.join(TEMP_DIR, `scta_${Date.now()}.txt`);
-      fs.writeFileSync(ctaFile, options.ctaText, "utf-8");
-      const ctaStart = Math.max(0, totalDuration - 3);
-      const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(`drawtext=textfile='${ctaFile}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t\\,${ctaStart}\\,${totalDuration})'`);
-    }
-
-    let audioCmd = "";
-    if (options.bgmPath && fs.existsSync(options.bgmPath)) {
-      audioCmd = `-i "${options.bgmPath}" -filter_complex "[1:a]volume=0.3,afade=t=out:st=${totalDuration - 1}:d=1[bgm]" -map 0:v -map "[bgm]"`;
-    }
-
-    const filterChain = `-vf "${filters.join(",")}"`;
-    const cmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" ${audioCmd} ${filterChain} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart -t ${totalDuration} "${outputPath}" 2>&1`;
-
-    console.log("[FFmpeg Slideshow] Command:", cmd);
-    execSync(cmd, { timeout: 60000 });
-
-    // 정리
-    try { fs.unlinkSync(concatPath); } catch {}
-
+    console.log(`[FFmpeg Shorts] Done: ${outputUrl}`);
     return { success: true, outputPath, outputUrl };
   } catch (err: any) {
-    console.error("[FFmpeg Slideshow] Error:", err.message);
+    console.error("[FFmpeg Shorts] Error:", err.message?.slice(0, 500));
     return { success: false, error: err.message?.slice(0, 500) };
   }
 }

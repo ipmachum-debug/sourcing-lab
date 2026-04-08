@@ -314,6 +314,30 @@ async function startServer() {
     }
   });
 
+  // 영상 업로드 (외부에서 만든 영상 직접 업로드)
+  app.post("/api/marketing/upload-video", express.json({ limit: "100mb" }), async (req, res) => {
+    try {
+      const { video, filename } = req.body;
+      if (!video) return res.status(400).json({ error: "영상 데이터가 없습니다." });
+
+      const videosDir = path.join(mktUploadsDir, "videos");
+      if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
+
+      const match = video.match(/^data:video\/(mp4|webm|mov|avi);base64,(.+)$/);
+      if (!match) return res.status(400).json({ error: "지원하지 않는 영상 형식입니다. (mp4/webm/mov)" });
+
+      const ext = match[1] === "quicktime" ? "mov" : match[1];
+      const buffer = Buffer.from(match[2], "base64");
+      const fname = filename || `upload_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.${ext}`;
+      const filePath = path.join(videosDir, fname);
+      fs.writeFileSync(filePath, buffer);
+
+      res.json({ success: true, url: `/uploads/marketing/videos/${fname}` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
