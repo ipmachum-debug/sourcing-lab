@@ -13,12 +13,12 @@ import {
 } from "lucide-react";
 
 const STYLE_OPTIONS = [
-  { value: "instagram_reel", label: "인스타 릴스", desc: "감성적, 15초" },
-  { value: "tiktok", label: "틱톡", desc: "훅 강조, 트렌디, 15초" },
-  { value: "youtube_shorts", label: "유튜브 쇼츠", desc: "정보성+재미, 30초" },
+  { value: "instagram_reel", label: "인스타 릴스", desc: "감성적, 세로형" },
+  { value: "tiktok", label: "틱톡", desc: "훅 강조, 트렌디" },
+  { value: "youtube_shorts", label: "유튜브 쇼츠", desc: "정보성+재미" },
   { value: "product_showcase", label: "상품 쇼케이스", desc: "고급 조명, 슬로우모션" },
-  { value: "unboxing", label: "언박싱", desc: "기대감 조성, 30초" },
-  { value: "review", label: "후기/체험", desc: "리얼 리뷰, 30초" },
+  { value: "unboxing", label: "언박싱", desc: "기대감 조성" },
+  { value: "review", label: "후기/체험", desc: "리얼 리뷰" },
 ];
 
 const MOOD_OPTIONS = [
