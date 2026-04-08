@@ -2,10 +2,13 @@
  * FFmpeg 영상 후처리 엔진
  *
  * 1. 여러 클립 이어붙이기 (사진별 Minimax 영상 or 단일 영상 반복)
- * 2. 자막 오버레이 (SRT → ASS 변환, 한글 폰트)
+ * 2. 자막 오버레이 (ASS 자막 방식, 한글 폰트)
  * 3. BGM 삽입
  * 4. CTA 텍스트/로고 오버레이
  * 5. 세로형(9:16) 리사이즈
+ *
+ * NOTE: drawtext 필터는 이 FFmpeg 빌드에서 미지원.
+ *       모든 텍스트 오버레이는 ASS 자막 파일 + ass 필터로 처리.
  */
 
 import { execSync, exec } from "child_process";
@@ -16,7 +19,7 @@ import crypto from "crypto";
 const UPLOADS_DIR = path.join(process.cwd(), "uploads", "marketing");
 const VIDEOS_DIR = path.join(UPLOADS_DIR, "videos");
 const TEMP_DIR = path.join(UPLOADS_DIR, "temp");
-const FONT_PATH = "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc";
+const FONT_NAME = "Noto Sans CJK KR Bold";
 
 // 디렉토리 생성
 for (const dir of [VIDEOS_DIR, TEMP_DIR]) {
@@ -40,6 +43,172 @@ interface PostProcessResult {
   error?: string;
 }
 
+// ─── ASS 헬퍼 함수들 ───
+
+function formatAssTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const cs = Math.floor((seconds % 1) * 100);
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+}
+
+/**
+ * ASS 파일 헤더 생성
+ * @param resX 영상 가로
+ * @param resY 영상 세로
+ * @param styles 스타일 정의 배열
+ */
+function assHeader(resX: number, resY: number, styles: string[]): string {
+  return `[Script Info]
+Title: Marketing Video Overlay
+ScriptType: v4.00+
+PlayResX: ${resX}
+PlayResY: ${resY}
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+${styles.join("\n")}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+}
+
+/**
+ * ASS 색상 (AABBGGRR 형식)
+ * 입력: hex RGB (예: "FFFFFF")
+ * 출력: &H00BBGGRR (불투명) or &HAABBGGRR
+ */
+function assColor(hex: string, alpha: number = 0): string {
+  const r = hex.slice(0, 2);
+  const g = hex.slice(2, 4);
+  const b = hex.slice(4, 6);
+  const a = alpha.toString(16).padStart(2, "0").toUpperCase();
+  return `&H${a}${b}${g}${r}`;
+}
+
+/**
+ * 멀티레이어 ASS 자막 파일 생성 (모든 텍스트를 하나의 ASS에)
+ */
+function createOverlayAss(
+  resX: number,
+  resY: number,
+  duration: number,
+  options: {
+    subtitleLines?: string[];
+    brandName?: string;
+    ctaText?: string;
+    ctaStartTime?: number;
+  }
+): string {
+  const assPath = path.join(TEMP_DIR, `overlay_${Date.now()}_${crypto.randomBytes(3).toString("hex")}.ass`);
+  const start = formatAssTime(0);
+  const end = formatAssTime(duration);
+
+  // 스타일 정의
+  const styles: string[] = [];
+
+  // 자막 스타일: 하단 중앙, 흰색, 검정 테두리
+  // Alignment 2 = 하단 중앙
+  styles.push(
+    `Style: Subtitle,${FONT_NAME},60,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,80,1`
+  );
+
+  // 브랜드명 스타일: 상단 중앙, 흰색 80% 투명, 작은 글씨
+  // Alignment 8 = 상단 중앙
+  styles.push(
+    `Style: Brand,${FONT_NAME},36,${assColor("FFFFFF", 0x33)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,2,1,8,40,40,60,1`
+  );
+
+  // CTA 스타일: 하단 중앙, 노란색, 큰 글씨, 검정 테두리
+  // Alignment 2 = 하단 중앙, MarginV 200으로 올림
+  styles.push(
+    `Style: CTA,${FONT_NAME},48,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,200,1`
+  );
+
+  let content = assHeader(resX, resY, styles);
+
+  // 자막 이벤트
+  if (options.subtitleLines && options.subtitleLines.length > 0) {
+    const secondsPerLine = duration / options.subtitleLines.length;
+    options.subtitleLines.forEach((line, i) => {
+      const ls = formatAssTime(i * secondsPerLine);
+      const le = formatAssTime((i + 1) * secondsPerLine);
+      content += `Dialogue: 0,${ls},${le},Subtitle,,0,0,0,,${line}\n`;
+    });
+  }
+
+  // 브랜드명 이벤트 (전체 영상)
+  if (options.brandName) {
+    content += `Dialogue: 1,${start},${end},Brand,,0,0,0,,${options.brandName}\n`;
+  }
+
+  // CTA 이벤트 (마지막 N초)
+  if (options.ctaText) {
+    const ctaStart = formatAssTime(options.ctaStartTime ?? Math.max(0, duration - 3));
+    content += `Dialogue: 2,${ctaStart},${end},CTA,,0,0,0,,${options.ctaText}\n`;
+  }
+
+  fs.writeFileSync(assPath, content, "utf-8");
+  return assPath;
+}
+
+/**
+ * 단일 클립용 ASS 파일 생성 (Ken Burns 숏폼용)
+ * 클립 전체 시간에 대해 텍스트 오버레이
+ */
+function createClipAss(
+  resX: number,
+  resY: number,
+  clipDuration: number,
+  textEntries: Array<{
+    text: string;
+    style: "Hook" | "Subtitle" | "CTA" | "Brand";
+  }>
+): string {
+  const assPath = path.join(TEMP_DIR, `clip_ass_${Date.now()}_${crypto.randomBytes(3).toString("hex")}.ass`);
+  const start = formatAssTime(0);
+  const end = formatAssTime(clipDuration);
+
+  const styles: string[] = [];
+
+  // 훅 텍스트: 중앙 크게, 흰색 + 검정 테두리
+  // Alignment 5 = 정중앙
+  styles.push(
+    `Style: Hook,${FONT_NAME},56,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,5,40,40,40,1`
+  );
+
+  // 자막: 하단 3/4 지점
+  // Alignment 2 = 하단 중앙, MarginV로 위치 조정
+  styles.push(
+    `Style: Subtitle,${FONT_NAME},44,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,2,1,2,40,40,${Math.round(resY * 0.25)},1`
+  );
+
+  // CTA: 하단 3/4, 노란색
+  styles.push(
+    `Style: CTA,${FONT_NAME},52,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,${Math.round(resY * 0.25)},1`
+  );
+
+  // 브랜드: 상단 작게
+  // Alignment 8 = 상단 중앙
+  styles.push(
+    `Style: Brand,${FONT_NAME},28,${assColor("FFFFFF", 0x33)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,1,1,8,40,40,50,1`
+  );
+
+  let content = assHeader(resX, resY, styles);
+
+  for (const entry of textEntries) {
+    content += `Dialogue: 0,${start},${end},${entry.style},,0,0,0,,${entry.text}\n`;
+  }
+
+  fs.writeFileSync(assPath, content, "utf-8");
+  return assPath;
+}
+
+// ─── 영상 유틸리티 ───
+
 /**
  * 원본 영상 다운로드
  */
@@ -53,46 +222,6 @@ async function downloadVideo(url: string): Promise<string> {
   const buffer = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(filePath, buffer);
   return filePath;
-}
-
-/**
- * 자막 ASS 파일 생성
- */
-function generateSubtitleFile(lines: string[], videoDuration: number): string {
-  const assPath = path.join(TEMP_DIR, `sub_${Date.now()}.ass`);
-  const secondsPerLine = videoDuration / lines.length;
-
-  let assContent = `[Script Info]
-Title: Marketing Subtitle
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 0
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Noto Sans CJK KR Bold,60,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,40,40,80,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
-
-  lines.forEach((line, i) => {
-    const start = formatAssTime(i * secondsPerLine);
-    const end = formatAssTime((i + 1) * secondsPerLine);
-    assContent += `Dialogue: 0,${start},${end},Default,,0,0,0,,${line}\n`;
-  });
-
-  fs.writeFileSync(assPath, assContent, "utf-8");
-  return assPath;
-}
-
-function formatAssTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const cs = Math.floor((seconds % 1) * 100);
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
 
 /**
@@ -110,8 +239,11 @@ function getVideoDuration(filePath: string): number {
   }
 }
 
+// ─── 메인 후처리 ───
+
 /**
  * 메인 후처리 함수
+ * Minimax 원본 영상에 자막/브랜드/CTA/BGM 추가
  */
 export async function postProcessVideo(input: PostProcessInput): Promise<PostProcessResult> {
   try {
@@ -122,46 +254,33 @@ export async function postProcessVideo(input: PostProcessInput): Promise<PostPro
     const duration = getVideoDuration(rawPath);
     console.log(`[FFmpeg] Downloaded: ${rawPath}, duration: ${duration}s`);
 
+    const isSquare = input.outputFormat === "square";
+    const W = 1080;
+    const H = isSquare ? 1080 : 1920;
+
     // 2. FFmpeg 필터 체인 구성
     const filters: string[] = [];
     const inputs: string[] = [`-i "${rawPath}"`];
     let audioInput = "";
 
-    // 세로형 리사이즈 (9:16)
-    if (input.outputFormat !== "square") {
-      filters.push("scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black");
-    } else {
-      filters.push("scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:black");
-    }
+    // 세로형/정사각 리사이즈
+    filters.push(`scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black`);
 
-    // 3. 자막 추가
-    if (input.subtitleLines && input.subtitleLines.length > 0) {
-      const assPath = generateSubtitleFile(input.subtitleLines, duration);
+    // 3. 텍스트 오버레이 (ASS 자막 방식 — drawtext 미지원)
+    const hasText = (input.subtitleLines && input.subtitleLines.length > 0) || input.brandName || input.ctaText;
+    if (hasText) {
+      const assPath = createOverlayAss(W, H, duration, {
+        subtitleLines: input.subtitleLines,
+        brandName: input.brandName,
+        ctaText: input.ctaText,
+        ctaStartTime: Math.max(0, duration - 3),
+      });
+      // ass 필터 경로에서 특수문자 이스케이프 (: → \\:)
+      const escapedAssPath = assPath.replace(/:/g, "\\:").replace(/\\/g, "/").replace(/\//g, "/");
       filters.push(`ass='${assPath}'`);
     }
 
-    // 4. 브랜드명 상단 표시
-    if (input.brandName) {
-      const brandFile = path.join(TEMP_DIR, `brand_${Date.now()}.txt`);
-      fs.writeFileSync(brandFile, input.brandName, "utf-8");
-      const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(
-        `drawtext=textfile='${brandFile}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`
-      );
-    }
-
-    // 5. CTA 문구 하단 표시 (마지막 3초)
-    if (input.ctaText) {
-      const ctaFile = path.join(TEMP_DIR, `cta_${Date.now()}.txt`);
-      fs.writeFileSync(ctaFile, input.ctaText, "utf-8");
-      const ctaStart = Math.max(0, duration - 3);
-      const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(
-        `drawtext=textfile='${ctaFile}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t\\,${ctaStart}\\,${duration})'`
-      );
-    }
-
-    // 6. BGM 삽입
+    // 4. BGM 삽입
     if (input.bgmPath && fs.existsSync(input.bgmPath)) {
       inputs.push(`-i "${input.bgmPath}"`);
       audioInput = `-filter_complex "[1:a]volume=0.3,afade=t=out:st=${duration - 1}:d=1[bgm]" -map 0:v -map "[bgm]"`;
@@ -178,8 +297,8 @@ export async function postProcessVideo(input: PostProcessInput): Promise<PostPro
 
     console.log("[FFmpeg] Command:", cmd);
 
-    // 실행 (최대 60초)
-    execSync(cmd, { timeout: 60000 });
+    // 실행 (최대 120초)
+    execSync(cmd, { timeout: 120000 });
 
     // 임시 파일 정리
     try { fs.unlinkSync(rawPath); } catch {}
@@ -187,22 +306,26 @@ export async function postProcessVideo(input: PostProcessInput): Promise<PostPro
     console.log(`[FFmpeg] Done: ${outputUrl}`);
     return { success: true, outputPath, outputUrl };
   } catch (err: any) {
-    console.error("[FFmpeg] Error:", err.message);
-    return { success: false, error: err.message?.slice(0, 500) };
+    console.error("[FFmpeg] Error:", err.message?.slice(0, 1000));
+    return { success: false, error: err.message?.slice(0, 1000) };
   }
 }
+
+// ─── 프로급 숏폼 영상 (Ken Burns) ───
 
 /**
  * 프로급 숏폼 영상 생성 (릴스/쇼츠 스타일)
  *
  * Ken Burns 효과 (줌인/줌아웃/팬) + 빠른 컷 전환 + 장면별 텍스트
  * 구조:
- *   [0~2초] 훅 텍스트 + 사진1 줌인
- *   [2~4초] 사진2 + 자막1 + 좌→우 팬
- *   [4~6초] 사진3 + 자막2 + 줌아웃
- *   [6~8초] 사진4 + 자막3 + 우→좌 팬
- *   [8~10초] 사진5 + CTA + 줌인
+ *   [0~2.5초] 훅 텍스트 + 사진1 줌인
+ *   [2.5~5초] 사진2 + 자막1 + 좌→우 팬
+ *   [5~7.5초] 사진3 + 자막2 + 줌아웃
+ *   [7.5~10초] 사진4 + 자막3 + 우→좌 팬
+ *   [10~12.5초] 사진5 + CTA + 줌인
  *   + BGM 전체
+ *
+ * NOTE: 모든 텍스트는 ASS 자막으로 처리 (drawtext 미지원)
  */
 export async function createShortsVideo(
   images: string[],
@@ -264,52 +387,57 @@ export async function createShortsVideo(
         .replace(/DURATION/g, String(frames))
         .replace(/WxH/g, `${W}x${H}`);
 
-      // 텍스트 오버레이 준비
-      let textFilter = "";
-      const fontOpt = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
+      // ASS 자막으로 텍스트 오버레이 준비
+      const textEntries: Array<{ text: string; style: "Hook" | "Subtitle" | "CTA" | "Brand" }> = [];
 
       if (i === 0 && options.hookText) {
-        // 첫 장면: 훅 텍스트 (크게, 중앙)
-        const hookFile = path.join(TEMP_DIR, `hook_${Date.now()}.txt`);
-        fs.writeFileSync(hookFile, options.hookText, "utf-8");
-        textFilter = `,drawtext=textfile='${hookFile}':fontsize=56${fontOpt}:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2`;
+        textEntries.push({ text: options.hookText, style: "Hook" });
       } else if (i === localImages.length - 1 && options.ctaText) {
-        // 마지막 장면: CTA
-        const ctaFile = path.join(TEMP_DIR, `cta2_${Date.now()}_${i}.txt`);
-        fs.writeFileSync(ctaFile, options.ctaText, "utf-8");
-        textFilter = `,drawtext=textfile='${ctaFile}':fontsize=52${fontOpt}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h*3/4`;
+        textEntries.push({ text: options.ctaText, style: "CTA" });
       } else if (subtitleLines[i - 1]) {
-        // 중간 장면: 자막
-        const subFile = path.join(TEMP_DIR, `stxt_${Date.now()}_${i}.txt`);
-        fs.writeFileSync(subFile, subtitleLines[i - 1], "utf-8");
-        textFilter = `,drawtext=textfile='${subFile}':fontsize=44${fontOpt}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h*3/4`;
+        textEntries.push({ text: subtitleLines[i - 1], style: "Subtitle" });
       }
 
-      // 브랜드명 (전 장면 공통)
-      let brandFilter = "";
       if (options.brandName) {
-        const brandFile = path.join(TEMP_DIR, `br_${Date.now()}_${i}.txt`);
-        fs.writeFileSync(brandFile, options.brandName, "utf-8");
-        brandFilter = `,drawtext=textfile='${brandFile}':fontsize=28${fontOpt}:fontcolor=white@0.8:borderw=1:bordercolor=black:x=(w-text_w)/2:y=50`;
+        textEntries.push({ text: options.brandName, style: "Brand" });
       }
 
-      const cmd = `ffmpeg -y -loop 1 -i "${localImages[i]}" -vf "${effect},format=yuv420p${textFilter}${brandFilter}" -t ${spi} -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${clipPath}" 2>&1`;
+      // ASS 필터 구성
+      let assFilter = "";
+      if (textEntries.length > 0) {
+        const assPath = createClipAss(W, H, spi, textEntries);
+        assFilter = `,ass='${assPath}'`;
+      }
+
+      const cmd = `ffmpeg -y -loop 1 -i "${localImages[i]}" -vf "${effect},format=yuv420p${assFilter}" -t ${spi} -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${clipPath}" 2>&1`;
 
       console.log(`[FFmpeg Shorts] Clip ${i + 1}/${localImages.length}`);
-      execSync(cmd, { timeout: 30000 });
-      clipPaths.push(clipPath);
+      try {
+        execSync(cmd, { timeout: 30000 });
+        clipPaths.push(clipPath);
+      } catch (clipErr: any) {
+        // 클립 실패 시 텍스트 없이 재시도
+        console.warn(`[FFmpeg Shorts] Clip ${i + 1} with text failed, retrying without text...`);
+        const fallbackCmd = `ffmpeg -y -loop 1 -i "${localImages[i]}" -vf "${effect},format=yuv420p" -t ${spi} -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${clipPath}" 2>&1`;
+        try {
+          execSync(fallbackCmd, { timeout: 30000 });
+          clipPaths.push(clipPath);
+        } catch (fallbackErr: any) {
+          console.error(`[FFmpeg Shorts] Clip ${i + 1} completely failed:`, fallbackErr.message?.slice(0, 300));
+        }
+      }
     }
 
-    // 클립들을 xfade로 이어붙이기 (크로스페이드 전환 0.3초)
+    if (clipPaths.length === 0) return { success: false, error: "모든 클립 생성 실패" };
+
+    // 클립들 이어붙이기
     const outputFilename = `shorts_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.mp4`;
     const outputPath = path.join(VIDEOS_DIR, outputFilename);
     const outputUrl = `/uploads/marketing/videos/${outputFilename}`;
 
     if (clipPaths.length === 1) {
-      // 1개면 그냥 복사
       fs.copyFileSync(clipPaths[0], outputPath);
     } else {
-      // 여러 개 연결 — concat 방식 (xfade는 복잡하므로 단순 concat + 짧은 fade)
       const concatPath = path.join(TEMP_DIR, `shorts_concat_${Date.now()}.txt`);
       const concatContent = clipPaths.map(p => `file '${p}'`).join("\n");
       fs.writeFileSync(concatPath, concatContent);
@@ -324,9 +452,8 @@ export async function createShortsVideo(
       concatCmd += ` -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart -t ${totalDuration} "${outputPath}" 2>&1`;
 
       console.log("[FFmpeg Shorts] Concatenating clips...");
-      execSync(concatCmd, { timeout: 60000 });
+      execSync(concatCmd, { timeout: 120000 });
 
-      // concat 파일 정리
       try { fs.unlinkSync(concatPath); } catch {}
     }
 
@@ -336,7 +463,7 @@ export async function createShortsVideo(
     console.log(`[FFmpeg Shorts] Done: ${outputUrl}`);
     return { success: true, outputPath, outputUrl };
   } catch (err: any) {
-    console.error("[FFmpeg Shorts] Error:", err.message?.slice(0, 500));
-    return { success: false, error: err.message?.slice(0, 500) };
+    console.error("[FFmpeg Shorts] Error:", err.message?.slice(0, 1000));
+    return { success: false, error: err.message?.slice(0, 1000) };
   }
 }
