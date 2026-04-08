@@ -62,7 +62,23 @@ export default function VideoStudio() {
 
   const startGen = trpc.marketing.video.startGeneration.useMutation({
     onSuccess: () => {
-      toast.success("Kling AI 영상 생성 시작! 1~5분 소요됩니다.");
+      toast.success("Minimax 영상 생성 시작! 3~10분 소요됩니다.");
+      utils.marketing.video.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const postProcess = trpc.marketing.video.postProcess.useMutation({
+    onSuccess: (data) => {
+      toast.success("자막/BGM/CTA 합성 완료!");
+      utils.marketing.video.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const createSlideshow = trpc.marketing.video.createSlideshow.useMutation({
+    onSuccess: (data) => {
+      toast.success("슬라이드쇼 영상이 생성되었습니다!");
       utils.marketing.video.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -165,7 +181,20 @@ export default function VideoStudio() {
                   {createJob.isPending ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" />AI가 준비 중...</>
                   ) : (
-                    <><Sparkles className="h-4 w-4 mr-1" />영상 제작 시작</>
+                    <><Sparkles className="h-4 w-4 mr-1" />AI 영상 제작 (Minimax)</>
+                  )}
+                </Button>
+                <div className="text-center text-xs text-muted-foreground">또는</div>
+                <Button variant="outline" className="w-full" disabled={!productId || createSlideshow.isPending}
+                  onClick={() => createSlideshow.mutate({
+                    productId: Number(productId),
+                    brandName: "미미스상회",
+                    ctaText: "지금 바로 주문하세요!",
+                  })}>
+                  {createSlideshow.isPending ? (
+                    <><Loader2 className="h-4 w-4 mr-1 animate-spin" />슬라이드쇼 생성 중...</>
+                  ) : (
+                    <><Image className="h-4 w-4 mr-1" />사진 슬라이드쇼 (무료)</>
                   )}
                 </Button>
               </div>
@@ -270,6 +299,17 @@ export default function VideoStudio() {
                       {job.status === "generating" && (
                         <Button size="sm" variant="outline" onClick={() => utils.marketing.video.list.invalidate()}>
                           <RefreshCw className="h-3 w-3 mr-1" />상태 확인
+                        </Button>
+                      )}
+                      {job.status === "completed" && job.rawVideoUrl && !job.finalVideoUrl && (
+                        <Button size="sm" variant="outline"
+                          disabled={postProcess.isPending}
+                          onClick={() => postProcess.mutate({ jobId: job.id, ctaText: "지금 바로 주문하세요!" })}>
+                          {postProcess.isPending ? (
+                            <><Loader2 className="h-3 w-3 mr-1 animate-spin" />합성 중</>
+                          ) : (
+                            <><Type className="h-3 w-3 mr-1" />자막/BGM 합성</>
+                          )}
                         </Button>
                       )}
                       {job.status === "completed" && job.finalVideoUrl && (

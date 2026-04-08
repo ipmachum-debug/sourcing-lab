@@ -8,6 +8,7 @@ import {
   selectBestCuts, generateStory, generateVideoPrompt,
   callVideoApi, checkVideoStatus, selectBgm,
 } from "../../modules/marketing/videoPipeline";
+import { postProcessVideo, createSlideshowVideo } from "../../modules/marketing/videoPostProcess";
 
 export const videoRouter = router({
   // 영상 작업 목록
@@ -196,6 +197,112 @@ export const videoRouter = router({
       }
 
       return { success: true, count: input.platforms.length };
+    }),
+
+  // FFmpeg 후처리 (자막 + BGM + CTA 합성)
+  postProcess: protectedProcedure
+    .input(z.object({
+      jobId: z.number(),
+      ctaText: z.string().optional(),
+      brandName: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [job] = await db.select().from(mktVideoJobs)
+        .where(and(eq(mktVideoJobs.id, input.jobId), eq(mktVideoJobs.userId, ctx.user.id)))
+        .limit(1);
+      if (!job) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!job.rawVideoUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "원본 영상이 없습니다." });
+
+      // 상태 업데이트
+      await db.execute(sql`UPDATE mkt_video_jobs SET status = 'processing' WHERE id = ${input.jobId}`);
+
+      // 자막 파싱
+      const subtitleLines = job.subtitleText
+        ? job.subtitleText.split("\n").filter((l: string) => l.trim())
+        : [];
+
+      // 후처리 실행
+      const result = await postProcessVideo({
+        rawVideoUrl: job.rawVideoUrl,
+        subtitleLines,
+        bgmPath: job.bgmTrack || undefined,
+        ctaText: input.ctaText || "지금 바로 주문하세요!",
+        brandName: input.brandName || undefined,
+        outputFormat: "vertical",
+      });
+
+      if (result.success && result.outputUrl) {
+        await db.execute(sql`
+          UPDATE mkt_video_jobs SET status = 'completed', final_video_url = ${result.outputUrl}
+          WHERE id = ${input.jobId}
+        `);
+        return { success: true, videoUrl: result.outputUrl };
+      } else {
+        await db.execute(sql`
+          UPDATE mkt_video_jobs SET status = 'failed', error_message = ${result.error || "후처리 실패"}
+          WHERE id = ${input.jobId}
+        `);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+      }
+    }),
+
+  // 사진 슬라이드쇼 영상 (Minimax 없이)
+  createSlideshow: protectedProcedure
+    .input(z.object({
+      productId: z.number(),
+      ctaText: z.string().optional(),
+      brandName: z.string().optional(),
+      secondsPerImage: z.number().min(2).max(5).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [product] = await db.select().from(mktProducts)
+        .where(and(eq(mktProducts.id, input.productId), eq(mktProducts.userId, ctx.user.id)))
+        .limit(1);
+      if (!product) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const images = (product.imageUrls as string[]) || [];
+      if (images.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "상품 사진이 없습니다." });
+
+      const [brand] = product.brandId
+        ? await db.select().from(mktBrands).where(eq(mktBrands.id, product.brandId)).limit(1)
+        : [null];
+
+      // AI로 자막 생성
+      const { subtitles } = await generateStory(images, product, brand, "product_showcase");
+      const subtitleLines = subtitles ? subtitles.split("\n").filter((l: string) => l.trim()) : [];
+
+      // 슬라이드쇼 생성
+      const result = await createSlideshowVideo(images, subtitleLines, {
+        secondsPerImage: input.secondsPerImage || 3,
+        brandName: input.brandName || brand?.name || undefined,
+        ctaText: input.ctaText || "지금 바로 주문하세요!",
+        outputFormat: "vertical",
+      });
+
+      if (!result.success) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+      }
+
+      // DB 저장
+      const sourceImagesJson = JSON.stringify(images);
+      await db.execute(sql`
+        INSERT INTO mkt_video_jobs (user_id, product_id, source_images, selected_images,
+          story_script, video_style, video_duration, subtitle_text, final_video_url, status)
+        VALUES (
+          ${ctx.user.id}, ${input.productId},
+          CAST(${sourceImagesJson} AS JSON), CAST(${sourceImagesJson} AS JSON),
+          ${subtitles || ""}, ${"product_showcase"}, ${images.length * (input.secondsPerImage || 3)},
+          ${subtitles || ""}, ${result.outputUrl}, ${"completed"}
+        )
+      `);
+
+      return { success: true, videoUrl: result.outputUrl };
     }),
 
   // 삭제
