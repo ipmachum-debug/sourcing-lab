@@ -150,8 +150,7 @@ export default function VideoStudio() {
                       <SelectContent>
                         <SelectItem value="5">5초</SelectItem>
                         <SelectItem value="10">10초</SelectItem>
-                        <SelectItem value="15">15초</SelectItem>
-                        <SelectItem value="30">30초</SelectItem>
+
                       </SelectContent>
                     </Select>
                   </div>
