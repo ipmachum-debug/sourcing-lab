@@ -110,22 +110,22 @@ function createOverlayAss(
   // 스타일 정의
   const styles: string[] = [];
 
-  // 자막 스타일: 하단 중앙, 흰색, 검정 테두리
+  // 자막 스타일: 하단 중앙, 흰색, 검정 테두리, 굵은 글씨
   // Alignment 2 = 하단 중앙
   styles.push(
-    `Style: Subtitle,${FONT_NAME},60,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,80,1`
+    `Style: Subtitle,${FONT_NAME},80,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,4,2,2,40,40,100,1`
   );
 
-  // 브랜드명 스타일: 상단 중앙, 흰색 80% 투명, 작은 글씨
+  // 브랜드명 스타일: 상단 중앙, 흰색, 중간 크기
   // Alignment 8 = 상단 중앙
   styles.push(
-    `Style: Brand,${FONT_NAME},36,${assColor("FFFFFF", 0x33)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,2,1,8,40,40,60,1`
+    `Style: Brand,${FONT_NAME},52,${assColor("FFFFFF", 0x20)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,8,40,40,70,1`
   );
 
-  // CTA 스타일: 하단 중앙, 노란색, 큰 글씨, 검정 테두리
-  // Alignment 2 = 하단 중앙, MarginV 200으로 올림
+  // CTA 스타일: 하단 중앙, 노란색, 크고 두꺼운 글씨
+  // Alignment 2 = 하단 중앙, MarginV 250으로 올림
   styles.push(
-    `Style: CTA,${FONT_NAME},48,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,200,1`
+    `Style: CTA,${FONT_NAME},80,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,4,2,2,40,40,250,1`
   );
 
   let content = assHeader(resX, resY, styles);
@@ -174,27 +174,27 @@ function createClipAss(
 
   const styles: string[] = [];
 
-  // 훅 텍스트: 중앙 크게, 흰색 + 검정 테두리
+  // 훅 텍스트: 중앙 크게, 흰색 + 검정 테두리, 임팩트
   // Alignment 5 = 정중앙
   styles.push(
-    `Style: Hook,${FONT_NAME},56,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,5,40,40,40,1`
+    `Style: Hook,${FONT_NAME},90,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,4,2,5,40,40,40,1`
   );
 
-  // 자막: 하단 3/4 지점
+  // 자막: 하단 3/4 지점, 크고 선명
   // Alignment 2 = 하단 중앙, MarginV로 위치 조정
   styles.push(
-    `Style: Subtitle,${FONT_NAME},44,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,2,1,2,40,40,${Math.round(resY * 0.25)},1`
+    `Style: Subtitle,${FONT_NAME},72,${assColor("FFFFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,2,2,40,40,${Math.round(resY * 0.25)},1`
   );
 
-  // CTA: 하단 3/4, 노란색
+  // CTA: 하단 3/4, 노란색, 두꺼운 테두리
   styles.push(
-    `Style: CTA,${FONT_NAME},52,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,3,1,2,40,40,${Math.round(resY * 0.25)},1`
+    `Style: CTA,${FONT_NAME},80,${assColor("00FFFF")},${assColor("0000FF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,4,2,2,40,40,${Math.round(resY * 0.25)},1`
   );
 
-  // 브랜드: 상단 작게
+  // 브랜드: 상단 중간 크기
   // Alignment 8 = 상단 중앙
   styles.push(
-    `Style: Brand,${FONT_NAME},28,${assColor("FFFFFF", 0x33)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,1,1,8,40,40,50,1`
+    `Style: Brand,${FONT_NAME},48,${assColor("FFFFFF", 0x20)},${assColor("FFFFFF")},${assColor("000000")},${assColor("000000", 0x80)},-1,0,0,0,100,100,0,0,1,2,1,8,40,40,60,1`
   );
 
   let content = assHeader(resX, resY, styles);
@@ -371,13 +371,22 @@ export async function createShortsVideo(
 
     // 각 이미지별 Ken Burns 클립 생성
     const clipPaths: string[] = [];
+    // Ken Burns 효과 — 부드러운 줌/팬 (흔들림 방지)
+    // 핵심: zoom 변화량을 극소화(0.001), 팬은 on(프레임번호) 기반 선형보간
+    // zoompan은 정수 반올림 이슈가 있으므로 변화량을 최소로 유지
     const kenBurnsEffects = [
-      "zoompan=z='min(zoom+0.002,1.3)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 중앙 줌인
-      "zoompan=z='1.3':x='if(eq(on,0),0,x+2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 좌→우 팬
-      "zoompan=z='if(eq(on,0),1.3,zoom-0.002)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 줌아웃
-      "zoompan=z='1.3':x='if(eq(on,0),iw,x-2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30", // 우→좌 팬
-      "zoompan=z='min(zoom+0.003,1.4)':x='iw/4-(iw/zoom/4)':y='ih/4-(ih/zoom/4)':d=DURATION:s=WxH:fps=30", // 좌상단 줌인
-      "zoompan=z='1.2':x='iw/2-(iw/zoom/2)':y='if(eq(on,0),0,y+1)':d=DURATION:s=WxH:fps=30", // 위→아래 팬
+      // 1. 부드러운 중앙 줌인 (1.0 → 1.15)
+      "zoompan=z='1+on*0.15/DURATION':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30",
+      // 2. 부드러운 좌→우 팬 (zoom 고정 1.15, x만 이동)
+      "zoompan=z='1.15':x='on*(iw-iw/zoom)/DURATION':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30",
+      // 3. 부드러운 줌아웃 (1.15 → 1.0)
+      "zoompan=z='1.15-on*0.15/DURATION':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30",
+      // 4. 부드러운 우→좌 팬 (zoom 고정 1.15, x 역방향)
+      "zoompan=z='1.15':x='(iw-iw/zoom)-on*(iw-iw/zoom)/DURATION':y='ih/2-(ih/zoom/2)':d=DURATION:s=WxH:fps=30",
+      // 5. 부드러운 좌상단→중앙 줌인 (1.0 → 1.12)
+      "zoompan=z='1+on*0.12/DURATION':x='iw/4-(iw/zoom/4)+on*(iw/4)/(DURATION)':y='ih/4-(ih/zoom/4)+on*(ih/4)/(DURATION)':d=DURATION:s=WxH:fps=30",
+      // 6. 부드러운 위→아래 팬 (zoom 고정 1.12)
+      "zoompan=z='1.12':x='iw/2-(iw/zoom/2)':y='on*(ih-ih/zoom)/DURATION':d=DURATION:s=WxH:fps=30",
     ];
 
     for (let i = 0; i < localImages.length; i++) {
