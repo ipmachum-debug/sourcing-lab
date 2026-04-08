@@ -142,18 +142,22 @@ export async function postProcessVideo(input: PostProcessInput): Promise<PostPro
 
     // 4. 브랜드명 상단 표시
     if (input.brandName) {
+      const brandFile = path.join(TEMP_DIR, `brand_${Date.now()}.txt`);
+      fs.writeFileSync(brandFile, input.brandName, "utf-8");
       const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
       filters.push(
-        `drawtext=text='${input.brandName}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`
+        `drawtext=textfile='${brandFile}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`
       );
     }
 
     // 5. CTA 문구 하단 표시 (마지막 3초)
     if (input.ctaText) {
+      const ctaFile = path.join(TEMP_DIR, `cta_${Date.now()}.txt`);
+      fs.writeFileSync(ctaFile, input.ctaText, "utf-8");
       const ctaStart = Math.max(0, duration - 3);
       const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
       filters.push(
-        `drawtext=text='${input.ctaText}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t,${ctaStart},${duration})'`
+        `drawtext=textfile='${ctaFile}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t\\,${ctaStart}\\,${duration})'`
       );
     }
 
@@ -252,15 +256,19 @@ export async function createSlideshowVideo(
 
     // 브랜드명
     if (options.brandName) {
+      const brandFile = path.join(TEMP_DIR, `sbrand_${Date.now()}.txt`);
+      fs.writeFileSync(brandFile, options.brandName, "utf-8");
       const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(`drawtext=text='${options.brandName}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`);
+      filters.push(`drawtext=textfile='${brandFile}':fontsize=36${fontFile}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=60`);
     }
 
     // CTA
     if (options.ctaText) {
+      const ctaFile = path.join(TEMP_DIR, `scta_${Date.now()}.txt`);
+      fs.writeFileSync(ctaFile, options.ctaText, "utf-8");
       const ctaStart = Math.max(0, totalDuration - 3);
       const fontFile = fs.existsSync(FONT_PATH) ? `:fontfile='${FONT_PATH}'` : "";
-      filters.push(`drawtext=text='${options.ctaText}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t,${ctaStart},${totalDuration})'`);
+      filters.push(`drawtext=textfile='${ctaFile}':fontsize=48${fontFile}:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-200:enable='between(t\\,${ctaStart}\\,${totalDuration})'`);
     }
 
     let audioCmd = "";
