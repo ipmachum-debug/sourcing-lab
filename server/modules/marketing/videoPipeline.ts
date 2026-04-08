@@ -200,16 +200,18 @@ export async function callVideoApi(
   }
 
   try {
-    const res = await fetch("https://api.minimaxi.chat/v1/video_generation", {
+    const res = await fetch("https://api.minimax.io/v1/video_generation", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "video-01",
+        model: "MiniMax-Hailuo-02",
         first_frame_image: imageUrl,
         prompt,
+        duration: duration <= 6 ? 6 : 10,
+        resolution: "768P",
       }),
     });
 
@@ -240,7 +242,7 @@ export async function checkVideoStatus(taskId: string): Promise<{
   if (!apiKey) return { status: "error", error: "API key missing" };
 
   try {
-    const res = await fetch(`https://api.minimaxi.chat/v1/query/video_generation?task_id=${taskId}`, {
+    const res = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
 
@@ -248,9 +250,23 @@ export async function checkVideoStatus(taskId: string): Promise<{
     const data = await res.json();
 
     if (data.status === "Success") {
-      return { status: "completed", videoUrl: data.file_id ? `https://api.minimaxi.chat/v1/files/retrieve?file_id=${data.file_id}` : undefined };
-    } else if (data.status === "Failed") {
-      return { status: "failed", error: data.base_resp?.status_msg || "생성 실패" };
+      // file_id로 다운로드 URL 가져오기
+      let videoUrl: string | undefined;
+      if (data.file_id) {
+        try {
+          const fileRes = await fetch(`https://api.minimax.io/v1/files/retrieve?file_id=${data.file_id}`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+          if (fileRes.ok) {
+            const fileData = await fileRes.json();
+            videoUrl = fileData.file?.download_url;
+          }
+        } catch {}
+        if (!videoUrl) videoUrl = `https://api.minimax.io/v1/files/retrieve?file_id=${data.file_id}`;
+      }
+      return { status: "completed", videoUrl };
+    } else if (data.status === "Fail" || data.status === "Failed") {
+      return { status: "failed", error: data.base_resp?.status_msg || data.error_message || "생성 실패" };
     }
     return { status: "processing" };
   } catch (err: any) {
