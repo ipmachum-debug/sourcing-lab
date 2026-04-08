@@ -16,7 +16,7 @@ import crypto from "crypto";
 const UPLOADS_DIR = path.join(process.cwd(), "uploads", "marketing");
 const VIDEOS_DIR = path.join(UPLOADS_DIR, "videos");
 const TEMP_DIR = path.join(UPLOADS_DIR, "temp");
-const FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc";
+const FONT_PATH = "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc";
 
 // 디렉토리 생성
 for (const dir of [VIDEOS_DIR, TEMP_DIR]) {

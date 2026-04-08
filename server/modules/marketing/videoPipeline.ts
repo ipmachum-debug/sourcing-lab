@@ -29,9 +29,9 @@ const VIDEO_STYLES: Record<string, string> = {
 export async function selectBestCuts(
   images: string[], product: any, brand: any
 ): Promise<{ selected: string[]; reason: string }> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL || process.env.OPENAI_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiUrl || !apiKey) {
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
     // API 없으면 앞에서 3~5장 선택
     return { selected: images.slice(0, Math.min(5, images.length)), reason: "AI API 없음 — 순서대로 선택" };
   }
@@ -85,9 +85,9 @@ JSON 응답: {"selectedIndices": [0, 2, 4], "reason": "선택 이유"}
 export async function generateStory(
   selectedImages: string[], product: any, brand: any, style: string
 ): Promise<{ script: string; subtitles: string }> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL || process.env.OPENAI_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiUrl || !apiKey) {
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
     return { script: `${product?.name || "상품"} 소개 영상`, subtitles: "" };
   }
 
@@ -137,15 +137,18 @@ JSON 응답:
 }
 
 /**
- * Step 3: Kling API용 영상 프롬프트 생성
+ * Step 3: Minimax (Hailuo) 영상 프롬프트 생성
+ * - 카메라 명령어 [Static shot], [Push in] 등 활용
+ * - 조명/분위기 구체적 제어
+ * - 네거티브 프롬프트 포함
  */
 export async function generateVideoPrompt(
   product: any, brand: any, script: string, style: string
 ): Promise<string> {
-  const apiUrl = process.env.BUILT_IN_FORGE_API_URL || process.env.OPENAI_API_URL;
-  const apiKey = process.env.BUILT_IN_FORGE_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiUrl || !apiKey) {
-    return `A premium product showcase video of ${product?.name}. Warm lighting, slow motion, close-up details.`;
+  const apiUrl = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return `[Static shot] A close-up of ${product?.name || "Korean dessert"} on a clean white surface, soft natural window lighting from the left, shallow depth of field, no camera movement, studio food photography style, 4K quality.`;
   }
 
   const styleDesc = VIDEO_STYLES[style] || VIDEO_STYLES.instagram_reel;
@@ -158,24 +161,42 @@ export async function generateVideoPrompt(
       messages: [
         {
           role: "system",
-          content: `AI 영상 생성 프롬프트 전문가. Kling AI에 보낼 영어 프롬프트를 생성합니다.
-프롬프트는 반드시 영어로, 구체적인 시각 묘사 포함.
-JSON 응답: {"prompt": "영어 프롬프트"}`,
+          content: `You are a professional food videographer creating prompts for the MiniMax Hailuo AI video model (image-to-video).
+
+CRITICAL RULES:
+1. The prompt must describe WHAT HAPPENS to the EXISTING image — subtle, realistic motion only.
+2. The first frame image is already provided. DO NOT describe what is in the image. Describe the MOTION and ATMOSPHERE only.
+3. Use Minimax camera commands: [Static shot], [Push in], [Pull out], [Pan left], [Pan right], [Tilt up], [Tilt down], [Zoom in], [Zoom out], [Tracking shot]
+4. Use ONLY ONE camera command maximum. [Static shot] is safest for food products.
+5. Keep motion MINIMAL — food doesn't move much. Focus on: steam, light changes, subtle shadow shifts, gentle rotation.
+
+MUST AVOID (causes artifacts):
+- "lens flare", "light leak", "sun rays", "bloom effect", "glow"
+- "fast zoom", "rapid movement", "dynamic camera", "handheld"
+- "morphing", "transformation", "shape change"
+- "blurry", "dreamy haze", "soft focus", "bokeh movement"
+- Any mention of multiple scenes or cuts (this is ONE continuous 6-10 second clip)
+
+GOOD EXAMPLES:
+- "[Static shot] Soft ambient lighting gently shifts across the dessert surface, subtle steam rises from the fresh cream, shallow depth of field, studio food photography, 4K."
+- "[Zoom in] Slow gentle zoom into the cream filling detail, natural window lighting from left, crisp sharp focus maintained throughout, professional food commercial quality."
+
+Respond in JSON: {"prompt": "English prompt under 200 words"}`,
         },
         {
           role: "user",
-          content: `상품: ${product?.name}
-설명: ${product?.description || ""}
-스토리: ${script}
-스타일: ${styleDesc}
-브랜드 톤: ${brand?.toneOfVoice || "friendly"}
+          content: `Product: ${product?.name}
+Description: ${product?.description || "Korean premium dessert"}
+Features: ${JSON.stringify(product?.features || [])}
+Style: ${styleDesc}
+Brand tone: ${brand?.toneOfVoice || "friendly"}
 
-이 상품의 영상 생성용 Kling AI 프롬프트를 만들어주세요.
-화면 구도, 카메라 움직임, 조명, 분위기를 구체적으로 묘사해주세요.`,
+Generate ONE image-to-video prompt. The product photo is already provided as the first frame.
+Describe only the subtle motion and atmosphere for a 6-10 second food commercial clip.`,
         },
       ],
-      temperature: 0.7,
-      max_tokens: 500,
+      temperature: 0.5,
+      max_tokens: 400,
       response_format: { type: "json_object" },
     }),
   });
@@ -183,7 +204,7 @@ JSON 응답: {"prompt": "영어 프롬프트"}`,
   if (!res.ok) throw new Error("Prompt generation failed");
   const data = await res.json();
   const result = JSON.parse(data.choices?.[0]?.message?.content || "{}");
-  return result.prompt || `A premium product showcase video. Warm lighting, slow motion, close-up details, cinematic feel.`;
+  return result.prompt || `[Static shot] Soft natural lighting gently illuminates the product on a clean surface, subtle shadow movement, crisp sharp focus, professional food photography, 4K quality.`;
 }
 
 /**
@@ -210,6 +231,7 @@ export async function callVideoApi(
         model: "MiniMax-Hailuo-02",
         first_frame_image: imageUrl,
         prompt,
+        prompt_optimizer: false,
         duration: duration <= 6 ? 6 : 10,
         resolution: "768P",
       }),
@@ -227,7 +249,11 @@ export async function callVideoApi(
 
     // task_id 위치가 다를 수 있음
     const taskId = data.task_id || data.data?.task_id || data.id || data.data?.id;
-    if (!taskId) return { error: `Minimax task_id 없음. 응답: ${JSON.stringify(data).slice(0, 300)}` };
+    if (!taskId) {
+      const msg = data.base_resp?.status_msg || "알 수 없는 에러";
+      const code = data.base_resp?.status_code || "";
+      return { error: `Minimax API 실패 (${code}): ${msg}. 응답: ${JSON.stringify(data).slice(0, 300)}` };
+    }
 
     return { taskId };
   } catch (err: any) {
