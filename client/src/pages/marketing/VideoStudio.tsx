@@ -68,6 +68,20 @@ export default function VideoStudio() {
     onError: (err) => toast.error(err.message),
   });
 
+  const checkStatus = trpc.marketing.video.checkStatus.useMutation({
+    onSuccess: (data) => {
+      if (data.status === "completed") {
+        toast.success("영상 생성 완료!");
+      } else if (data.status === "failed") {
+        toast.error("영상 생성 실패");
+      } else {
+        toast.info("아직 생성 중입니다. 잠시 후 다시 확인해주세요.");
+      }
+      utils.marketing.video.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const postProcess = trpc.marketing.video.postProcess.useMutation({
     onSuccess: (data) => {
       toast.success("자막/BGM/CTA 합성 완료!");
@@ -297,8 +311,10 @@ export default function VideoStudio() {
                         </Button>
                       )}
                       {job.status === "generating" && (
-                        <Button size="sm" variant="outline" onClick={() => utils.marketing.video.list.invalidate()}>
-                          <RefreshCw className="h-3 w-3 mr-1" />상태 확인
+                        <Button size="sm" variant="outline"
+                          disabled={checkStatus.isPending}
+                          onClick={() => checkStatus.mutate({ jobId: job.id })}>
+                          <RefreshCw className={`h-3 w-3 mr-1 ${checkStatus.isPending ? "animate-spin" : ""}`} />상태 확인
                         </Button>
                       )}
                       {job.status === "completed" && job.rawVideoUrl && !job.finalVideoUrl && (

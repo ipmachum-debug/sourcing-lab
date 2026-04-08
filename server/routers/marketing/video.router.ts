@@ -133,10 +133,10 @@ export const videoRouter = router({
       return { success: true, taskId: result.taskId };
     }),
 
-  // Kling 상태 확인
+  // Minimax 상태 확인 (mutation으로 변경 — 버튼 클릭 시 호출)
   checkStatus: protectedProcedure
     .input(z.object({ jobId: z.number() }))
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
