@@ -6,7 +6,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   selectBestCuts, generateStory, generateVideoPrompt,
-  callKlingApi, checkKlingStatus, selectBgm,
+  callVideoApi, checkVideoStatus, selectBgm,
 } from "../../modules/marketing/videoPipeline";
 
 export const videoRouter = router({
@@ -114,7 +114,7 @@ export const videoRouter = router({
       const host = process.env.BASE_URL || "https://lumiriz.kr";
       const fullImageUrl = imageUrl.startsWith("http") ? imageUrl : `${host}${imageUrl}`;
 
-      const result = await callKlingApi(fullImageUrl, job.videoPrompt || "", job.videoDuration || 5);
+      const result = await callVideoApi(fullImageUrl, job.videoPrompt || "", job.videoDuration || 5);
 
       if ("error" in result) {
         await db.execute(sql`
@@ -146,7 +146,7 @@ export const videoRouter = router({
 
       if (!job.klingTaskId) return { status: job.status, job };
 
-      const result = await checkKlingStatus(job.klingTaskId);
+      const result = await checkVideoStatus(job.klingTaskId);
 
       if (result.status === "completed" && result.videoUrl) {
         await db.execute(sql`
