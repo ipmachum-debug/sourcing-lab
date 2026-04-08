@@ -45,7 +45,7 @@ export default function VideoStudio() {
   const [productId, setProductId] = useState("");
   const [style, setStyle] = useState("instagram_reel");
   const [mood, setMood] = useState("trendy");
-  const [duration, setDuration] = useState("15");
+  const [duration, setDuration] = useState("6");
 
   const utils = trpc.useUtils();
   const products = trpc.marketing.products.list.useQuery();
@@ -148,7 +148,7 @@ export default function VideoStudio() {
                     <Select value={duration} onValueChange={setDuration}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="5">5초</SelectItem>
+                        <SelectItem value="6">6초</SelectItem>
                         <SelectItem value="10">10초</SelectItem>
                       </SelectContent>
                     </Select>
