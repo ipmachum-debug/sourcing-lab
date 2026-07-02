@@ -5,6 +5,12 @@ import { and, desc, eq, gte, inArray, lt, lte, sql, SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { rebuildMarketPool } from "../lib/marketPoolService";
+import {
+  enqueueDeepScan,
+  getDeepScanStatus,
+  pollDeepScanTask,
+  submitDeepScanResult,
+} from "../lib/deepScanService";
 
 // 티어별 월매출(원) 경계
 const TIER_BOUNDS: Record<string, { min: number; max?: number }> = {
@@ -28,6 +34,54 @@ export const sourcingWizardRouter = router({
     .mutation(async ({ input }) => {
       return await rebuildMarketPool({ windowDays: input?.windowDays ?? 21 });
     }),
+
+  // ===== 심화수집 (R5) =====
+  // 웹앱: 결과 카드 펼침 → 효자상품 상세 수집 큐 등록
+  enqueueDeepScan: protectedProcedure
+    .input(
+      z.object({
+        productIds: z.array(z.string().max(50)).max(20),
+        keyword: z.string().max(255).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) =>
+      enqueueDeepScan({ productIds: input.productIds, keyword: input.keyword, userId: ctx.user!.id })
+    ),
+
+  // 웹앱: 3초 폴링 — 상세 캐시 + 진행 상태
+  getDeepScanStatus: protectedProcedure
+    .input(z.object({ productIds: z.array(z.string().max(50)).max(20) }))
+    .query(async ({ input }) => getDeepScanStatus({ productIds: input.productIds })),
+
+  // 확장: 다음 스캔 작업 픽업 (pending/좀비)
+  pollDeepScanTask: protectedProcedure.mutation(async () => pollDeepScanTask()),
+
+  // 확장: 스캔 결과 제출
+  submitDeepScanResult: protectedProcedure
+    .input(
+      z.object({
+        targetId: z.string().max(50),
+        detail: z.object({
+          productName: z.string().max(500).optional(),
+          mainImageUrl: z.string().max(1000).optional(),
+          currentPrice: z.number().int().optional(),
+          sellerName: z.string().max(255).optional(),
+          sellerGrade: z.string().max(50).optional(),
+          sellerProductCount: z.number().int().optional(),
+          optionCount: z.number().int().optional(),
+          optionJson: z.unknown().optional(),
+          deliveryType: z.string().max(30).optional(),
+          originCountry: z.string().max(100).optional(),
+          brand: z.string().max(255).optional(),
+          categoryPath: z.string().max(500).optional(),
+          detailImagesCount: z.number().int().optional(),
+          rating: z.number().optional(),
+          reviewCount: z.number().int().optional(),
+          discoveredViaKeyword: z.string().max(255).optional(),
+        }),
+      })
+    )
+    .mutation(async ({ input }) => submitDeepScanResult({ targetId: input.targetId, detail: input.detail })),
 
   // 로딩 화면용 카운터 (KEYWORDS / CATEGORIES / PRODUCTS)
   honeypotStats: protectedProcedure.query(async () => {
