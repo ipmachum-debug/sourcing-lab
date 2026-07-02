@@ -146,6 +146,29 @@ function KeywordCard({ item }: { item: Item }) {
   const [open, setOpen] = useState(false);
   const s = item.stats;
   const certs = detectCerts(`${item.keyword} ${item.category ?? ""}`);
+
+  // R5 심화수집: 펼치면 효자상품 상세를 큐 등록 + 3초 폴링
+  const productIds = item.topProducts.map(p => p.coupangProductId).filter(Boolean);
+  const enqueue = trpc.sourcingWizard.enqueueDeepScan.useMutation();
+  const scanQuery = trpc.sourcingWizard.getDeepScanStatus.useQuery(
+    { productIds },
+    {
+      enabled: open && productIds.length > 0,
+      refetchInterval: (q: any) => {
+        const d = q?.state?.data;
+        return d && d.doneCount >= d.total ? false : 3000;
+      },
+    }
+  );
+  useEffect(() => {
+    if (open && productIds.length) enqueue.mutate({ productIds, keyword: item.keyword });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const scan = scanQuery.data as
+    | { total: number; doneCount: number; details: any[]; statusByProduct: Record<string, string> }
+    | undefined;
+  const detailById = new Map<string, any>((scan?.details ?? []).map(d => [d.coupangProductId, d]));
+
   return (
     <Card className="overflow-hidden">
       {/* 접힘: 3줄 요약 */}
@@ -286,6 +309,47 @@ function KeywordCard({ item }: { item: Item }) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* 심화 정보 (R5 on-expand) */}
+          {productIds.length > 0 && (
+            <div className="mt-5">
+              <p className="font-bold text-sm mb-2 flex items-center gap-2">
+                🔬 심화 정보
+                {scan && scan.doneCount < scan.total && (
+                  <span className="text-[11px] text-muted-foreground font-normal">
+                    수집 중 {scan.doneCount}/{scan.total} · 쿠팡 페이지 열려있으면 자동 진행
+                  </span>
+                )}
+              </p>
+              <div className="space-y-2">
+                {item.topProducts.map((p, i) => {
+                  const d = detailById.get(p.coupangProductId);
+                  return (
+                    <div key={p.coupangProductId || i} className="rounded-lg border px-3 py-2">
+                      <p className="font-medium text-sm truncate">
+                        <span className="text-gray-400 mr-1.5">{i + 1}</span>
+                        {p.productName}
+                      </p>
+                      {d ? (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1.5">
+                          {d.sellerName && (
+                            <span>🏪 {d.sellerName}{d.sellerProductCount ? ` · ${num(d.sellerProductCount)}개 상품` : ""}</span>
+                          )}
+                          {d.originCountry && <span>🌏 원산지 {d.originCountry}</span>}
+                          {d.brand && <span>🏷️ {d.brand}</span>}
+                          {d.deliveryType && <span>🚚 {d.deliveryType}</span>}
+                          {d.optionCount ? <span>⚙️ 옵션 {d.optionCount}개</span> : null}
+                          {d.categoryPath && <span className="w-full">📂 {d.categoryPath}</span>}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-1">⏳ 수집 대기 중…</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
