@@ -116,15 +116,14 @@ const menuItems: MenuItem[] = [
   // ===== 메인 (초보자는 이것만 봐도 됨) =====
   { icon: Gem, label: "소싱", path: "/sourcing", emoji: "🔎", section: "main" },
   { icon: Calculator, label: "계산기", path: "/margin", emoji: "🧮", section: "main" },
-  { icon: Package, label: "내 소싱", path: "/products", emoji: "📌", section: "main" },
+  { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: LayoutDashboard, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
+  { icon: Gem, label: "니치 파인더", path: "/niche-finder", emoji: "💎", section: "advanced", group: "소싱 상세" },
   { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", section: "advanced", group: "소싱 상세" },
   { icon: Sparkles, label: "AI 제품 발견", path: "/discovery", emoji: "🔍", section: "advanced", group: "소싱 상세" },
-  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", section: "advanced", group: "소싱 상세" },
-  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪", section: "advanced", group: "소싱 상세" },
   // 시장 분석
   { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "🔬", section: "advanced", group: "시장 분석" },
   { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢", section: "advanced", group: "시장 분석" },

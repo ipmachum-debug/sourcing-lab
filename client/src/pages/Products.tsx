@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import { Search, Package, Plus, Star, Sparkles, Trash2, Eye, Pencil, Save, RotateCcw, X, AlertTriangle, Target, Trophy, Loader2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -87,7 +87,7 @@ function getScoreColor(score: number) {
   return "from-gray-400 to-gray-500";
 }
 
-export default function Products() {
+export default function Products({ embedded = false }: { embedded?: boolean }) {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -115,8 +115,9 @@ export default function Products() {
     setEditModalOpen(true);
   };
 
+  const Wrap = embedded ? Fragment : DashboardLayout;
   return (
-    <DashboardLayout>
+    <Wrap>
       <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -257,7 +258,7 @@ export default function Products() {
         product={editingProduct}
         onSuccess={() => utils.sourcing.list.invalidate()}
       />
-    </DashboardLayout>
+    </Wrap>
   );
 }
 
