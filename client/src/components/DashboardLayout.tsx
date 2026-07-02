@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -106,47 +106,54 @@ type MenuItem = {
   path: string;
   emoji: string;
   superAdminOnly?: boolean;
+  section: "main" | "advanced";
   group?: string;
 };
 
+// ★ UX 개편(R1): 초보자용 메인 4개 + 나머지는 "고급"으로 접기.
+//   기존 페이지는 삭제하지 않고 고급으로 이동 → 회귀 안전.
 const menuItems: MenuItem[] = [
-  // 소싱
-  { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", group: "소싱" },
-  { icon: Gem, label: "니치 파인더", path: "/niche-finder", emoji: "💎", group: "소싱" },
-  { icon: Sparkles, label: "AI 제품 발견", path: "/discovery", emoji: "🔍", group: "소싱" },
-  { icon: Calculator, label: "마진 계산기", path: "/margin", emoji: "💰", group: "소싱" },
-  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", group: "소싱" },
-  { icon: Package, label: "전체 상품", path: "/products", emoji: "📦", group: "소싱" },
-  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪", group: "소싱" },
+  // ===== 메인 (초보자는 이것만 봐도 됨) =====
+  { icon: Gem, label: "소싱", path: "/niche-finder", emoji: "🔎", section: "main" },
+  { icon: Calculator, label: "계산기", path: "/margin", emoji: "🧮", section: "main" },
+  { icon: Package, label: "내 소싱", path: "/products", emoji: "📌", section: "main" },
+  { icon: LayoutDashboard, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
+
+  // ===== 고급 (더보기) =====
+  // 소싱 상세
+  { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", section: "advanced", group: "소싱 상세" },
+  { icon: Sparkles, label: "AI 제품 발견", path: "/discovery", emoji: "🔍", section: "advanced", group: "소싱 상세" },
+  { icon: FileText, label: "데일리 소싱", path: "/daily", emoji: "📝", section: "advanced", group: "소싱 상세" },
+  { icon: FlaskConical, label: "테스트 후보", path: "/test-candidates", emoji: "🧪", section: "advanced", group: "소싱 상세" },
   // 시장 분석
-  { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "🔬", group: "시장 분석" },
-  { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢", group: "시장 분석" },
-  // 판매 관리
-  { icon: LayoutDashboard, label: "대시보드", path: "/dashboard", emoji: "🏠", group: "판매 관리" },
-  { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰", group: "판매 관리" },
-  { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️", group: "판매 관리" },
-  { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅", group: "판매 관리" },
+  { icon: BarChart3, label: "헬퍼 대시보드", path: "/extension", emoji: "🔬", section: "advanced", group: "시장 분석" },
+  { icon: Puzzle, label: "소싱 헬퍼", path: "/sourcing-helper", emoji: "🐢", section: "advanced", group: "시장 분석" },
+  // 판매 관리 상세
+  { icon: TrendingUp, label: "Daily Profit", path: "/daily-profit", emoji: "💰", section: "advanced", group: "판매 관리 상세" },
+  { icon: ShoppingBag, label: "쿠팡 관리", path: "/coupang", emoji: "🛍️", section: "advanced", group: "판매 관리 상세" },
+  { icon: CalendarCheck, label: "주간 리뷰", path: "/weekly-review", emoji: "📅", section: "advanced", group: "판매 관리 상세" },
   // 마케팅
-  { icon: Megaphone, label: "마케팅 Today", path: "/marketing", emoji: "📢", group: "마케팅" },
-  { icon: PenTool, label: "콘텐츠 생성", path: "/marketing/content", emoji: "✍️", group: "마케팅" },
-  { icon: Send, label: "발행 큐", path: "/marketing/queue", emoji: "📤", group: "마케팅" },
-  { icon: BarChart3, label: "성과 분석", path: "/marketing/analytics", emoji: "📊", group: "마케팅" },
-  { icon: Bot, label: "AI 브리핑", path: "/marketing/briefing", emoji: "🤖", group: "마케팅" },
-  { icon: Calendar, label: "콘텐츠 캘린더", path: "/marketing/calendar", emoji: "📅", group: "마케팅" },
-  { icon: Flask, label: "A/B 테스트", path: "/marketing/ab-test", emoji: "🧪", group: "마케팅" },
-  { icon: FileBarChart, label: "성과 리포트", path: "/marketing/reports", emoji: "📋", group: "마케팅" },
-  { icon: Library, label: "자료실", path: "/marketing/library", emoji: "📚", group: "마케팅" },
-  { icon: Building, label: "고객사 관리", path: "/marketing/clients", emoji: "🏢", group: "마케팅" },
-  { icon: Sliders, label: "마케팅 설정", path: "/marketing/settings", emoji: "⚙️", group: "마케팅" },
+  { icon: Megaphone, label: "마케팅 Today", path: "/marketing", emoji: "📢", section: "advanced", group: "마케팅" },
+  { icon: PenTool, label: "콘텐츠 생성", path: "/marketing/content", emoji: "✍️", section: "advanced", group: "마케팅" },
+  { icon: Send, label: "발행 큐", path: "/marketing/queue", emoji: "📤", section: "advanced", group: "마케팅" },
+  { icon: BarChart3, label: "성과 분석", path: "/marketing/analytics", emoji: "📊", section: "advanced", group: "마케팅" },
+  { icon: Bot, label: "AI 브리핑", path: "/marketing/briefing", emoji: "🤖", section: "advanced", group: "마케팅" },
+  { icon: Calendar, label: "콘텐츠 캘린더", path: "/marketing/calendar", emoji: "📅", section: "advanced", group: "마케팅" },
+  { icon: Flask, label: "A/B 테스트", path: "/marketing/ab-test", emoji: "🧪", section: "advanced", group: "마케팅" },
+  { icon: FileBarChart, label: "성과 리포트", path: "/marketing/reports", emoji: "📋", section: "advanced", group: "마케팅" },
+  { icon: Library, label: "자료실", path: "/marketing/library", emoji: "📚", section: "advanced", group: "마케팅" },
+  { icon: Building, label: "고객사 관리", path: "/marketing/clients", emoji: "🏢", section: "advanced", group: "마케팅" },
+  { icon: Sliders, label: "마케팅 설정", path: "/marketing/settings", emoji: "⚙️", section: "advanced", group: "마케팅" },
   // 도구
-  { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "🧩", group: "도구" },
-  { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖", group: "도구" },
-  { icon: User, label: "내 프로필", path: "/profile", emoji: "👤", group: "도구" },
-  { icon: Settings, label: "계정 설정", path: "/settings/accounts", emoji: "⚙️", group: "도구" },
-  { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", group: "도구" },
+  { icon: BookOpen, label: "확장프로그램", path: "/extension-guide", emoji: "🧩", section: "advanced", group: "도구" },
+  { icon: BookOpen, label: "사용 매뉴얼", path: "/manual", emoji: "📖", section: "advanced", group: "도구" },
+  { icon: User, label: "내 프로필", path: "/profile", emoji: "👤", section: "advanced", group: "도구" },
+  { icon: Settings, label: "계정 설정", path: "/settings/accounts", emoji: "⚙️", section: "advanced", group: "도구" },
+  { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", section: "advanced", group: "도구" },
 ];
 
-const menuGroups = ["소싱", "시장 분석", "판매 관리", "마케팅", "도구"];
+const mainItems = menuItems.filter(i => i.section === "main");
+const advancedGroups = ["소싱 상세", "시장 분석", "판매 관리 상세", "마케팅", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 260;
@@ -205,6 +212,13 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
 
+  // 고급 메뉴 접기/펼치기 — 현재 위치가 고급 항목이면 자동으로 펼쳐 활성 항목이 보이게
+  const inAdvanced = menuItems.some(i => i.section === "advanced" && i.path === location);
+  const [showAdvanced, setShowAdvanced] = useState(inAdvanced);
+  useEffect(() => {
+    if (inAdvanced) setShowAdvanced(true);
+  }, [inAdvanced]);
+
   useEffect(() => {
     if (isCollapsed) setIsResizing(false);
   }, [isCollapsed]);
@@ -258,15 +272,54 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           {/* Menu items */}
           <SidebarContent className="gap-0 pt-2">
             <SidebarMenu className="px-2 py-1">
-              {menuGroups.map(group => {
+              {/* ===== 메인 (초보자) ===== */}
+              {mainItems.map(item => {
+                const isActive = location === item.path;
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => setLocation(item.path)}
+                      tooltip={item.label}
+                      className={`h-11 transition-all rounded-xl my-0.5 ${
+                        isActive
+                          ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-semibold border border-pink-100/60"
+                          : "hover:bg-pink-50/50 font-medium"
+                      }`}
+                    >
+                      <item.icon className={`h-4 w-4 transition-all ${
+                        isActive ? "text-pink-500" : "text-muted-foreground"
+                      }`} />
+                      <span className="flex items-center gap-2">
+                        {!isCollapsed && <span className="text-base">{item.emoji}</span>}
+                        <span className="text-[15px]">{item.label}</span>
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+
+              {/* ===== 고급 (더보기) 토글 ===== */}
+              {!isCollapsed && (
+                <button
+                  onClick={() => setShowAdvanced(v => !v)}
+                  className="flex items-center justify-between w-full px-3 mt-3 mb-1 py-1.5 text-[11px] font-semibold text-gray-400 hover:text-pink-500 transition-colors rounded-lg hover:bg-pink-50/40"
+                >
+                  <span className="uppercase tracking-wider">고급 기능</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+                </button>
+              )}
+
+              {/* ===== 고급 그룹들 ===== */}
+              {showAdvanced && advancedGroups.map(group => {
                 const groupItems = menuItems
-                  .filter(item => item.group === group)
+                  .filter(item => item.section === "advanced" && item.group === group)
                   .filter(item => !item.superAdminOnly || user?.isSuperAdmin);
                 if (!groupItems.length) return null;
                 return (
                   <div key={group}>
                     {!isCollapsed && (
-                      <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 pt-3 pb-1">
+                      <div className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider px-3 pt-2 pb-1">
                         {group}
                       </div>
                     )}
@@ -279,16 +332,16 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                             isActive={isActive}
                             onClick={() => setLocation(item.path)}
                             tooltip={item.label}
-                            className={`h-10 transition-all font-normal rounded-xl my-0.5 ${
+                            className={`h-9 transition-all font-normal rounded-xl my-0.5 ${
                               isActive
                                 ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-medium border border-pink-100/60"
                                 : "hover:bg-pink-50/50"
                             }`}
                           >
                             <item.icon className={`h-4 w-4 transition-all ${
-                              isActive ? "text-pink-500" : "text-muted-foreground"
+                              isActive ? "text-pink-500" : "text-muted-foreground/70"
                             }`} />
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-center gap-2 text-[13px]">
                               {!isCollapsed && <span className="text-sm">{item.emoji}</span>}
                               {item.label}
                             </span>
