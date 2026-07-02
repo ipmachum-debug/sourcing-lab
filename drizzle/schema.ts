@@ -1718,3 +1718,53 @@ export const marketProductStats = mysqlTable("market_product_stats", {
 
 export type MarketProductStat = typeof marketProductStats.$inferSelect;
 export type InsertMarketProductStat = typeof marketProductStats.$inferInsert;
+
+// ==================== 심화수집 큐 (market_scan_queue) ====================
+// R5: 웹앱에서 결과 카드 펼침 → 여기 큐 등록 → 확장이 폴링 픽업 → 상세 수집.
+// target_id(상품ID) 유니크 — 상품당 1행, 상태만 갱신. 좀비 방지: running_expires_at.
+export const marketScanQueue = mysqlTable("market_scan_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  scanType: mysqlEnum("scan_type", ["product_detail"]).default("product_detail").notNull(),
+  targetId: varchar("target_id", { length: 50 }).notNull().unique(), // coupang product id
+  keyword: varchar("keyword", { length: 255 }),                      // 트리거한 키워드(참고)
+  status: mysqlEnum("status", ["pending", "running", "done", "failed"]).default("pending").notNull(),
+  priority: int("priority").default(50),
+  requestedBy: int("requested_by"),                                  // 요청 유저(분석용)
+  attempts: int("attempts").default(0),
+  runningExpiresAt: timestamp("running_expires_at", tsOpts),         // running 좀비 복구 기한
+  lastError: varchar("last_error", { length: 500 }),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketScanQueue = typeof marketScanQueue.$inferSelect;
+export type InsertMarketScanQueue = typeof marketScanQueue.$inferInsert;
+
+// ============ 공유 상품 상세 풀 (market_shared_product_details_pool) ============
+// 상품 고유 상세정보(판매자·원산지·옵션 등). product_id 유니크(키워드 무관).
+// TTL(last_scanned_at 기준)로 신선도 관리 — deepScanService 참조.
+export const marketProductDetails = mysqlTable("market_shared_product_details_pool", {
+  id: int("id").autoincrement().primaryKey(),
+  coupangProductId: varchar("coupang_product_id", { length: 50 }).notNull().unique(),
+  productName: varchar("product_name", { length: 500 }),
+  mainImageUrl: varchar("main_image_url", { length: 1000 }),
+  currentPrice: int("current_price").default(0),
+  sellerName: varchar("seller_name", { length: 255 }),
+  sellerGrade: varchar("seller_grade", { length: 50 }),
+  sellerProductCount: int("seller_product_count").default(0),        // 판매자 총 상품수(경쟁규모)
+  optionCount: int("option_count").default(0),
+  optionJson: json("option_json"),
+  deliveryType: varchar("delivery_type", { length: 30 }),            // rocket/seller_rocket/global/normal/overseas
+  originCountry: varchar("origin_country", { length: 100 }),
+  brand: varchar("brand", { length: 255 }),
+  categoryPath: varchar("category_path", { length: 500 }),
+  detailImagesCount: int("detail_images_count").default(0),
+  rating: decimal("rating", { precision: 3, scale: 1 }).default("0"),
+  reviewCount: int("review_count").default(0),
+  discoveredViaKeyword: varchar("discovered_via_keyword", { length: 255 }),
+  firstScannedAt: timestamp("first_scanned_at", tsOpts).defaultNow().notNull(),
+  lastScannedAt: timestamp("last_scanned_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MarketProductDetail = typeof marketProductDetails.$inferSelect;
+export type InsertMarketProductDetail = typeof marketProductDetails.$inferInsert;
