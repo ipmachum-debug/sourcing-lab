@@ -65,7 +65,7 @@ export default function KeywordSourcing() {
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-pink-500 bg-pink-50 px-3 py-1 rounded-full">
             🔎 AI 소싱
           </span>
-          <h1 className="text-3xl font-bold mt-4 gradient-text">AI 꿀통키워드 소싱</h1>
+          <h1 className="text-3xl font-bold mt-4 gradient-text">AI 원픽키워드 소싱</h1>
           <p className="text-muted-foreground mt-2">AI가 수익성 높은 쿠팡 키워드를 찾아드립니다</p>
         </div>
 
@@ -107,7 +107,7 @@ export default function KeywordSourcing() {
 
         {/* ② 리뷰 슬라이더 */}
         <section>
-          <StepTitle n={2} title="효자상품 최대 리뷰수" sub="매출 1위 효자상품의 리뷰가 이 수 이하인 꿀통키워드만 보여드립니다" />
+          <StepTitle n={2} title="효자상품 최대 리뷰수" sub="매출 1위 효자상품의 리뷰가 이 수 이하인 원픽키워드만 보여드립니다" />
           <Card className="p-6 mt-4">
             <div className="flex items-end justify-between mb-4">
               <div>
