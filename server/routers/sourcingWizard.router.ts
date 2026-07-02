@@ -1,9 +1,10 @@
-import { protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { marketKeywordStats, marketProductStats } from "../../drizzle/schema";
 import { and, desc, eq, gte, inArray, lt, lte, sql, SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { rebuildMarketPool } from "../lib/marketPoolService";
 
 // 티어별 월매출(원) 경계
 const TIER_BOUNDS: Record<string, { min: number; max?: number }> = {
@@ -20,6 +21,14 @@ const HIGH_PRICE_THRESHOLD = 20_000;
  * userId로 필터하지 않음(공유 데이터). 별도 크롤링 없이 검색-수집된 데이터를 그대로 노출.
  */
 export const sourcingWizardRouter = router({
+  // 공유 풀 재구성 (관리자) — 유저별 수집 데이터를 병합해 market_* 채움.
+  // 배치에서 주기 호출하거나 관리자가 수동 트리거.
+  rebuildPool: adminProcedure
+    .input(z.object({ windowDays: z.number().int().min(1).max(90).default(21) }).optional())
+    .mutation(async ({ input }) => {
+      return await rebuildMarketPool({ windowDays: input?.windowDays ?? 21 });
+    }),
+
   // 로딩 화면용 카운터 (KEYWORDS / CATEGORIES / PRODUCTS)
   honeypotStats: protectedProcedure.query(async () => {
     const db = await getDb();
