@@ -27,6 +27,8 @@ import SearchDemand from "./pages/SearchDemand";
 import MarginCalculator from "./pages/MarginCalculator";
 import NicheFinder from "./pages/NicheFinder";
 import ProductDiscovery from "./pages/ProductDiscovery";
+import KeywordSourcing from "./pages/KeywordSourcing";
+import KeywordSourcingResults from "./pages/KeywordSourcingResults";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -61,6 +63,8 @@ function Router() {
       <Route path="/coupang" component={CoupangManager} />
       <Route path="/demand" component={SearchDemand} />
       <Route path="/margin" component={MarginCalculator} />
+      <Route path="/sourcing" component={KeywordSourcing} />
+      <Route path="/sourcing/results" component={KeywordSourcingResults} />
       <Route path="/niche-finder" component={NicheFinder} />
       <Route path="/discovery" component={ProductDiscovery} />
       <Route path="/sourcing-helper" component={SourcingHelper} />

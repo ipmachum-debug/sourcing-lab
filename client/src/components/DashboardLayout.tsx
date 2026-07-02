@@ -114,7 +114,7 @@ type MenuItem = {
 //   기존 페이지는 삭제하지 않고 고급으로 이동 → 회귀 안전.
 const menuItems: MenuItem[] = [
   // ===== 메인 (초보자는 이것만 봐도 됨) =====
-  { icon: Gem, label: "소싱", path: "/niche-finder", emoji: "🔎", section: "main" },
+  { icon: Gem, label: "소싱", path: "/sourcing", emoji: "🔎", section: "main" },
   { icon: Calculator, label: "계산기", path: "/margin", emoji: "🧮", section: "main" },
   { icon: Package, label: "내 소싱", path: "/products", emoji: "📌", section: "main" },
   { icon: LayoutDashboard, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
