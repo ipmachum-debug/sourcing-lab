@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.7.1",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.7.1 — 로그인 안정화, 수동수집 페이지 일괄 선택",
+  "version": "8.8.1",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.8.1 — 순수 패시브 전환(일괄 크롤 제거), 원픽 심화수집",
   "permissions": [
     "storage",
     "tabs",

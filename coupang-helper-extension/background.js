@@ -31,16 +31,16 @@ function generateRequestId() {
 // ---- 설치/업데이트 시 열린 쿠팡 탭 자동 새로고침 ----
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  // 순위 추적 알람 (매 6시간마다)
+  // 순위 추적 알람 (매 6시간마다) — 관심제품(watched) 추적, 유지
   chrome.alarms.create('rankTracking', { periodInMinutes: 360 });
-  // 판매량 추정 배치 알람 (매 12시간마다)
+  // 판매량 추정 배치 알람 (매 12시간마다) — 관심제품 추정, 유지
   chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
-  // 하이브리드 일일 배치 알람 (매 24시간마다)
-  chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
-  // v8.6: 예약 자동수집 알람 (매 2시간마다)
-  chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+  // v8.8.1: 순수 패시브 전환 — 일괄 크롤(dailyBatchCollection·scheduledAutoCollect) 제거.
+  //   검색 읽기(passive) + on-expand 심화수집(deepScanPolling)만 사용.
   // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
+  // R5: 심화수집 폴링 (매 1분마다 원픽 결과 카드 요청 픽업) — scheduleEnabled 옵트인 시에만 실동작
+  chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -64,25 +64,13 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
     console.log('[Discovery] 폴링 알람 재생성');
   }
-  // v8.6: 예약 수집 알람 보장 + 경과 시간 기반 즉시 실행
-  const schedData = await chrome.storage.local.get(['scheduleEnabled', 'scheduleLastRun']);
-  if (schedData.scheduleEnabled) {
-    const schedAlarm = await chrome.alarms.get('scheduledAutoCollect').catch(() => null);
-    if (!schedAlarm) {
-      const lastRun = schedData.scheduleLastRun ? new Date(schedData.scheduleLastRun).getTime() : 0;
-      const elapsed = Date.now() - lastRun;
-      const intervalMs = 120 * 60 * 1000;
-      if (elapsed >= intervalMs) {
-        chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-        console.log('[Schedule] 알람 재생성 — 즉시 실행');
-        setTimeout(() => runScheduledAutoCollect(), 5000);
-      } else {
-        const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
-        chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
-        console.log('[Schedule] 알람 재생성 — ' + remainMin + '분 후');
-      }
-    }
-  }
+  // v8.8.1: 순수 패시브 전환 — 예약 자동수집(scheduledAutoCollect) 재생성 제거.
+  //   남아있을 수 있는 일괄 크롤 알람을 정리.
+  chrome.alarms.clear('scheduledAutoCollect').catch(() => {});
+  chrome.alarms.clear('dailyBatchCollection').catch(() => {});
+  // deepScanPolling 알람 보장 (on-expand 심화수집)
+  const dsAlarm = await chrome.alarms.get('deepScanPolling').catch(() => null);
+  if (!dsAlarm) chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
   // 10초 후 즉시 체크
   setTimeout(async () => {
     console.log('[Discovery] 서비스 워커 시작 — 자동 체크 실행');
@@ -107,16 +95,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'salesEstimateBatch') {
     await autoRunSalesEstimate();
   }
-  if (alarm.name === 'dailyBatchCollection') {
-    await autoRunDailyBatch();
-  }
+  // v8.8.1: 순수 패시브 전환 — 일괄 크롤(dailyBatchCollection·scheduledAutoCollect)
+  //   핸들러 무력화. 어떤 경로로 알람이 생겨도 크롤하지 않음.
   // v8.1: AI 제품 발견 자동 폴링
   if (alarm.name === 'discoveryPolling') {
     await discoveryAutoCheck();
   }
-  // v8.6: 예약 자동수집 (2시간마다)
-  if (alarm.name === 'scheduledAutoCollect') {
-    await runScheduledAutoCollect();
+  // R5: 심화수집 폴링 (1분마다)
+  if (alarm.name === 'deepScanPolling') {
+    await runDeepScanPoll();
   }
 });
 
@@ -922,11 +909,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ===== v6.4: 자동 순회 수집기 (Auto-Collect) =====
     case 'START_AUTO_COLLECT': {
-      startAutoCollect(message.payload || {}).then((result) => {
-        sendResponse(result);
-      }).catch(e => {
-        sendResponse({ ok: false, error: e.message });
-      });
+      // v8.8.1: 순수 패시브 전환 — 일괄 자동수집(크롤) 비활성화.
+      // 검색 읽기(passive) + on-expand 심화수집만 사용.
+      sendResponse({ ok: false, error: 'passive_mode: 자동수집(크롤)은 비활성화되었습니다' });
       return true;
     }
 
@@ -938,32 +923,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // v8.6: 예약 수집 토글
     case 'SCHEDULE_TOGGLE': {
+      // v8.8.1: 순수 패시브 전환 — 예약 자동수집(크롤) 비활성화 고정.
       (async () => {
-        const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
-        const newVal = !scheduleEnabled;
-        await chrome.storage.local.set({ scheduleEnabled: newVal });
-        if (newVal) {
-          // 마지막 수집으로부터 경과 시간 계산
-          const { scheduleLastRun } = await chrome.storage.local.get('scheduleLastRun');
-          const lastRun = scheduleLastRun ? new Date(scheduleLastRun).getTime() : 0;
-          const elapsed = Date.now() - lastRun;
-          const intervalMs = 120 * 60 * 1000; // 2시간
-          if (elapsed >= intervalMs) {
-            // 이미 2시간 지남 → 즉시 실행 + 이후 2시간 주기
-            chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-            console.log('[Schedule] 예약 활성화 — 마지막 수집 ' + Math.round(elapsed / 60000) + '분 전 → 즉시 실행');
-            setTimeout(() => runScheduledAutoCollect(), 3000);
-          } else {
-            // 아직 2시간 안됨 → 남은 시간 후 첫 실행
-            const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
-            chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
-            console.log('[Schedule] 예약 활성화 — ' + remainMin + '분 후 첫 수집');
-          }
-        } else {
-          chrome.alarms.clear('scheduledAutoCollect');
-          console.log('[Schedule] 예약 수집 비활성화');
-        }
-        sendResponse({ ok: true, enabled: newVal });
+        await chrome.storage.local.set({ scheduleEnabled: false });
+        chrome.alarms.clear('scheduledAutoCollect').catch(() => {});
+        sendResponse({ ok: false, enabled: false, error: 'passive_mode: 예약 자동수집이 제거되었습니다' });
       })();
       return true;
     }
@@ -990,9 +954,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'RESUME_AUTO_COLLECT': {
-      startAutoCollect().then((result) => {
-        sendResponse(result);
-      });
+      // v8.8.1: 순수 패시브 전환 — 일괄 자동수집(크롤) 비활성화.
+      sendResponse({ ok: false, error: 'passive_mode: 자동수집(크롤)은 비활성화되었습니다' });
       return true;
     }
 
@@ -2713,6 +2676,134 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     pauseAutoCollect();
   }
 });
+
+// ============================================================
+//  R5: 심화수집 폴링 워커
+//  웹앱 원픽 결과 카드 펼침 → 서버 큐 → 여기서 픽업 → 상세 수집 → 제출.
+//  옵트인(scheduleEnabled) + 쿠팡 탭 확보 시에만 동작. 활성 탭 하이재킹 방지를
+//  위해 ensureCoupangTab(전용 탭 로직)을 재사용한다.
+// ============================================================
+async function runDeepScanPoll() {
+  // 1) 옵트인 + 로그인 게이트 (기여 동의 재사용)
+  const { serverLoggedIn, scheduleEnabled } = await chrome.storage.local.get(['serverLoggedIn', 'scheduleEnabled']);
+  if (!serverLoggedIn || !scheduleEnabled) return;
+
+  // 2) 배치 수집기 실행 중이면 스킵 (탭 충돌 방지)
+  if (collector.running) return;
+
+  // 3) 열려있는 쿠팡 탭이 있을 때만 (유저가 브라우징 중일 때만 동작)
+  const openTabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+  if (!openTabs || openTabs.length === 0) return;
+
+  // 4) 서버에서 작업 1건 픽업
+  let task;
+  try {
+    const resp = await apiClient.pollDeepScanTask();
+    task = resp?.result?.data;
+  } catch (e) {
+    console.warn('[DeepScan] poll 실패:', e.message);
+    return;
+  }
+  if (!task || !task.targetId) return;
+
+  console.log(`[DeepScan] 작업 픽업: ${task.targetId} (kw: ${task.keyword || '-'})`);
+
+  // 5) 전용 탭 확보 후 상세 수집
+  let tabId;
+  try {
+    tabId = await ensureCoupangTab();
+  } catch (e) {
+    console.warn('[DeepScan] 탭 확보 실패:', e.message);
+    return;
+  }
+  if (!tabId) return;
+
+  const result = await scanDetailForDeepScan(tabId, task.targetId, task.keyword);
+  if (!result) {
+    // 실패 시 제출 안 함 → 서버가 running_expires_at 경과 후 재큐
+    console.warn('[DeepScan] 상세 파싱 실패, 재큐 대기:', task.targetId);
+    return;
+  }
+
+  // 6) 결과 매핑 + 서버 제출
+  const detail = {
+    productName: result.title || undefined,
+    mainImageUrl: result.imageUrl || undefined,
+    currentPrice: result.price || undefined,
+    sellerName: result.sellerName || undefined,
+    optionCount: result.optionCount || undefined,
+    optionJson: result.optionSummary || undefined,
+    deliveryType: result.deliveryType || undefined,
+    originCountry: result.origin || undefined,
+    brand: result.brandName || undefined,
+    categoryPath: result.categoryPath || undefined,
+    rating: result.rating || undefined,
+    reviewCount: result.reviewCount || undefined,
+    discoveredViaKeyword: task.keyword || undefined,
+  };
+  try {
+    await apiClient.submitDeepScanResult({ targetId: task.targetId, detail });
+    console.log(`[DeepScan] ✅ 제출 완료: ${task.targetId}`);
+  } catch (e) {
+    console.warn('[DeepScan] 제출 실패:', e.message);
+  }
+}
+
+// 상세 페이지로 이동 → content-detail.js 파싱 → 결과 반환 (서버 저장은 호출측에서)
+function scanDetailForDeepScan(tabId, productId, keyword) {
+  return new Promise(async (resolve) => {
+    const detailUrl = `https://www.coupang.com/vp/products/${productId}`;
+    const requestId = generateRequestId();
+
+    try {
+      await chrome.tabs.update(tabId, { url: detailUrl });
+    } catch (e) {
+      resolve(null);
+      return;
+    }
+
+    // 로드 완료 대기 (최대 20초)
+    await new Promise((r) => {
+      const listener = (tid, changeInfo) => {
+        if (tid === tabId && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          r();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); r(); }, 20000);
+    });
+
+    // DOM 안정화 (3~6초 + 지터)
+    await collectorSleep(addJitter(3000 + Math.floor(Math.random() * 3000)));
+
+    // content-detail.js에 파싱 요청 (1회 재시도)
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'START_PARSE_DETAIL', requestId, productId, keyword, isAutoCollect: true });
+    } catch (e) {
+      await collectorSleep(3000);
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: 'START_PARSE_DETAIL', requestId, productId, keyword, isAutoCollect: true });
+      } catch (e2) {
+        resolve(null);
+        return;
+      }
+    }
+
+    // 응답 대기 (최대 20초)
+    const handler = (msg) => {
+      if (msg.type === 'DETAIL_PARSE_SUCCESS' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        resolve(msg.result || null);
+      } else if (msg.type === 'DETAIL_PARSE_FAILED' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        resolve(null);
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    setTimeout(() => { chrome.runtime.onMessage.removeListener(handler); resolve(null); }, 20000);
+  });
+}
 
 // ============================================================
 //  v8.0: AI 제품 발견 크롤링 파이프라인

@@ -329,8 +329,9 @@
     /* 하이라이트 */
     .sh-hl { outline: 3px solid #6366f1 !important; outline-offset: -2px !important; transition: outline .15s !important; }
 
-    /* 배치 수집 바 */
+    /* 배치 수집 바 — v8.8.1: 순수 패시브 전환으로 숨김(자동수집 크롤러 제거) */
     .sh-batch {
+      display: none !important;
       padding: 8px 14px !important; flex-shrink: 0 !important;
       border-top: 1px solid #e2e8f0 !important;
       background: #f8fafc !important;

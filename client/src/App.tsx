@@ -30,6 +30,9 @@ import ProductDiscovery from "./pages/ProductDiscovery";
 import KeywordSourcing from "./pages/KeywordSourcing";
 import KeywordSourcingResults from "./pages/KeywordSourcingResults";
 import MySourcing from "./pages/MySourcing";
+import InventoryBet from "./pages/InventoryBet";
+import Home from "./pages/Home";
+import QuickMargin from "./pages/QuickMargin";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -47,6 +50,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Landing} />
       <Route path="/login" component={Landing} />
+      <Route path="/home" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/daily" component={DailySourcing as any} />
       <Route path="/daily-profit" component={DailyProfitBoard} />
@@ -63,10 +67,12 @@ function Router() {
       <Route path="/settings/accounts" component={AccountSettings} />
       <Route path="/coupang" component={CoupangManager} />
       <Route path="/demand" component={SearchDemand} />
+      <Route path="/quick-margin" component={QuickMargin} />
       <Route path="/margin" component={MarginCalculator} />
       <Route path="/sourcing" component={KeywordSourcing} />
       <Route path="/sourcing/results" component={KeywordSourcingResults} />
       <Route path="/my-sourcing" component={MySourcing} />
+      <Route path="/inventory-bet" component={InventoryBet} />
       <Route path="/niche-finder" component={NicheFinder} />
       <Route path="/discovery" component={ProductDiscovery} />
       <Route path="/sourcing-helper" component={SourcingHelper} />
@@ -93,7 +99,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
+      <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
           <Router />
         </TooltipProvider>
