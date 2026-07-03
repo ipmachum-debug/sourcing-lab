@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.7.1";
+const EXTENSION_LATEST_VERSION = "8.8.1";
 const EXTENSION_CHANGELOG = [
-  "검색량 '로그인 필요' 간헐적 표시 수정 — 401 재로그인 로직 복원",
-  "수동수집 페이지 단위 일괄 선택 기능 추가",
-  "UNAUTHORIZED 응답 시 2초 대기 후 1회 재시도",
+  "순수 패시브 전환 — 플로팅 '자동 수집' 크롤러 제거 (봇 리스크↓)",
+  "검색으로 보는 데이터만 읽고, 원픽 결과 펼칠 때 상세 수집(on-expand)",
+  "관심 상품 추적은 그대로 유지",
 ];
 import { getDb } from "../../db";
 import {
