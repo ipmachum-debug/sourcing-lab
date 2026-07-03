@@ -625,4 +625,17 @@
   .dark .card-header-gradient {
     background: linear-gradient(135deg, rgba(34,211,238,0.10) 0%, rgba(168,85,247,0.10) 40%, rgba(217,70,239,0.10) 100%);
   }
+  .dark .pretty-input {
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #e6eaf7;
+  }
+  .dark .pastel-gradient-bg,
+  .dark .pastel-page-bg {
+    background: linear-gradient(160deg, #070a1a 0%, #0a0b1e 60%, #06070f 100%) !important;
+  }
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: rgba(148, 163, 184, 0.45) !important;
+  }
 }
