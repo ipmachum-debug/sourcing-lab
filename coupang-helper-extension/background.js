@@ -31,14 +31,12 @@ function generateRequestId() {
 // ---- 설치/업데이트 시 열린 쿠팡 탭 자동 새로고침 ----
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  // 순위 추적 알람 (매 6시간마다)
+  // 순위 추적 알람 (매 6시간마다) — 관심제품(watched) 추적, 유지
   chrome.alarms.create('rankTracking', { periodInMinutes: 360 });
-  // 판매량 추정 배치 알람 (매 12시간마다)
+  // 판매량 추정 배치 알람 (매 12시간마다) — 관심제품 추정, 유지
   chrome.alarms.create('salesEstimateBatch', { periodInMinutes: 720 });
-  // 하이브리드 일일 배치 알람 (매 24시간마다)
-  chrome.alarms.create('dailyBatchCollection', { periodInMinutes: 1440 });
-  // v8.6: 예약 자동수집 알람 (매 2시간마다)
-  chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
+  // v8.8.1: 순수 패시브 전환 — 일괄 크롤(dailyBatchCollection·scheduledAutoCollect) 제거.
+  //   검색 읽기(passive) + on-expand 심화수집(deepScanPolling)만 사용.
   // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
   // R5: 심화수집 폴링 (매 1분마다 원픽 결과 카드 요청 픽업) — scheduleEnabled 옵트인 시에만 실동작
@@ -66,25 +64,13 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
     console.log('[Discovery] 폴링 알람 재생성');
   }
-  // v8.6: 예약 수집 알람 보장 + 경과 시간 기반 즉시 실행
-  const schedData = await chrome.storage.local.get(['scheduleEnabled', 'scheduleLastRun']);
-  if (schedData.scheduleEnabled) {
-    const schedAlarm = await chrome.alarms.get('scheduledAutoCollect').catch(() => null);
-    if (!schedAlarm) {
-      const lastRun = schedData.scheduleLastRun ? new Date(schedData.scheduleLastRun).getTime() : 0;
-      const elapsed = Date.now() - lastRun;
-      const intervalMs = 120 * 60 * 1000;
-      if (elapsed >= intervalMs) {
-        chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-        console.log('[Schedule] 알람 재생성 — 즉시 실행');
-        setTimeout(() => runScheduledAutoCollect(), 5000);
-      } else {
-        const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
-        chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
-        console.log('[Schedule] 알람 재생성 — ' + remainMin + '분 후');
-      }
-    }
-  }
+  // v8.8.1: 순수 패시브 전환 — 예약 자동수집(scheduledAutoCollect) 재생성 제거.
+  //   남아있을 수 있는 일괄 크롤 알람을 정리.
+  chrome.alarms.clear('scheduledAutoCollect').catch(() => {});
+  chrome.alarms.clear('dailyBatchCollection').catch(() => {});
+  // deepScanPolling 알람 보장 (on-expand 심화수집)
+  const dsAlarm = await chrome.alarms.get('deepScanPolling').catch(() => null);
+  if (!dsAlarm) chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
   // 10초 후 즉시 체크
   setTimeout(async () => {
     console.log('[Discovery] 서비스 워커 시작 — 자동 체크 실행');
@@ -109,16 +95,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'salesEstimateBatch') {
     await autoRunSalesEstimate();
   }
-  if (alarm.name === 'dailyBatchCollection') {
-    await autoRunDailyBatch();
-  }
+  // v8.8.1: 순수 패시브 전환 — 일괄 크롤(dailyBatchCollection·scheduledAutoCollect)
+  //   핸들러 무력화. 어떤 경로로 알람이 생겨도 크롤하지 않음.
   // v8.1: AI 제품 발견 자동 폴링
   if (alarm.name === 'discoveryPolling') {
     await discoveryAutoCheck();
-  }
-  // v8.6: 예약 자동수집 (2시간마다)
-  if (alarm.name === 'scheduledAutoCollect') {
-    await runScheduledAutoCollect();
   }
   // R5: 심화수집 폴링 (1분마다)
   if (alarm.name === 'deepScanPolling') {
@@ -928,11 +909,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ===== v6.4: 자동 순회 수집기 (Auto-Collect) =====
     case 'START_AUTO_COLLECT': {
-      startAutoCollect(message.payload || {}).then((result) => {
-        sendResponse(result);
-      }).catch(e => {
-        sendResponse({ ok: false, error: e.message });
-      });
+      // v8.8.1: 순수 패시브 전환 — 일괄 자동수집(크롤) 비활성화.
+      // 검색 읽기(passive) + on-expand 심화수집만 사용.
+      sendResponse({ ok: false, error: 'passive_mode: 자동수집(크롤)은 비활성화되었습니다' });
       return true;
     }
 
@@ -944,32 +923,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // v8.6: 예약 수집 토글
     case 'SCHEDULE_TOGGLE': {
+      // v8.8.1: 순수 패시브 전환 — 예약 자동수집(크롤) 비활성화 고정.
       (async () => {
-        const { scheduleEnabled } = await chrome.storage.local.get('scheduleEnabled');
-        const newVal = !scheduleEnabled;
-        await chrome.storage.local.set({ scheduleEnabled: newVal });
-        if (newVal) {
-          // 마지막 수집으로부터 경과 시간 계산
-          const { scheduleLastRun } = await chrome.storage.local.get('scheduleLastRun');
-          const lastRun = scheduleLastRun ? new Date(scheduleLastRun).getTime() : 0;
-          const elapsed = Date.now() - lastRun;
-          const intervalMs = 120 * 60 * 1000; // 2시간
-          if (elapsed >= intervalMs) {
-            // 이미 2시간 지남 → 즉시 실행 + 이후 2시간 주기
-            chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
-            console.log('[Schedule] 예약 활성화 — 마지막 수집 ' + Math.round(elapsed / 60000) + '분 전 → 즉시 실행');
-            setTimeout(() => runScheduledAutoCollect(), 3000);
-          } else {
-            // 아직 2시간 안됨 → 남은 시간 후 첫 실행
-            const remainMin = Math.max(1, Math.round((intervalMs - elapsed) / 60000));
-            chrome.alarms.create('scheduledAutoCollect', { delayInMinutes: remainMin, periodInMinutes: 120 });
-            console.log('[Schedule] 예약 활성화 — ' + remainMin + '분 후 첫 수집');
-          }
-        } else {
-          chrome.alarms.clear('scheduledAutoCollect');
-          console.log('[Schedule] 예약 수집 비활성화');
-        }
-        sendResponse({ ok: true, enabled: newVal });
+        await chrome.storage.local.set({ scheduleEnabled: false });
+        chrome.alarms.clear('scheduledAutoCollect').catch(() => {});
+        sendResponse({ ok: false, enabled: false, error: 'passive_mode: 예약 자동수집이 제거되었습니다' });
       })();
       return true;
     }
@@ -996,9 +954,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'RESUME_AUTO_COLLECT': {
-      startAutoCollect().then((result) => {
-        sendResponse(result);
-      });
+      // v8.8.1: 순수 패시브 전환 — 일괄 자동수집(크롤) 비활성화.
+      sendResponse({ ok: false, error: 'passive_mode: 자동수집(크롤)은 비활성화되었습니다' });
       return true;
     }
 

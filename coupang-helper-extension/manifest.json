@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.8.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.8.0 — 원픽키워드 심화수집(on-expand) 폴링",
+  "version": "8.8.1",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.8.1 — 순수 패시브 전환(일괄 크롤 제거), 원픽 심화수집",
   "permissions": [
     "storage",
     "tabs",
