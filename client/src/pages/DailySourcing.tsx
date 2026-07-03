@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { toast } from "sonner";
 import { Save, RotateCcw, AlertTriangle, Sparkles, Star, Target, Trophy, ShoppingBag, Factory, Plus, Trash2, ExternalLink, Wand2, Loader2 } from "lucide-react";
 
@@ -120,7 +120,7 @@ function getGradeIcon(grade: string) {
   return <Target className="h-4 w-4" />;
 }
 
-export default function DailySourcing() {
+export default function DailySourcing({ embedded = false }: { embedded?: boolean }) {
   const [form, setForm] = useState<FormData>(defaultForm);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const utils = trpc.useUtils();
@@ -181,8 +181,9 @@ export default function DailySourcing() {
 
   const set = (k: keyof FormData, v: string) => setForm(prev => ({ ...prev, [k]: v }));
 
+  const Wrap = embedded ? Fragment : DashboardLayout;
   return (
-    <DashboardLayout>
+    <Wrap>
       <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -435,6 +436,6 @@ export default function DailySourcing() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </Wrap>
   );
 }

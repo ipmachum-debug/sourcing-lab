@@ -27,6 +27,9 @@ import SearchDemand from "./pages/SearchDemand";
 import MarginCalculator from "./pages/MarginCalculator";
 import NicheFinder from "./pages/NicheFinder";
 import ProductDiscovery from "./pages/ProductDiscovery";
+import KeywordSourcing from "./pages/KeywordSourcing";
+import KeywordSourcingResults from "./pages/KeywordSourcingResults";
+import MySourcing from "./pages/MySourcing";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -45,11 +48,11 @@ function Router() {
       <Route path="/" component={Landing} />
       <Route path="/login" component={Landing} />
       <Route path="/dashboard" component={Dashboard} />
-      <Route path="/daily" component={DailySourcing} />
+      <Route path="/daily" component={DailySourcing as any} />
       <Route path="/daily-profit" component={DailyProfitBoard} />
-      <Route path="/products" component={Products} />
+      <Route path="/products" component={Products as any} />
       <Route path="/products/:id" component={ProductDetail} />
-      <Route path="/test-candidates" component={TestCandidates} />
+      <Route path="/test-candidates" component={TestCandidates as any} />
       <Route path="/weekly-review" component={WeeklyReview} />
       <Route path="/register" component={Register} />
       <Route path="/forgot-password" component={ForgotPassword} />
@@ -61,6 +64,9 @@ function Router() {
       <Route path="/coupang" component={CoupangManager} />
       <Route path="/demand" component={SearchDemand} />
       <Route path="/margin" component={MarginCalculator} />
+      <Route path="/sourcing" component={KeywordSourcing} />
+      <Route path="/sourcing/results" component={KeywordSourcingResults} />
+      <Route path="/my-sourcing" component={MySourcing} />
       <Route path="/niche-finder" component={NicheFinder} />
       <Route path="/discovery" component={ProductDiscovery} />
       <Route path="/sourcing-helper" component={SourcingHelper} />

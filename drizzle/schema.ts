@@ -1655,3 +1655,116 @@ export const mktCompetitors = mysqlTable("mkt_competitors", {
 
 export type MktCompetitor = typeof mktCompetitors.$inferSelect;
 export type InsertMktCompetitor = typeof mktCompetitors.$inferInsert;
+
+// ==================== 공유 시장 풀 (market_keyword_stats) ====================
+// ★ 전 유저 공유 풀 (userId 없음). 유저별 ext_keyword_daily_stats를
+//   정규화 키워드 단위로 병합한 "현재 시장 진실" 1행/키워드.
+//   → 꿀통키워드 소싱이 이 테이블만 조회하므로 초보자도 즉시 결과를 봄.
+export const marketKeywordStats = mysqlTable("market_keyword_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  normalizedKeyword: varchar("normalized_keyword", { length: 255 }).notNull().unique(),
+  categoryHint: varchar("category_hint", { length: 100 }),
+  // 시장 지표 (대표 스냅샷에서 병합)
+  productCount: int("product_count").default(0),
+  avgPrice: int("avg_price").default(0),
+  minPrice: int("min_price").default(0),
+  maxPrice: int("max_price").default(0),
+  medianPrice: int("median_price").default(0),
+  totalReviewSum: int("total_review_sum").default(0),
+  avgReview: int("avg_review").default(0),
+  // 효자상품(매출1위) 리뷰수 — maxReview 슬라이더 필터 대상
+  topProductReviewCount: int("top_product_review_count").default(0),
+  competitionScore: int("competition_score").default(0),
+  competitionLevel: mysqlEnum("competition_level", ["easy", "medium", "hard"]).default("medium"),
+  rocketCount: int("rocket_count").default(0),
+  // 판매/매출 추정
+  salesEstimateDaily: int("sales_estimate_daily").default(0),      // 일 판매 추정
+  monthlySales: int("monthly_sales").default(0),                   // 월 판매 추정
+  monthlyRevenue: decimal("monthly_revenue", { precision: 16, scale: 0 }).default("0"), // 월 매출(원)
+  // 점수/등급
+  keywordScore: int("keyword_score").default(0),                   // HiddenScore
+  demandScore: int("demand_score").default(0),
+  honeypotScore: int("honeypot_score").default(0),                 // 꿀통 스코어 0~100
+  grade: mysqlEnum("grade", ["S_PLUS", "S", "A", "B", "C"]).default("C"),
+  spikeLevel: varchar("spike_level", { length: 20 }).default("normal"),
+  // 데이터 신뢰도 (병합 출처)
+  contributorCount: int("contributor_count").default(0),           // 병합된 distinct 유저 수
+  sampleSnapshotCount: int("sample_snapshot_count").default(0),
+  lastObservedDate: varchar("last_observed_date", { length: 10 }), // YYYY-MM-DD
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketKeywordStat = typeof marketKeywordStats.$inferSelect;
+export type InsertMarketKeywordStat = typeof marketKeywordStats.$inferInsert;
+
+// ==================== 공유 시장 풀: 효자상품 (market_product_stats) ====================
+// 키워드별 상위 상품(효자상품). ext_product_sales_estimates + ext_product_trackings 병합.
+export const marketProductStats = mysqlTable("market_product_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  normalizedKeyword: varchar("normalized_keyword", { length: 255 }).notNull(),
+  coupangProductId: varchar("coupang_product_id", { length: 50 }).notNull(),
+  productName: varchar("product_name", { length: 500 }).notNull(),
+  price: int("price").default(0),
+  reviewCount: int("review_count").default(0),
+  rating: decimal("rating", { precision: 3, scale: 1 }).default("0"),
+  estMonthlySales: int("est_monthly_sales").default(0),
+  estMonthlyRevenue: decimal("est_monthly_revenue", { precision: 16, scale: 0 }).default("0"),
+  salesGrade: mysqlEnum("sales_grade", ["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"]).default("MEDIUM"),
+  rankInKeyword: int("rank_in_keyword").default(0),                // 키워드 내 매출 순위 1,2,3…
+  lastObservedDate: varchar("last_observed_date", { length: 10 }),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketProductStat = typeof marketProductStats.$inferSelect;
+export type InsertMarketProductStat = typeof marketProductStats.$inferInsert;
+
+// ==================== 심화수집 큐 (market_scan_queue) ====================
+// R5: 웹앱에서 결과 카드 펼침 → 여기 큐 등록 → 확장이 폴링 픽업 → 상세 수집.
+// target_id(상품ID) 유니크 — 상품당 1행, 상태만 갱신. 좀비 방지: running_expires_at.
+export const marketScanQueue = mysqlTable("market_scan_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  scanType: mysqlEnum("scan_type", ["product_detail"]).default("product_detail").notNull(),
+  targetId: varchar("target_id", { length: 50 }).notNull().unique(), // coupang product id
+  keyword: varchar("keyword", { length: 255 }),                      // 트리거한 키워드(참고)
+  status: mysqlEnum("status", ["pending", "running", "done", "failed"]).default("pending").notNull(),
+  priority: int("priority").default(50),
+  requestedBy: int("requested_by"),                                  // 요청 유저(분석용)
+  attempts: int("attempts").default(0),
+  runningExpiresAt: timestamp("running_expires_at", tsOpts),         // running 좀비 복구 기한
+  lastError: varchar("last_error", { length: 500 }),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketScanQueue = typeof marketScanQueue.$inferSelect;
+export type InsertMarketScanQueue = typeof marketScanQueue.$inferInsert;
+
+// ============ 공유 상품 상세 풀 (market_shared_product_details_pool) ============
+// 상품 고유 상세정보(판매자·원산지·옵션 등). product_id 유니크(키워드 무관).
+// TTL(last_scanned_at 기준)로 신선도 관리 — deepScanService 참조.
+export const marketProductDetails = mysqlTable("market_shared_product_details_pool", {
+  id: int("id").autoincrement().primaryKey(),
+  coupangProductId: varchar("coupang_product_id", { length: 50 }).notNull().unique(),
+  productName: varchar("product_name", { length: 500 }),
+  mainImageUrl: varchar("main_image_url", { length: 1000 }),
+  currentPrice: int("current_price").default(0),
+  sellerName: varchar("seller_name", { length: 255 }),
+  sellerGrade: varchar("seller_grade", { length: 50 }),
+  sellerProductCount: int("seller_product_count").default(0),        // 판매자 총 상품수(경쟁규모)
+  optionCount: int("option_count").default(0),
+  optionJson: json("option_json"),
+  deliveryType: varchar("delivery_type", { length: 30 }),            // rocket/seller_rocket/global/normal/overseas
+  originCountry: varchar("origin_country", { length: 100 }),
+  brand: varchar("brand", { length: 255 }),
+  categoryPath: varchar("category_path", { length: 500 }),
+  detailImagesCount: int("detail_images_count").default(0),
+  rating: decimal("rating", { precision: 3, scale: 1 }).default("0"),
+  reviewCount: int("review_count").default(0),
+  discoveredViaKeyword: varchar("discovered_via_keyword", { length: 255 }),
+  firstScannedAt: timestamp("first_scanned_at", tsOpts).defaultNow().notNull(),
+  lastScannedAt: timestamp("last_scanned_at", tsOpts).defaultNow().notNull(),
+});
+
+export type MarketProductDetail = typeof marketProductDetails.$inferSelect;
+export type InsertMarketProductDetail = typeof marketProductDetails.$inferInsert;

@@ -26,6 +26,7 @@ import { marginRouter } from "./routers/margin.router";
 import { keywordDiscoveryRouter } from "./routers/keywordDiscovery.router";
 import { aliValidationRouter } from "./routers/aliValidation.router";
 import { marketingRouter } from "./routers/marketing";
+import { sourcingWizardRouter } from "./routers/sourcingWizard.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -47,6 +48,7 @@ export const appRouter = router({
   keywordDiscovery: keywordDiscoveryRouter,
   aliValidation: aliValidationRouter,
   marketing: marketingRouter,
+  sourcingWizard: sourcingWizardRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

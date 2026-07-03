@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, Fragment } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { FlaskConical, Play, Pause, X, Star, RefreshCw, Loader2 } from "lucide-react";
 
-export default function TestCandidates() {
+export default function TestCandidates({ embedded = false }: { embedded?: boolean }) {
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
 
@@ -45,8 +45,9 @@ export default function TestCandidates() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const Wrap = embedded ? Fragment : DashboardLayout;
   return (
-    <DashboardLayout>
+    <Wrap>
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <div>
@@ -144,6 +145,6 @@ export default function TestCandidates() {
           </div>
         )}
       </div>
-    </DashboardLayout>
+    </Wrap>
   );
 }
