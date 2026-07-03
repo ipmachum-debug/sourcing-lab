@@ -266,6 +266,15 @@ class ApiClient {
     return this._call('extension.getDetailHistory', opts, 'query');
   }
 
+  // ===== R5: 심화수집 (원픽키워드 결과 카드 on-expand) =====
+  async pollDeepScanTask() {
+    return this._call('sourcingWizard.pollDeepScanTask', undefined, 'mutation');
+  }
+
+  async submitDeepScanResult(data) {
+    return this._call('sourcingWizard.submitDeepScanResult', data, 'mutation');
+  }
+
   // ===== v8.0: AI 제품 발견 시스템 =====
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');

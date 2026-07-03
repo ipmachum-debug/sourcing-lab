@@ -41,6 +41,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('scheduledAutoCollect', { periodInMinutes: 120 });
   // v8.1: AI 제품 발견 자동 폴링 (매 1분마다 pending job 확인)
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
+  // R5: 심화수집 폴링 (매 1분마다 원픽 결과 카드 요청 픽업) — scheduleEnabled 옵트인 시에만 실동작
+  chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -117,6 +119,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // v8.6: 예약 자동수집 (2시간마다)
   if (alarm.name === 'scheduledAutoCollect') {
     await runScheduledAutoCollect();
+  }
+  // R5: 심화수집 폴링 (1분마다)
+  if (alarm.name === 'deepScanPolling') {
+    await runDeepScanPoll();
   }
 });
 
@@ -2713,6 +2719,134 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     pauseAutoCollect();
   }
 });
+
+// ============================================================
+//  R5: 심화수집 폴링 워커
+//  웹앱 원픽 결과 카드 펼침 → 서버 큐 → 여기서 픽업 → 상세 수집 → 제출.
+//  옵트인(scheduleEnabled) + 쿠팡 탭 확보 시에만 동작. 활성 탭 하이재킹 방지를
+//  위해 ensureCoupangTab(전용 탭 로직)을 재사용한다.
+// ============================================================
+async function runDeepScanPoll() {
+  // 1) 옵트인 + 로그인 게이트 (기여 동의 재사용)
+  const { serverLoggedIn, scheduleEnabled } = await chrome.storage.local.get(['serverLoggedIn', 'scheduleEnabled']);
+  if (!serverLoggedIn || !scheduleEnabled) return;
+
+  // 2) 배치 수집기 실행 중이면 스킵 (탭 충돌 방지)
+  if (collector.running) return;
+
+  // 3) 열려있는 쿠팡 탭이 있을 때만 (유저가 브라우징 중일 때만 동작)
+  const openTabs = await chrome.tabs.query({ url: 'https://www.coupang.com/*' });
+  if (!openTabs || openTabs.length === 0) return;
+
+  // 4) 서버에서 작업 1건 픽업
+  let task;
+  try {
+    const resp = await apiClient.pollDeepScanTask();
+    task = resp?.result?.data;
+  } catch (e) {
+    console.warn('[DeepScan] poll 실패:', e.message);
+    return;
+  }
+  if (!task || !task.targetId) return;
+
+  console.log(`[DeepScan] 작업 픽업: ${task.targetId} (kw: ${task.keyword || '-'})`);
+
+  // 5) 전용 탭 확보 후 상세 수집
+  let tabId;
+  try {
+    tabId = await ensureCoupangTab();
+  } catch (e) {
+    console.warn('[DeepScan] 탭 확보 실패:', e.message);
+    return;
+  }
+  if (!tabId) return;
+
+  const result = await scanDetailForDeepScan(tabId, task.targetId, task.keyword);
+  if (!result) {
+    // 실패 시 제출 안 함 → 서버가 running_expires_at 경과 후 재큐
+    console.warn('[DeepScan] 상세 파싱 실패, 재큐 대기:', task.targetId);
+    return;
+  }
+
+  // 6) 결과 매핑 + 서버 제출
+  const detail = {
+    productName: result.title || undefined,
+    mainImageUrl: result.imageUrl || undefined,
+    currentPrice: result.price || undefined,
+    sellerName: result.sellerName || undefined,
+    optionCount: result.optionCount || undefined,
+    optionJson: result.optionSummary || undefined,
+    deliveryType: result.deliveryType || undefined,
+    originCountry: result.origin || undefined,
+    brand: result.brandName || undefined,
+    categoryPath: result.categoryPath || undefined,
+    rating: result.rating || undefined,
+    reviewCount: result.reviewCount || undefined,
+    discoveredViaKeyword: task.keyword || undefined,
+  };
+  try {
+    await apiClient.submitDeepScanResult({ targetId: task.targetId, detail });
+    console.log(`[DeepScan] ✅ 제출 완료: ${task.targetId}`);
+  } catch (e) {
+    console.warn('[DeepScan] 제출 실패:', e.message);
+  }
+}
+
+// 상세 페이지로 이동 → content-detail.js 파싱 → 결과 반환 (서버 저장은 호출측에서)
+function scanDetailForDeepScan(tabId, productId, keyword) {
+  return new Promise(async (resolve) => {
+    const detailUrl = `https://www.coupang.com/vp/products/${productId}`;
+    const requestId = generateRequestId();
+
+    try {
+      await chrome.tabs.update(tabId, { url: detailUrl });
+    } catch (e) {
+      resolve(null);
+      return;
+    }
+
+    // 로드 완료 대기 (최대 20초)
+    await new Promise((r) => {
+      const listener = (tid, changeInfo) => {
+        if (tid === tabId && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          r();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); r(); }, 20000);
+    });
+
+    // DOM 안정화 (3~6초 + 지터)
+    await collectorSleep(addJitter(3000 + Math.floor(Math.random() * 3000)));
+
+    // content-detail.js에 파싱 요청 (1회 재시도)
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'START_PARSE_DETAIL', requestId, productId, keyword, isAutoCollect: true });
+    } catch (e) {
+      await collectorSleep(3000);
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: 'START_PARSE_DETAIL', requestId, productId, keyword, isAutoCollect: true });
+      } catch (e2) {
+        resolve(null);
+        return;
+      }
+    }
+
+    // 응답 대기 (최대 20초)
+    const handler = (msg) => {
+      if (msg.type === 'DETAIL_PARSE_SUCCESS' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        resolve(msg.result || null);
+      } else if (msg.type === 'DETAIL_PARSE_FAILED' && msg.requestId === requestId) {
+        chrome.runtime.onMessage.removeListener(handler);
+        resolve(null);
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    setTimeout(() => { chrome.runtime.onMessage.removeListener(handler); resolve(null); }, 20000);
+  });
+}
 
 // ============================================================
 //  v8.0: AI 제품 발견 크롤링 파이프라인
