@@ -10,9 +10,9 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.8.1";
+const EXTENSION_LATEST_VERSION = "8.8.2";
 const EXTENSION_CHANGELOG = [
-  "순수 패시브 전환 — 플로팅 '자동 수집' 크롤러 제거 (봇 리스크↓)",
+  "순수 패시브 완성 — 사이드패널 '수집' 탭 + 플로팅 자동수집 크롤러 제거",
   "검색으로 보는 데이터만 읽고, 원픽 결과 펼칠 때 상세 수집(on-expand)",
   "관심 상품 추적은 그대로 유지",
 ];
@@ -62,8 +62,9 @@ export const marketDataRouter = router({
         createdAt: keywordSearchVolumeHistory.createdAt,
       })
         .from(keywordSearchVolumeHistory)
+        // ★ 전역 공유 7일 캐시(userId 무관): 아무 유저나 7일 내 조회했으면 재사용
+        //   → 인기 키워드 네이버 API 중복 호출 방지, 429 리스크↓
         .where(and(
-          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
           eq(keywordSearchVolumeHistory.source, "naver"),
           sql`${keywordSearchVolumeHistory.createdAt} >= ${sevenDaysAgoStr}`,
         ));
@@ -120,7 +121,6 @@ export const marketDataRouter = router({
         })
           .from(keywordSearchVolumeHistory)
           .where(and(
-            eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
             eq(keywordSearchVolumeHistory.source, "naver"),
             eq(keywordSearchVolumeHistory.keyword, mainKw),
           ))
@@ -139,7 +139,6 @@ export const marketDataRouter = router({
             })
               .from(keywordSearchVolumeHistory)
               .where(and(
-                eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
                 eq(keywordSearchVolumeHistory.source, "naver"),
                 eq(keywordSearchVolumeHistory.keyword, cleaned),
               ))
@@ -284,10 +283,8 @@ export const marketDataRouter = router({
 
       const rows = await db.select()
         .from(keywordSearchVolumeHistory)
-        .where(and(
-          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
-          eq(keywordSearchVolumeHistory.keyword, input.keyword),
-        ))
+        // ★ 전역 공유(userId 무관): 네이버 검색량 월별 히스토리는 유저 불문 공용
+        .where(eq(keywordSearchVolumeHistory.keyword, input.keyword))
         .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
         .limit(input.months);
 
@@ -407,29 +404,28 @@ export const marketDataRouter = router({
         .orderBy(desc(extSearchSnapshots.createdAt))
         .limit(1);
 
-      // 검색량 최신 데이터
+      // 검색량 최신 데이터 — ★ 전역 공유 캐시(userId 무관): 아무 유저나 조회한
+      // 네이버 검색량을 전 유저가 공유 → 인기 키워드 중복 API 호출 방지.
       let [volume] = await db.select()
         .from(keywordSearchVolumeHistory)
         .where(and(
-          eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
           eq(keywordSearchVolumeHistory.keyword, input.keyword),
           eq(keywordSearchVolumeHistory.source, "naver"),
         ))
-        .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
+        .orderBy(desc(keywordSearchVolumeHistory.yearMonth), desc(keywordSearchVolumeHistory.createdAt))
         .limit(1);
 
-      // ★ v8.4.4: 원본 키워드로 못 찾으면 공백 제거 버전으로 재시도
+      // ★ v8.4.4: 원본 키워드로 못 찾으면 공백 제거 버전으로 재시도 (전역)
       if (!volume) {
         const cleaned = input.keyword.replace(/\s+/g, "");
         if (cleaned !== input.keyword) {
           [volume] = await db.select()
             .from(keywordSearchVolumeHistory)
             .where(and(
-              eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
               eq(keywordSearchVolumeHistory.keyword, cleaned),
               eq(keywordSearchVolumeHistory.source, "naver"),
             ))
-            .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
+            .orderBy(desc(keywordSearchVolumeHistory.yearMonth), desc(keywordSearchVolumeHistory.createdAt))
             .limit(1);
         }
       }
@@ -567,10 +563,8 @@ export const marketDataRouter = router({
           yearMonth: keywordSearchVolumeHistory.yearMonth,
         })
           .from(keywordSearchVolumeHistory)
-          .where(and(
-            eq(keywordSearchVolumeHistory.userId, ctx.user!.id),
-            eq(keywordSearchVolumeHistory.keyword, keyword),
-          ))
+          // ★ 전역 공유(userId 무관)
+          .where(eq(keywordSearchVolumeHistory.keyword, keyword))
           .orderBy(desc(keywordSearchVolumeHistory.yearMonth))
           .limit(1);
 

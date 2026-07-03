@@ -22,7 +22,8 @@
     <!-- ========== 탭 네비게이션 (v8.5 정리) ========== -->
     <nav class="tabs">
       <button class="tab active" data-tab="analysis">📊 분석</button>
-      <button class="tab" data-tab="demand">🔥 수집</button>
+      <!-- v8.8.2: 순수 패시브 전환 — '수집'(크롤) 탭 제거 -->
+      <button class="tab" data-tab="demand" style="display:none">🔥 수집</button>
       <button class="tab" data-tab="wing">🦅 WING</button>
       <button class="tab" data-tab="history">📋 이력</button>
       <button class="tab" data-tab="calculator">🧮 마진</button>
