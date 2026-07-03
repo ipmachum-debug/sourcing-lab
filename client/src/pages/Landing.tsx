@@ -21,14 +21,14 @@ export default function Landing() {
 
   useEffect(() => {
     if (!isLoading && user) {
-      setLocation("/dashboard");
+      setLocation("/home");
     }
   }, [user, isLoading, setLocation]);
   
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: () => {
       toast.success("로그인 성공! 환영합니다! ✨");
-      window.location.href = "/dashboard";
+      window.location.href = "/home";
     },
     onError: (error) => {
       toast.error(error.message);

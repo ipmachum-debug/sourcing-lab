@@ -22,7 +22,7 @@ export default function Login() {
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: () => {
       toast.success("로그인 성공! 환영합니다! ✨");
-      window.location.href = "/dashboard";
+      window.location.href = "/home";
     },
     onError: (error) => {
       toast.error(error.message || "로그인에 실패했습니다.");

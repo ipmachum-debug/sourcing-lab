@@ -31,6 +31,7 @@ import KeywordSourcing from "./pages/KeywordSourcing";
 import KeywordSourcingResults from "./pages/KeywordSourcingResults";
 import MySourcing from "./pages/MySourcing";
 import InventoryBet from "./pages/InventoryBet";
+import Home from "./pages/Home";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -48,6 +49,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Landing} />
       <Route path="/login" component={Landing} />
+      <Route path="/home" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/daily" component={DailySourcing as any} />
       <Route path="/daily-profit" component={DailyProfitBoard} />
