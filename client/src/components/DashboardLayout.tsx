@@ -117,12 +117,13 @@ const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "홈", path: "/home", emoji: "🏠", section: "main" },
   { icon: Gem, label: "소싱", path: "/sourcing", emoji: "🔎", section: "main" },
   { icon: Dices, label: "재고 배팅", path: "/inventory-bet", emoji: "🎲", section: "main" },
-  { icon: Calculator, label: "계산기", path: "/margin", emoji: "🧮", section: "main" },
+  { icon: Calculator, label: "계산기", path: "/quick-margin", emoji: "🧮", section: "main" },
   { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: TrendingUp, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
+  { icon: Sliders, label: "상세 계산기", path: "/margin", emoji: "🧮", section: "advanced", group: "소싱 상세" },
   { icon: Gem, label: "니치 파인더", path: "/niche-finder", emoji: "💎", section: "advanced", group: "소싱 상세" },
   { icon: Activity, label: "검색 수요", path: "/demand", emoji: "📊", section: "advanced", group: "소싱 상세" },
   { icon: Sparkles, label: "AI 제품 발견", path: "/discovery", emoji: "🔍", section: "advanced", group: "소싱 상세" },

@@ -6,13 +6,13 @@ import { Search, Dices, Calculator, Package, ArrowRight, Sparkles } from "lucide
 const ACTIONS = [
   { icon: Search, emoji: "🔎", title: "원픽 소싱", desc: "지금 뜨는 쿠팡 키워드를 데이터로 골라드려요", path: "/sourcing", tone: "cyan" },
   { icon: Dices, emoji: "🎲", title: "재고 배팅", desc: "언제·얼마나 발주할지 3단계로 추천", path: "/inventory-bet", tone: "magenta" },
-  { icon: Calculator, emoji: "🧮", title: "계산기", desc: "마진·순수익을 빠르게 계산", path: "/margin", tone: "violet" },
+  { icon: Calculator, emoji: "🧮", title: "계산기", desc: "마진·순수익을 빠르게 계산", path: "/quick-margin", tone: "violet" },
   { icon: Package, emoji: "📌", title: "내 소싱", desc: "관심 상품·테스트 후보 관리", path: "/my-sourcing", tone: "emerald" },
 ];
 
 const STEPS = [
   { n: 1, title: "팔릴 상품 찾기", desc: "원픽 소싱으로 수익성 높은 키워드 발굴", path: "/sourcing" },
-  { n: 2, title: "마진 확인", desc: "계산기로 남는 장사인지 체크", path: "/margin" },
+  { n: 2, title: "마진 확인", desc: "빠른 마진으로 남는 장사인지 체크", path: "/quick-margin" },
   { n: 3, title: "발주 결정", desc: "재고 배팅으로 얼마나 걸지 판단", path: "/inventory-bet" },
 ];
 

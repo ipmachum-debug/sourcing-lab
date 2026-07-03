@@ -32,6 +32,7 @@ import KeywordSourcingResults from "./pages/KeywordSourcingResults";
 import MySourcing from "./pages/MySourcing";
 import InventoryBet from "./pages/InventoryBet";
 import Home from "./pages/Home";
+import QuickMargin from "./pages/QuickMargin";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/settings/accounts" component={AccountSettings} />
       <Route path="/coupang" component={CoupangManager} />
       <Route path="/demand" component={SearchDemand} />
+      <Route path="/quick-margin" component={QuickMargin} />
       <Route path="/margin" component={MarginCalculator} />
       <Route path="/sourcing" component={KeywordSourcing} />
       <Route path="/sourcing/results" component={KeywordSourcingResults} />
