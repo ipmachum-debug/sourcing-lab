@@ -40,10 +40,10 @@ interface Item {
 }
 
 const TIER_LABEL: Record<string, string> = {
-  beginner: "초보 키워드",
-  intermediate: "중수 키워드",
-  advanced: "고수 키워드",
-  trend: "트렌드 키워드",
+  beginner: "새싹 원픽",
+  intermediate: "성장 원픽",
+  advanced: "메이저 원픽",
+  trend: "라이징 원픽",
 };
 
 const GRADE_STYLE: Record<string, string> = {
@@ -408,14 +408,14 @@ function LoadingView({ tier, keywords, categories, products }: { tier: string; k
   return (
     <div className="max-w-2xl mx-auto text-center pt-10 space-y-6">
       <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
-        ● AI SOURCING ENGINE
+        ● ONEPICK ENGINE
       </span>
       <div>
         <span className="inline-block text-xs font-semibold text-pink-600 bg-pink-50 px-3 py-1 rounded-full mb-4">
           {TIER_LABEL[tier] ?? tier}
         </span>
-        <h1 className="text-3xl font-bold">쿠팡 키워드 DB 분석 중..</h1>
-        <p className="text-sm text-muted-foreground mt-2">키워드 필터링 중...</p>
+        <h1 className="text-3xl font-bold">원픽 엔진 가동 중..</h1>
+        <p className="text-sm text-muted-foreground mt-2">조건에 맞는 키워드를 고르는 중...</p>
       </div>
       <div className="text-right">
         <span className="text-4xl font-bold text-emerald-500">{Math.min(pct, 99)}%</span>

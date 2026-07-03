@@ -16,10 +16,10 @@ const TIERS: {
   range: string;
   desc: string;
 }[] = [
-  { key: "beginner", badge: "입문추천", badgeColor: "text-green-600 bg-green-50", name: "초보 키워드", dot: "bg-green-500", range: "월매출 300만~1,000만", desc: "소자본으로 시작하기 좋은 안전한 시장" },
-  { key: "intermediate", badge: "안정매출", badgeColor: "text-yellow-600 bg-yellow-50", name: "중수 키워드", dot: "bg-yellow-500", range: "월매출 1,000만~3,000만", desc: "매출 규모가 검증된 중급 시장" },
-  { key: "advanced", badge: "고수익", badgeColor: "text-red-600 bg-red-50", name: "고수 키워드", dot: "bg-red-500", range: "월매출 3,000만+", desc: "큰 매출을 노리는 경쟁 시장" },
-  { key: "trend", badge: "급성장", badgeColor: "text-purple-600 bg-purple-50", name: "트렌드 키워드", dot: "bg-purple-500", range: "리뷰 50 이하 + 3,000만+", desc: "리뷰가 적지만 매출이 터지는 신규 시장" },
+  { key: "beginner", badge: "🌱 소자본", badgeColor: "text-green-600 bg-green-50", name: "새싹 원픽", dot: "bg-green-500", range: "월 300만~1,000만", desc: "적은 자본으로 안전하게 첫 발을 떼는 시장" },
+  { key: "intermediate", badge: "📈 성장", badgeColor: "text-sky-600 bg-sky-50", name: "성장 원픽", dot: "bg-sky-500", range: "월 1,000만~3,000만", desc: "수요가 검증돼 규모를 키우기 좋은 시장" },
+  { key: "advanced", badge: "🏆 대형", badgeColor: "text-rose-600 bg-rose-50", name: "메이저 원픽", dot: "bg-rose-500", range: "월 3,000만+", desc: "경쟁을 뚫고 큰 매출을 노리는 시장" },
+  { key: "trend", badge: "⚡ 급부상", badgeColor: "text-violet-600 bg-violet-50", name: "라이징 원픽", dot: "bg-violet-500", range: "리뷰 50↓ · 월 3,000만+", desc: "리뷰는 적은데 매출이 터지는 신흥 시장" },
 ];
 
 const CATEGORIES = [
@@ -29,11 +29,11 @@ const CATEGORIES = [
 
 const TAGS: { key: string; label: string }[] = [
   { key: "surge", label: "🔥 급상승" },
-  { key: "new", label: "🆕 新 신규" },
-  { key: "blue_ocean", label: "💎 블루오션" },
-  { key: "seasonal", label: "🗓️ 계절성" },
-  { key: "rocket_gap", label: "🚀 로켓공백" },
-  { key: "high_price", label: "👑 고단가" },
+  { key: "new", label: "✨ 신규 진입" },
+  { key: "blue_ocean", label: "🌊 블루오션" },
+  { key: "seasonal", label: "🗓️ 시즌템" },
+  { key: "rocket_gap", label: "🚀 로켓 공백" },
+  { key: "high_price", label: "💎 고단가" },
 ];
 
 export default function KeywordSourcing() {
@@ -63,15 +63,15 @@ export default function KeywordSourcing() {
         {/* 헤더 */}
         <div className="text-center pt-4">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-pink-500 bg-pink-50 px-3 py-1 rounded-full">
-            🔎 AI 소싱
+            🔎 원픽 엔진
           </span>
-          <h1 className="text-3xl font-bold mt-4 gradient-text">AI 원픽키워드 소싱</h1>
-          <p className="text-muted-foreground mt-2">AI가 수익성 높은 쿠팡 키워드를 찾아드립니다</p>
+          <h1 className="text-3xl font-bold mt-4 gradient-text">오늘의 원픽키워드</h1>
+          <p className="text-muted-foreground mt-2">쿠팡 판매 데이터로, 지금 통하는 원픽키워드만 골라드려요</p>
         </div>
 
         {/* ① 티어 */}
         <section>
-          <StepTitle n={1} title="어떤 키워드를 찾으시나요?" sub="원하는 키워드 티어를 하나 선택해주세요" />
+          <StepTitle n={1} title="어느 규모의 시장을 노리세요?" sub="매출 규모로 시장 등급을 하나 골라주세요" />
           <div className="grid sm:grid-cols-2 gap-3 mt-4">
             {TIERS.map(t => {
               const active = tier === t.key;
@@ -107,7 +107,7 @@ export default function KeywordSourcing() {
 
         {/* ② 리뷰 슬라이더 */}
         <section>
-          <StepTitle n={2} title="효자상품 최대 리뷰수" sub="매출 1위 효자상품의 리뷰가 이 수 이하인 원픽키워드만 보여드립니다" />
+          <StepTitle n={2} title="1위 상품 리뷰 상한" sub="1위 상품 리뷰가 이보다 적은(=뚫기 쉬운) 키워드만 골라요" />
           <Card className="p-6 mt-4">
             <div className="flex items-end justify-between mb-4">
               <div>
@@ -117,7 +117,7 @@ export default function KeywordSourcing() {
                 </p>
               </div>
               <span className="text-xs text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
-                ⓘ 리뷰가 적을수록 진입 난이도가 낮아요!
+                👍 리뷰가 적을수록 뚫기 쉬워요
               </span>
             </div>
             <input
@@ -138,7 +138,7 @@ export default function KeywordSourcing() {
 
         {/* ③ 카테고리 */}
         <section>
-          <StepTitle n={3} title="소싱할 상품 카테고리" sub="특정 카테고리만 소싱하려면 선택하세요 (미선택 시 전체)" />
+          <StepTitle n={3} title="관심 카테고리" sub="특정 카테고리만 볼거면 선택하세요 (안 고르면 전체)" />
           <div className="grid sm:grid-cols-3 gap-2.5 mt-4">
             {CATEGORIES.map(c => {
               const active = category === c;
@@ -164,7 +164,7 @@ export default function KeywordSourcing() {
 
         {/* ④ 태그 */}
         <section>
-          <StepTitle n={4} title="관심 태그 선택" sub="(복수 선택 가능)" />
+          <StepTitle n={4} title="시장 성향 태그" sub="원하는 성향을 골라요 (복수 선택 가능)" />
           <div className="flex flex-wrap gap-2 mt-4">
             {TAGS.map(t => {
               const active = tags.includes(t.key);
@@ -195,9 +195,9 @@ export default function KeywordSourcing() {
             className="w-full h-14 text-base font-semibold bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 disabled:opacity-40"
           >
             {tier ? (
-              <span className="flex items-center gap-2">소싱 시작하기 <Rocket className="h-4 w-4" /></span>
+              <span className="flex items-center gap-2">원픽 찾기 시작 <Rocket className="h-4 w-4" /></span>
             ) : (
-              "키워드 티어를 선택해주세요"
+              "먼저 시장 등급을 골라주세요"
             )}
           </Button>
         </div>
