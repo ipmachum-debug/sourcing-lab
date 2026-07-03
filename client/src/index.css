@@ -607,4 +607,22 @@
       radial-gradient(50% 40% at 100% 0%, rgba(124, 58, 237, 0.10), transparent 60%),
       linear-gradient(160deg, #070a1a 0%, #0a0b1e 60%, #06070f 100%);
   }
+
+  /* 다크 스코프에서 커스텀(핑크 하드코딩) 카드들을 글래스로 전환 */
+  .dark .pretty-card {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(12px);
+  }
+  .dark .pretty-card:hover {
+    border-color: rgba(34, 211, 238, 0.4);
+    box-shadow: 0 12px 40px rgba(34, 211, 238, 0.12);
+  }
+  .dark .summary-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(168,85,247,0.06) 100%) !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.35) !important;
+  }
+  .dark .card-header-gradient {
+    background: linear-gradient(135deg, rgba(34,211,238,0.10) 0%, rgba(168,85,247,0.10) 40%, rgba(217,70,239,0.10) 100%);
+  }
 }
