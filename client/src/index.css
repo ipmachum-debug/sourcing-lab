@@ -474,3 +474,130 @@
     opacity: 1;
   }
 }
+
+/* ============================================================
+   ONEPICK — 미래도시 네온 디자인 시스템 (원픽 소싱/재고배팅)
+   ============================================================ */
+@layer utilities {
+  /* 다크 스테이지: 딥 네이비 + 네온 오브 + 그리드 */
+  .cyber-stage {
+    position: relative;
+    isolation: isolate;
+    border-radius: 1.5rem;
+    overflow: hidden;
+    background:
+      radial-gradient(60% 50% at 15% 0%, rgba(168, 85, 247, 0.22), transparent 60%),
+      radial-gradient(55% 45% at 90% 10%, rgba(34, 211, 238, 0.20), transparent 60%),
+      radial-gradient(70% 60% at 50% 110%, rgba(233, 53, 193, 0.18), transparent 60%),
+      linear-gradient(160deg, #070a1a 0%, #0a0b22 55%, #06070f 100%);
+    color: #e6eaf7;
+  }
+  /* 움직이는 그리드 라인 오버레이 */
+  .cyber-stage::before {
+    content: "";
+    position: absolute;
+    inset: -50%;
+    z-index: -1;
+    background-image:
+      linear-gradient(rgba(120, 160, 255, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 160, 255, 0.07) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(closest-side at 50% 40%, #000 60%, transparent 100%);
+    animation: grid-pan 22s linear infinite;
+  }
+  @keyframes grid-pan {
+    0% { transform: translate3d(0, 0, 0); }
+    100% { transform: translate3d(44px, 44px, 0); }
+  }
+
+  /* 글래스모피즘 카드 */
+  .glass {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .glass-hover:hover {
+    transform: translateY(-3px);
+    border-color: rgba(34, 211, 238, 0.55);
+    box-shadow: 0 14px 50px rgba(34, 211, 238, 0.16), 0 0 0 1px rgba(34, 211, 238, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+  /* 선택된 카드 — 마젠타/바이올렛 글로우 */
+  .glass-active {
+    border-color: rgba(217, 70, 239, 0.7) !important;
+    box-shadow: 0 0 0 1px rgba(217, 70, 239, 0.5), 0 12px 44px rgba(168, 85, 247, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.14), rgba(34, 211, 238, 0.06)) !important;
+  }
+
+  /* 네온 그라디언트 텍스트 */
+  .neon-text {
+    background: linear-gradient(92deg, #67e8f9 0%, #a855f7 45%, #f0abfc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 14px rgba(168, 85, 247, 0.45));
+  }
+  .neon-cyan { color: #4dd8ec; text-shadow: 0 0 12px rgba(77, 216, 236, 0.55); }
+  .neon-magenta { color: #f0abfc; text-shadow: 0 0 12px rgba(240, 171, 252, 0.5); }
+
+  /* 네온 CTA 버튼 */
+  .neon-btn {
+    background: linear-gradient(92deg, #06b6d4, #7c3aed 55%, #db2777);
+    background-size: 200% 100%;
+    color: #fff;
+    box-shadow: 0 8px 30px rgba(124, 58, 237, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transition: background-position 0.5s ease, box-shadow 0.3s ease, transform 0.15s ease;
+  }
+  .neon-btn:hover:not(:disabled) {
+    background-position: 100% 0;
+    box-shadow: 0 10px 40px rgba(219, 39, 119, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
+  }
+  .neon-btn:disabled { opacity: 0.4; }
+
+  /* 등급/칩 네온 필 */
+  .neon-chip {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+  }
+  .neon-chip:hover { border-color: rgba(34, 211, 238, 0.5); background: rgba(34, 211, 238, 0.08); }
+  .neon-chip-on {
+    border-color: rgba(217, 70, 239, 0.7) !important;
+    background: linear-gradient(180deg, rgba(217, 70, 239, 0.18), rgba(124, 58, 237, 0.10)) !important;
+    box-shadow: 0 0 18px rgba(217, 70, 239, 0.3);
+    color: #fbe8ff;
+  }
+
+  /* 펄스 글로우 (로딩/강조) */
+  @keyframes neon-pulse {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.04); }
+  }
+  .animate-neon-pulse { animation: neon-pulse 1.8s ease-in-out infinite; }
+
+  /* 스캔라인 (로딩 연출) */
+  @keyframes scanline {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(2000%); }
+  }
+  .scanline {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+    filter: blur(1px); opacity: 0.7;
+    animation: scanline 2.4s linear infinite;
+  }
+
+  /* 회전 컨틱 링 (로딩) */
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  .animate-spin-slow { animation: spin-slow 3s linear infinite; }
+
+  /* 은은한 떠오름 */
+  @keyframes cyber-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .animate-cyber-float { animation: cyber-float 5s ease-in-out infinite; }
+}

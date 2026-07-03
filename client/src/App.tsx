@@ -30,6 +30,7 @@ import ProductDiscovery from "./pages/ProductDiscovery";
 import KeywordSourcing from "./pages/KeywordSourcing";
 import KeywordSourcingResults from "./pages/KeywordSourcingResults";
 import MySourcing from "./pages/MySourcing";
+import InventoryBet from "./pages/InventoryBet";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -67,6 +68,7 @@ function Router() {
       <Route path="/sourcing" component={KeywordSourcing} />
       <Route path="/sourcing/results" component={KeywordSourcingResults} />
       <Route path="/my-sourcing" component={MySourcing} />
+      <Route path="/inventory-bet" component={InventoryBet} />
       <Route path="/niche-finder" component={NicheFinder} />
       <Route path="/discovery" component={ProductDiscovery} />
       <Route path="/sourcing-helper" component={SourcingHelper} />

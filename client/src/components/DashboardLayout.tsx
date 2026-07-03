@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -115,6 +115,7 @@ type MenuItem = {
 const menuItems: MenuItem[] = [
   // ===== 메인 (초보자는 이것만 봐도 됨) =====
   { icon: Gem, label: "소싱", path: "/sourcing", emoji: "🔎", section: "main" },
+  { icon: Dices, label: "재고 배팅", path: "/inventory-bet", emoji: "🎲", section: "main" },
   { icon: Calculator, label: "계산기", path: "/margin", emoji: "🧮", section: "main" },
   { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: LayoutDashboard, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
