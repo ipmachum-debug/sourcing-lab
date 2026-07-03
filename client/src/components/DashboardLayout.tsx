@@ -52,12 +52,12 @@ function ExtensionUpgradeBanner() {
   };
 
   return (
-    <div className="mb-4 rounded-xl border border-pink-200 bg-gradient-to-r from-pink-50 to-purple-50 p-4 shadow-sm">
+    <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <span className="text-2xl mt-0.5">🧩</span>
           <div>
-            <p className="font-semibold text-sm text-pink-800">
+            <p className="font-semibold text-sm text-slate-100">
               소싱 헬퍼 확장프로그램 v{latestVersion} 사용 가능
             </p>
             {showChangelog && versionInfo.changelog && (
@@ -190,7 +190,15 @@ export default function DashboardLayout({
 
   return (
     <SidebarProvider
-      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+      style={{
+        "--sidebar-width": `${sidebarWidth}px`,
+        "--sidebar": "#0a0b1e",
+        "--sidebar-foreground": "#c7cde0",
+        "--sidebar-border": "rgba(255,255,255,0.08)",
+        "--sidebar-accent": "rgba(255,255,255,0.06)",
+        "--sidebar-accent-foreground": "#e6eaf7",
+        "--sidebar-ring": "#22d3ee",
+      } as CSSProperties}
     >
       <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
         {children}
@@ -252,13 +260,13 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
       <div className="relative" ref={sidebarRef}>
         <Sidebar collapsible="icon" className="border-r-0" disableTransition={isResizing}>
           {/* Sidebar header with logo */}
-          <SidebarHeader className="h-16 justify-center border-b border-pink-100/50">
+          <SidebarHeader className="h-16 justify-center border-b border-white/10">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
-                className="h-8 w-8 flex items-center justify-center hover:bg-pink-50 rounded-xl transition-colors shrink-0"
+                className="h-8 w-8 flex items-center justify-center hover:bg-white/10 rounded-xl transition-colors shrink-0"
               >
-                <PanelLeft className="h-4 w-4 text-pink-400" />
+                <PanelLeft className="h-4 w-4 text-cyan-300" />
               </button>
               {!isCollapsed && (
                 <div className="flex items-center gap-2">
@@ -285,12 +293,12 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                       tooltip={item.label}
                       className={`h-11 transition-all rounded-xl my-0.5 ${
                         isActive
-                          ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-semibold border border-pink-100/60"
-                          : "hover:bg-pink-50/50 font-medium"
+                          ? "bg-white/[0.08] text-white font-semibold border border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.15)]"
+                          : "text-slate-300 hover:bg-white/5 font-medium"
                       }`}
                     >
                       <item.icon className={`h-4 w-4 transition-all ${
-                        isActive ? "text-pink-500" : "text-muted-foreground"
+                        isActive ? "text-cyan-300" : "text-slate-400"
                       }`} />
                       <span className="flex items-center gap-2">
                         {!isCollapsed && <span className="text-base">{item.emoji}</span>}
@@ -305,7 +313,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
               {!isCollapsed && (
                 <button
                   onClick={() => setShowAdvanced(v => !v)}
-                  className="flex items-center justify-between w-full px-3 mt-3 mb-1 py-1.5 text-[11px] font-semibold text-gray-400 hover:text-pink-500 transition-colors rounded-lg hover:bg-pink-50/40"
+                  className="flex items-center justify-between w-full px-3 mt-3 mb-1 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-cyan-300 transition-colors rounded-lg hover:bg-white/5"
                 >
                   <span className="uppercase tracking-wider">고급 기능</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
@@ -336,12 +344,12 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                             tooltip={item.label}
                             className={`h-9 transition-all font-normal rounded-xl my-0.5 ${
                               isActive
-                                ? "bg-gradient-to-r from-pink-50 to-purple-50 text-pink-700 font-medium border border-pink-100/60"
-                                : "hover:bg-pink-50/50"
+                                ? "bg-white/[0.08] text-white font-medium border border-cyan-400/30"
+                                : "text-slate-400 hover:bg-white/5"
                             }`}
                           >
                             <item.icon className={`h-4 w-4 transition-all ${
-                              isActive ? "text-pink-500" : "text-muted-foreground/70"
+                              isActive ? "text-cyan-300" : "text-slate-500"
                             }`} />
                             <span className="flex items-center gap-2 text-[13px]">
                               {!isCollapsed && <span className="text-sm">{item.emoji}</span>}
@@ -358,11 +366,11 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           </SidebarContent>
 
           {/* User footer */}
-          <SidebarFooter className="p-3 border-t border-pink-100/50">
+          <SidebarFooter className="p-3 border-t border-white/10">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-pink-50/60 transition-all w-full text-left group-data-[collapsible=icon]:justify-center">
-                  <Avatar className="h-11 w-11 border-2 border-pink-200 shrink-0 shadow-sm">
+                <button className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/5 transition-all w-full text-left group-data-[collapsible=icon]:justify-center">
+                  <Avatar className="h-11 w-11 border-2 border-white/15 shrink-0 shadow-sm">
                     {(user as any)?.profileImage ? (
                       <AvatarImage src={(user as any).profileImage} alt={user?.name || ""} className="object-cover" />
                     ) : null}
@@ -372,7 +380,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                   </Avatar>
                   <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                     <p className="text-sm font-medium truncate">{user?.name || "-"}</p>
-                    <p className="text-xs text-pink-400/80 truncate mt-0.5">{user?.email || "-"}</p>
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{user?.email || "-"}</p>
                   </div>
                 </button>
               </DropdownMenuTrigger>
@@ -391,17 +399,17 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
 
         {/* Resize handle */}
         <div
-          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-pink-300/30 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-400/30 transition-colors ${isCollapsed ? "hidden" : ""}`}
           onMouseDown={() => { if (!isCollapsed) setIsResizing(true); }}
           style={{ zIndex: 50 }}
         />
       </div>
 
-      <SidebarInset className="flex flex-col min-h-screen pastel-page-bg">
+      <SidebarInset className="flex flex-col min-h-screen app-shell-bg">
         {/* Mobile header */}
-        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-pink-100/50 bg-white/80 backdrop-blur-md px-4 lg:hidden">
-          <button onClick={toggleSidebar} className="h-9 w-9 flex items-center justify-center hover:bg-pink-50 rounded-xl">
-            <PanelLeft className="h-5 w-5 text-pink-400" />
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0a0b1e]/80 backdrop-blur-md px-4 lg:hidden">
+          <button onClick={toggleSidebar} className="h-9 w-9 flex items-center justify-center hover:bg-white/10 rounded-xl">
+            <PanelLeft className="h-5 w-5 text-cyan-300" />
           </button>
           {activeMenuItem && (
             <div className="flex items-center gap-2">

@@ -600,4 +600,11 @@
     50% { transform: translateY(-8px); }
   }
   .animate-cyber-float { animation: cyber-float 5s ease-in-out infinite; }
+
+  /* 앱 셸(다크) — 사이드바/콘텐츠 배경 통일 */
+  .app-shell-bg {
+    background:
+      radial-gradient(50% 40% at 100% 0%, rgba(124, 58, 237, 0.10), transparent 60%),
+      linear-gradient(160deg, #070a1a 0%, #0a0b1e 60%, #06070f 100%);
+  }
 }
