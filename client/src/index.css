@@ -601,11 +601,14 @@
   }
   .animate-cyber-float { animation: cyber-float 5s ease-in-out infinite; }
 
-  /* 앱 셸(다크) — 사이드바/콘텐츠 배경 통일 */
+  /* 앱 셸(다크 네온) — 모든 페이지 공통 배경. 은은한 네온 오브(그리드는 생략해 데이터 화면 가독성 유지) */
   .app-shell-bg {
     background:
-      radial-gradient(50% 40% at 100% 0%, rgba(124, 58, 237, 0.10), transparent 60%),
+      radial-gradient(48% 38% at 12% 0%, rgba(168, 85, 247, 0.13), transparent 62%),
+      radial-gradient(42% 34% at 92% 4%, rgba(34, 211, 238, 0.11), transparent 62%),
+      radial-gradient(60% 50% at 50% 120%, rgba(233, 53, 193, 0.09), transparent 60%),
       linear-gradient(160deg, #070a1a 0%, #0a0b1e 60%, #06070f 100%);
+    background-attachment: fixed;
   }
 
   /* 다크 스코프에서 커스텀(핑크 하드코딩) 카드들을 글래스로 전환 */
