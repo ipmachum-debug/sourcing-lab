@@ -5,11 +5,11 @@ import { Globe2, Camera, Scale, Dices, Package, Ship, Sparkles } from "lucide-re
 
 // 역직구 채널 홈 — 국내매입 → 해외판매(POIZON·당근·아마존). 도구는 순차 오픈.
 const TOOLS = [
+  { icon: Camera, emoji: "📸", title: "오늘의 SKU TOP100", desc: "국내가 × POIZON 스프레드로 오늘 살 SKU 랭킹", path: "/reverse/sku" },
   { icon: Scale, emoji: "⚖️", title: "아비트리지 계산", desc: "POIZON 수수료·검수탈락·부가세환급까지 반영한 순익", path: "/reverse/arbitrage" },
   { icon: Dices, emoji: "🎲", title: "베팅 사이징", desc: "자금 회전 기준으로 SKU별 매입 수량 추천", path: "/reverse/betting" },
-  { icon: Camera, emoji: "📸", title: "오늘의 SKU TOP100", desc: "국내가 × POIZON 스프레드로 오늘 살 SKU 랭킹", status: "준비중" },
-  { icon: Package, emoji: "📦", title: "매입 관리", desc: "발품·매입·검수·정산을 한 곳에서", status: "준비중" },
-  { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "POIZON·당근 판매·회전율·회계", status: "준비중" },
+  { icon: Package, emoji: "📦", title: "매입 관리", desc: "매입·검수·판매 기록 → 검수탈락률·회전일 축적", path: "/reverse/purchases" },
+  { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "채널별 판매·정산·회계", path: "/reverse/exports" },
 ];
 
 const STEPS = [

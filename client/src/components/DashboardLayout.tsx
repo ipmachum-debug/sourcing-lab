@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -136,6 +136,9 @@ const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse" },
   { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse" },
   { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse" },
+  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse" },
+  { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse" },
+  { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
