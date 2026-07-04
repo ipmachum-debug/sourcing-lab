@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.8.2";
+const EXTENSION_LATEST_VERSION = "8.8.3";
 const EXTENSION_CHANGELOG = [
-  "순수 패시브 완성 — 사이드패널 '수집' 탭 + 플로팅 자동수집 크롤러 제거",
-  "검색으로 보는 데이터만 읽고, 원픽 결과 펼칠 때 상세 수집(on-expand)",
-  "관심 상품 추적은 그대로 유지",
+  "역직구 POIZON 시세 패시브 수집 — 내가 본 상품 시세만 공유 풀에 반영",
+  "순수 패시브 유지 — 대량 크롤 없이 '본 것만' 저빈도로",
+  "쿠팡: 검색 읽기 + 원픽 on-expand 심화수집",
 ];
 import { getDb } from "../../db";
 import {

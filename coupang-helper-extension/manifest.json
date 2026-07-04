@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.8.2",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.8.2 — 사이드패널 수집탭 제거(순수 패시브 완성), 원픽 심화수집",
+  "version": "8.8.3",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.8.3 — 역직구 POIZON 시세 패시브 수집, 원픽 심화수집",
   "permissions": [
     "storage",
     "tabs",
@@ -23,7 +23,9 @@
     "https://lumiriz.kr/*",
     "https://www.aliexpress.com/*",
     "https://ko.aliexpress.com/*",
-    "https://*.aliexpress.com/*"
+    "https://*.aliexpress.com/*",
+    "https://*.dewu.com/*",
+    "https://*.poizon.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -93,6 +95,17 @@
       ],
       "js": [
         "content-coupang-ads.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*.dewu.com/*",
+        "https://*.poizon.com/*"
+      ],
+      "js": [
+        "content-poizon.js"
       ],
       "run_at": "document_idle",
       "all_frames": false

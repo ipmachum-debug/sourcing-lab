@@ -275,6 +275,11 @@ class ApiClient {
     return this._call('sourcingWizard.submitDeepScanResult', data, 'mutation');
   }
 
+  // ===== 역직구: POIZON 시세 패시브 제출 (본 것만) =====
+  async poizonSubmit(data) {
+    return this._call('reversePurchase.poizonSubmit', data, 'mutation');
+  }
+
   // ===== v8.0: AI 제품 발견 시스템 =====
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');
