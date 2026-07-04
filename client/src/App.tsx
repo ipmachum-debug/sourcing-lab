@@ -36,6 +36,7 @@ import QuickMargin from "./pages/QuickMargin";
 import Reverse from "./pages/Reverse";
 import ReverseArbitrage from "./pages/ReverseArbitrage";
 import ReverseBetting from "./pages/ReverseBetting";
+import ReversePurchases from "./pages/ReversePurchases";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -57,6 +58,7 @@ function Router() {
       <Route path="/reverse" component={Reverse} />
       <Route path="/reverse/arbitrage" component={ReverseArbitrage} />
       <Route path="/reverse/betting" component={ReverseBetting} />
+      <Route path="/reverse/purchases" component={ReversePurchases} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/daily" component={DailySourcing as any} />
       <Route path="/daily-profit" component={DailyProfitBoard} />
