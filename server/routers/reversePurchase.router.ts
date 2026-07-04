@@ -1,6 +1,6 @@
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { reversePurchases, reverseSkuWatch } from "../../drizzle/schema";
+import { reversePurchases, reverseSkuWatch, poizonPricePool } from "../../drizzle/schema";
 import { and, eq, desc, like, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -9,6 +9,41 @@ const CONDITION = ["new", "a_grade", "b_grade"] as const;
 const INSPECT = ["pending", "pass", "fail"] as const;
 const SELL_CHANNEL = ["poizon", "danggeun", "amazon", "other"] as const;
 const STATUS = ["purchased", "inspecting", "listed", "sold", "settled", "returned"] as const;
+
+// POIZON 시세 풀 매칭키 (브랜드+상품 정규화)
+function poizonNormKey(brand: string | undefined, name: string): string {
+  return `${brand ?? ""} ${name}`.toLowerCase().replace(/\s+/g, "").slice(0, 250);
+}
+// 공유 풀 upsert (패시브 관측 반영)
+async function upsertPoizon(
+  db: any,
+  d: { brand?: string; productName: string; priceCny: number; poizonSpuId?: string; imageUrl?: string; source?: string }
+) {
+  const normKey = poizonNormKey(d.brand, d.productName);
+  await db
+    .insert(poizonPricePool)
+    .values({
+      normKey,
+      brand: d.brand ?? null,
+      productName: d.productName,
+      priceCny: d.priceCny,
+      poizonSpuId: d.poizonSpuId ?? null,
+      imageUrl: d.imageUrl ?? null,
+      source: d.source ?? "manual",
+      observeCount: 1,
+      contributorCount: 1,
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        priceCny: d.priceCny,
+        brand: d.brand ?? null,
+        productName: d.productName,
+        observeCount: sql`${poizonPricePool.observeCount} + 1`,
+        lastObservedAt: sql`NOW()`,
+        source: d.source ?? "manual",
+      },
+    });
+}
 
 export const reversePurchaseRouter = router({
   // 목록 (상태 필터 + 검색)
@@ -160,6 +195,15 @@ export const reversePurchaseRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(reverseSkuWatch).values({ userId: ctx.user!.id, ...input });
+      // 수동 입력한 POIZON 시세도 공유 풀에 반영 → 다른 유저도 활용
+      if (input.poizonCny && input.poizonCny > 0) {
+        await upsertPoizon(db, {
+          brand: input.brand,
+          productName: input.productName,
+          priceCny: input.poizonCny,
+          source: "manual",
+        }).catch(() => {});
+      }
       return { ok: true };
     }),
 
@@ -172,5 +216,39 @@ export const reversePurchaseRouter = router({
         .delete(reverseSkuWatch)
         .where(and(eq(reverseSkuWatch.id, input.id), eq(reverseSkuWatch.userId, ctx.user!.id)));
       return { ok: true };
+    }),
+
+  // ===== 공유 POIZON 시세 풀 (패시브 수집) =====
+  // 확장/유저가 본 시세 제출 → 전역 공유. 확장은 이 프로시저만 부르면 됨.
+  poizonSubmit: protectedProcedure
+    .input(
+      z.object({
+        brand: z.string().max(100).optional(),
+        productName: z.string().min(1).max(300),
+        priceCny: z.number().int().min(0),
+        poizonSpuId: z.string().max(60).optional(),
+        imageUrl: z.string().max(1000).optional(),
+        source: z.enum(["manual", "extension"]).default("extension"),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await upsertPoizon(db, input);
+      return { ok: true };
+    }),
+
+  // 공유 풀 조회 (오늘의 SKU 자동 채움용) — 전역
+  poizonLookup: protectedProcedure
+    .input(z.object({ query: z.string().min(1).max(200) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return db
+        .select()
+        .from(poizonPricePool)
+        .where(like(poizonPricePool.productName, `%${input.query}%`))
+        .orderBy(desc(poizonPricePool.lastObservedAt))
+        .limit(8);
     }),
 });
