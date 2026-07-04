@@ -100,6 +100,16 @@ function ExtensionUpgradeBanner() {
   );
 }
 
+// ★ 판매 채널(마켓) 레지스트리 — 확장형. 아마존·일본 등은 여기에 추가만 하면 열림.
+type ChannelId = "coupang" | "reverse";
+type Channel = { id: ChannelId; label: string; emoji: string; tagline: string };
+const CHANNELS: Channel[] = [
+  { id: "coupang", label: "쿠팡 로켓그로스", emoji: "🚀", tagline: "수입 → 쿠팡 판매" },
+  { id: "reverse", label: "역직구", emoji: "🌏", tagline: "국내매입 → 해외판매" },
+  // 향후: { id: "amazon", label: "아마존 US", emoji: "🇺🇸", tagline: "국내 → Amazon" },
+];
+const CHANNEL_KEY = "biz-channel";
+
 type MenuItem = {
   icon: any;
   label: string;
@@ -108,6 +118,7 @@ type MenuItem = {
   superAdminOnly?: boolean;
   section: "main" | "advanced";
   group?: string;
+  channel?: ChannelId; // 없으면 coupang(기존)로 간주
 };
 
 // ★ UX 개편(R1): 초보자용 메인 4개 + 나머지는 "고급"으로 접기.
@@ -120,6 +131,9 @@ const menuItems: MenuItem[] = [
   { icon: Calculator, label: "계산기", path: "/quick-margin", emoji: "🧮", section: "main" },
   { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: TrendingUp, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
+
+  // ===== 역직구 채널 (국내매입 → 해외판매) =====
+  { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
@@ -154,7 +168,8 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "사용자 관리", path: "/user-management", superAdminOnly: true, emoji: "👥", section: "advanced", group: "도구" },
 ];
 
-const mainItems = menuItems.filter(i => i.section === "main");
+const channelOf = (i: MenuItem): ChannelId => i.channel ?? "coupang";
+const mainItemsFor = (ch: ChannelId) => menuItems.filter(i => i.section === "main" && channelOf(i) === ch);
 const advancedGroups = ["소싱 상세", "시장 분석", "판매 관리 상세", "마케팅", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -222,6 +237,22 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
 
+  // 판매 채널(마켓) 전환 — 확장형. 선택 채널의 메뉴만 노출.
+  const [channel, setChannel] = useState<ChannelId>(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/reverse")) return "reverse";
+    return ((localStorage.getItem(CHANNEL_KEY) as ChannelId) || "coupang");
+  });
+  useEffect(() => { localStorage.setItem(CHANNEL_KEY, channel); }, [channel]);
+  useEffect(() => {
+    // /reverse 딥링크 진입 시 채널 동기화
+    if (location.startsWith("/reverse") && channel !== "reverse") setChannel("reverse");
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mainItems = mainItemsFor(channel);
+  const switchChannel = (id: ChannelId) => {
+    setChannel(id);
+    setLocation(id === "reverse" ? "/reverse" : "/home");
+  };
+
   // 고급 메뉴 접기/펼치기 — 현재 위치가 고급 항목이면 자동으로 펼쳐 활성 항목이 보이게
   const inAdvanced = menuItems.some(i => i.section === "advanced" && i.path === location);
   const [showAdvanced, setShowAdvanced] = useState(inAdvanced);
@@ -281,6 +312,30 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
 
           {/* Menu items */}
           <SidebarContent className="gap-0 pt-2">
+            {/* ===== 판매 채널 스위처 ===== */}
+            {!isCollapsed && (
+              <div className="px-3 pt-1 pb-2">
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+                  {CHANNELS.map(ch => {
+                    const on = channel === ch.id;
+                    return (
+                      <button
+                        key={ch.id}
+                        onClick={() => switchChannel(ch.id)}
+                        title={ch.tagline}
+                        className={`rounded-lg py-1.5 text-[12px] font-semibold transition-all ${
+                          on
+                            ? "bg-white/[0.10] text-white shadow-[0_0_14px_rgba(34,211,238,0.18)] border border-cyan-400/30"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <span className="mr-1">{ch.emoji}</span>{ch.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <SidebarMenu className="px-2 py-1">
               {/* ===== 메인 (초보자) ===== */}
               {mainItems.map(item => {
@@ -309,8 +364,8 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                 );
               })}
 
-              {/* ===== 고급 (더보기) 토글 ===== */}
-              {!isCollapsed && (
+              {/* ===== 고급 (더보기) 토글 — 쿠팡 채널에만 ===== */}
+              {!isCollapsed && channel === "coupang" && (
                 <button
                   onClick={() => setShowAdvanced(v => !v)}
                   className="flex items-center justify-between w-full px-3 mt-3 mb-1 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-cyan-300 transition-colors rounded-lg hover:bg-white/5"
@@ -320,8 +375,8 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                 </button>
               )}
 
-              {/* ===== 고급 그룹들 ===== */}
-              {showAdvanced && advancedGroups.map(group => {
+              {/* ===== 고급 그룹들 (쿠팡 채널에만) ===== */}
+              {showAdvanced && channel === "coupang" && advancedGroups.map(group => {
                 const groupItems = menuItems
                   .filter(item => item.section === "advanced" && item.group === group)
                   .filter(item => !item.superAdminOnly || user?.isSuperAdmin);
