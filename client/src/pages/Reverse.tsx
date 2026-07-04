@@ -1,12 +1,13 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useLocation } from "wouter";
 import { Globe2, Camera, Scale, Dices, Package, Ship, Sparkles } from "lucide-react";
 
 // 역직구 채널 홈 — 국내매입 → 해외판매(POIZON·당근·아마존). 도구는 순차 오픈.
 const TOOLS = [
+  { icon: Scale, emoji: "⚖️", title: "아비트리지 계산", desc: "POIZON 수수료·검수탈락·부가세환급까지 반영한 순익", path: "/reverse/arbitrage" },
+  { icon: Dices, emoji: "🎲", title: "베팅 사이징", desc: "자금 회전 기준으로 SKU별 매입 수량 추천", path: "/reverse/betting" },
   { icon: Camera, emoji: "📸", title: "오늘의 SKU TOP100", desc: "국내가 × POIZON 스프레드로 오늘 살 SKU 랭킹", status: "준비중" },
-  { icon: Scale, emoji: "⚖️", title: "아비트리지 계산", desc: "POIZON 수수료·검수탈락·부가세환급까지 반영한 순익", status: "준비중" },
-  { icon: Dices, emoji: "🎲", title: "베팅 사이징", desc: "자금 회전 기준으로 SKU별 매입 수량 추천", status: "준비중" },
   { icon: Package, emoji: "📦", title: "매입 관리", desc: "발품·매입·검수·정산을 한 곳에서", status: "준비중" },
   { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "POIZON·당근 판매·회전율·회계", status: "준비중" },
 ];
@@ -19,6 +20,7 @@ const STEPS = [
 
 export default function Reverse() {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const name = (user as any)?.name || "셀러";
 
   return (
@@ -62,24 +64,34 @@ export default function Reverse() {
           <section>
             <h2 className="text-sm font-semibold text-slate-400 tracking-widest mb-3">도구</h2>
             <div className="grid sm:grid-cols-2 gap-4">
-              {TOOLS.map(t => (
-                <div key={t.title} className="glass rounded-2xl p-6 flex items-center gap-4 opacity-90">
-                  <span className="h-14 w-14 rounded-2xl grid place-items-center text-2xl shrink-0 border border-white/10"
-                    style={{ boxShadow: "0 0 22px rgba(217,70,239,0.35)", background: "rgba(255,255,255,0.04)" }}>
-                    {t.emoji}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <t.icon className="h-4 w-4 text-fuchsia-300" />
-                      <span className="font-bold text-lg text-white">{t.title}</span>
-                      <span className="text-[10px] font-semibold text-amber-300 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded-full">
-                        {t.status}
-                      </span>
+              {TOOLS.map(t => {
+                const ready = !!t.path;
+                return (
+                  <button
+                    key={t.title}
+                    onClick={() => ready && setLocation(t.path!)}
+                    disabled={!ready}
+                    className={`glass rounded-2xl p-6 flex items-center gap-4 text-left ${ready ? "glass-hover" : "opacity-70 cursor-default"}`}
+                  >
+                    <span className="h-14 w-14 rounded-2xl grid place-items-center text-2xl shrink-0 border border-white/10"
+                      style={{ boxShadow: "0 0 22px rgba(217,70,239,0.35)", background: "rgba(255,255,255,0.04)" }}>
+                      {t.emoji}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <t.icon className="h-4 w-4 text-fuchsia-300" />
+                        <span className="font-bold text-lg text-white">{t.title}</span>
+                        {ready ? (
+                          <span className="text-[10px] font-semibold text-emerald-300 bg-emerald-400/10 border border-emerald-400/25 px-1.5 py-0.5 rounded-full">사용가능</span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-amber-300 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded-full">준비중</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1 leading-relaxed">{t.desc}</p>
                     </div>
-                    <p className="text-sm text-slate-400 mt-1 leading-relaxed">{t.desc}</p>
-                  </div>
-                </div>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </section>
 
