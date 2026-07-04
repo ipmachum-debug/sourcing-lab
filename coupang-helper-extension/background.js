@@ -915,6 +915,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.8.3: 역직구 POIZON 시세 패시브 제출 (content-poizon.js → 서버 공유 풀)
+    case 'SUBMIT_POIZON_PRICE': {
+      (async () => {
+        const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+        const d = message.data || {};
+        if (!serverLoggedIn || !d.productName || !d.priceCny) { sendResponse({ ok: false }); return; }
+        try {
+          await apiClient.poizonSubmit({ ...d, source: 'extension' });
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     case 'STOP_AUTO_COLLECT': {
       stopAutoCollect();
       sendResponse({ ok: true });

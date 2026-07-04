@@ -1824,3 +1824,25 @@ export const reverseSkuWatch = mysqlTable("reverse_sku_watch", {
 
 export type ReverseSkuWatch = typeof reverseSkuWatch.$inferSelect;
 export type InsertReverseSkuWatch = typeof reverseSkuWatch.$inferInsert;
+
+// ==================== 공유 POIZON 시세 풀 (poizon_price_pool) ====================
+// ★ 패시브 수집: 유저가 자기 POIZON에서 본 시세를 여기로 공유(userId 무관).
+//   대량 크롤 없이 "본 것만" 저빈도로 쌓아 전 유저가 공유 → 밴 리스크↓.
+export const poizonPricePool = mysqlTable("poizon_price_pool", {
+  id: int("id").autoincrement().primaryKey(),
+  normKey: varchar("norm_key", { length: 255 }).notNull().unique(), // 정규화(브랜드+상품) 매칭키
+  poizonSpuId: varchar("poizon_spu_id", { length: 60 }),            // POIZON 상품 id(있으면)
+  brand: varchar("brand", { length: 100 }),
+  productName: varchar("product_name", { length: 300 }).notNull(),
+  priceCny: int("price_cny").default(0),                            // 최신 시세(위안)
+  lowCny: int("low_cny").default(0),                                // 최저가(있으면)
+  imageUrl: varchar("image_url", { length: 1000 }),
+  contributorCount: int("contributor_count").default(0),           // 관측 기여 유저 수
+  observeCount: int("observe_count").default(0),                   // 총 관측 횟수
+  source: varchar("source", { length: 30 }).default("manual"),     // manual/extension
+  lastObservedAt: timestamp("last_observed_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type PoizonPrice = typeof poizonPricePool.$inferSelect;
+export type InsertPoizonPrice = typeof poizonPricePool.$inferInsert;

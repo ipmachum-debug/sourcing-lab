@@ -36,6 +36,17 @@ export default function ReverseSku() {
   const removeMut = trpc.reversePurchase.skuRemove.useMutation({ onSuccess: inv });
 
   const [f, setF] = useState({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "190", feePct: "9" });
+  const lookupPool = async () => {
+    if (!f.productName.trim()) return toast.error("상품명을 먼저 입력하세요");
+    const res = (await utils.reversePurchase.poizonLookup.fetch({ query: f.productName })) as any[];
+    if (res && res.length) {
+      const hit = res[0];
+      setF(p => ({ ...p, poizonCny: String(hit.priceCny || 0), brand: p.brand || (hit.brand ?? "") }));
+      toast.success(`공유 풀 시세 ${hit.priceCny}¥ (관측 ${hit.observeCount || 1}회)`);
+    } else {
+      toast.info("공유 풀에 아직 없어요. 직접 넣으면 다른 유저와 공유됩니다.");
+    }
+  };
   const submit = () => {
     if (!f.productName.trim()) return toast.error("상품명 입력");
     createMut.mutate({
@@ -72,11 +83,15 @@ export default function ReverseSku() {
               <In placeholder="POIZON(위안)" value={f.poizonCny} onChange={v => setF({ ...f, poizonCny: v })} type="number" />
               <In placeholder="환율" value={f.rate} onChange={v => setF({ ...f, rate: v })} type="number" />
             </div>
-            <div className="flex justify-end mt-2">
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={lookupPool} className="neon-chip rounded-lg px-3 py-2 text-sm text-slate-200 flex items-center gap-1.5">
+                🔍 공유 풀에서 시세 찾기
+              </button>
               <button onClick={submit} disabled={createMut.isPending} className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5">
                 <Plus className="h-4 w-4" /> SKU 추가
               </button>
             </div>
+            <p className="text-[11px] text-slate-500 mt-1.5">💡 POIZON 시세는 <b className="text-slate-400">공유 풀</b>에서 자동으로 찾거나, 직접 넣으면 다른 유저에게도 공유돼요 (패시브 수집).</p>
           </div>
 
           {/* 랭킹 */}
