@@ -1802,3 +1802,25 @@ export const reversePurchases = mysqlTable("reverse_purchases", {
 
 export type ReversePurchase = typeof reversePurchases.$inferSelect;
 export type InsertReversePurchase = typeof reversePurchases.$inferInsert;
+
+// ==================== 역직구 SKU 워치풀 (reverse_sku_watch) ====================
+// 아비트리지 후보 SKU 워치리스트. 국내가 × POIZON 시세로 스프레드 랭킹.
+// (수동 등록 → 이후 POIZON 자동 피드로 확장)
+export const reverseSkuWatch = mysqlTable("reverse_sku_watch", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  brand: varchar("brand", { length: 100 }),
+  productName: varchar("product_name", { length: 300 }).notNull(),
+  sku: varchar("sku", { length: 120 }),
+  category: varchar("category", { length: 80 }),
+  domesticPrice: int("domestic_price").default(0),   // 국내 매입가(원)
+  poizonCny: int("poizon_cny").default(0),            // POIZON 시세(위안)
+  rate: int("rate").default(190),                     // 환율(원/위안)
+  feePct: int("fee_pct").default(9),                  // POIZON 수수료(%)
+  note: varchar("note", { length: 300 }),
+  createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),
+});
+
+export type ReverseSkuWatch = typeof reverseSkuWatch.$inferSelect;
+export type InsertReverseSkuWatch = typeof reverseSkuWatch.$inferInsert;

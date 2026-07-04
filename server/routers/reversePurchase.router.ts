@@ -1,6 +1,6 @@
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { reversePurchases } from "../../drizzle/schema";
+import { reversePurchases, reverseSkuWatch } from "../../drizzle/schema";
 import { and, eq, desc, like, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -127,6 +127,50 @@ export const reversePurchaseRouter = router({
       await db
         .delete(reversePurchases)
         .where(and(eq(reversePurchases.id, input.id), eq(reversePurchases.userId, ctx.user!.id)));
+      return { ok: true };
+    }),
+
+  // ===== SKU 워치풀 (오늘의 SKU TOP100) =====
+  skuList: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    return db
+      .select()
+      .from(reverseSkuWatch)
+      .where(eq(reverseSkuWatch.userId, ctx.user!.id))
+      .orderBy(desc(reverseSkuWatch.createdAt))
+      .limit(200);
+  }),
+
+  skuCreate: protectedProcedure
+    .input(
+      z.object({
+        brand: z.string().max(100).optional(),
+        productName: z.string().min(1).max(300),
+        sku: z.string().max(120).optional(),
+        category: z.string().max(80).optional(),
+        domesticPrice: z.number().int().min(0).default(0),
+        poizonCny: z.number().int().min(0).default(0),
+        rate: z.number().int().min(1).default(190),
+        feePct: z.number().int().min(0).max(30).default(9),
+        note: z.string().max(300).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.insert(reverseSkuWatch).values({ userId: ctx.user!.id, ...input });
+      return { ok: true };
+    }),
+
+  skuRemove: protectedProcedure
+    .input(z.object({ id: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db
+        .delete(reverseSkuWatch)
+        .where(and(eq(reverseSkuWatch.id, input.id), eq(reverseSkuWatch.userId, ctx.user!.id)));
       return { ok: true };
     }),
 });
