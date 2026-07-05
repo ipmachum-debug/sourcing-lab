@@ -28,6 +28,7 @@ import { aliValidationRouter } from "./routers/aliValidation.router";
 import { marketingRouter } from "./routers/marketing";
 import { sourcingWizardRouter } from "./routers/sourcingWizard.router";
 import { reversePurchaseRouter } from "./routers/reversePurchase.router";
+import { reverseDealsRouter } from "./routers/reverseDeals.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -51,6 +52,7 @@ export const appRouter = router({
   marketing: marketingRouter,
   sourcingWizard: sourcingWizardRouter,
   reversePurchase: reversePurchaseRouter,
+  reverseDeals: reverseDealsRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

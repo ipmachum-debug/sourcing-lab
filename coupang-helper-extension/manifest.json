@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.8.3",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.8.3 — 역직구 POIZON 시세 패시브 수집, 원픽 심화수집",
+  "version": "8.9.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.9.0 — 역직구 매입 판단(POIZON 안정가 + 국내몰 최저가 패시브 수집)",
   "permissions": [
     "storage",
     "tabs",
@@ -25,7 +25,18 @@
     "https://ko.aliexpress.com/*",
     "https://*.aliexpress.com/*",
     "https://*.dewu.com/*",
-    "https://*.poizon.com/*"
+    "https://*.poizon.com/*",
+    "https://*.musinsa.com/*",
+    "https://*.abcmart.co.kr/*",
+    "https://*.a-rt.com/*",
+    "https://*.crocs.co.kr/*",
+    "https://*.nike.com/*",
+    "https://*.adidas.co.kr/*",
+    "https://*.newbalance.co.kr/*",
+    "https://*.lfmall.co.kr/*",
+    "https://*.lotteon.com/*",
+    "https://*.ssg.com/*",
+    "https://*.29cm.co.kr/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -106,6 +117,26 @@
       ],
       "js": [
         "content-poizon.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*.musinsa.com/*",
+        "https://*.abcmart.co.kr/*",
+        "https://*.a-rt.com/*",
+        "https://*.crocs.co.kr/*",
+        "https://*.nike.com/*",
+        "https://*.adidas.co.kr/*",
+        "https://*.newbalance.co.kr/*",
+        "https://*.lfmall.co.kr/*",
+        "https://*.lotteon.com/*",
+        "https://*.ssg.com/*",
+        "https://*.29cm.co.kr/*"
+      ],
+      "js": [
+        "content-domestic.js"
       ],
       "run_at": "document_idle",
       "all_frames": false

@@ -1,0 +1,105 @@
+import { describe, it, expect } from "vitest";
+import {
+  stableSellPrice,
+  computeProfit,
+  stabilityGrade,
+  recommendQty,
+  evaluateDeal,
+  DEFAULT_COST,
+  type PriceSample,
+} from "./reverseProfit";
+
+const NOW = 1_700_000_000_000;
+const DAY = 24 * 60 * 60 * 1000;
+
+function recent(prices: number[], now = NOW): PriceSample[] {
+  return prices.map((priceCny, i) => ({ priceCny, at: now - i * DAY }));
+}
+
+describe("stableSellPrice", () => {
+  it("returns null when no valid samples", () => {
+    expect(stableSellPrice([], NOW)).toBeNull();
+    expect(stableSellPrice([{ priceCny: 0, at: NOW }], NOW)).toBeNull();
+  });
+
+  it("uses P25 (하위 25%) as the conservative stable price", () => {
+    // 100,110,120,130,140 → P25 ≈ 110
+    const s = stableSellPrice(recent([140, 130, 120, 110, 100]), NOW)!;
+    expect(s.stableCny).toBe(110);
+    expect(s.stableCny).toBeLessThan(s.avg30Cny); // 안정가는 평균보다 낮아야
+    expect(s.lowCny).toBe(100);
+    expect(s.highCny).toBe(140);
+  });
+
+  it("prefers an explicit 30d volume hint over sample count", () => {
+    const s = stableSellPrice(recent([100, 110]), NOW, 55)!;
+    expect(s.volume30).toBe(55);
+    expect(s.sampleCount).toBe(2);
+  });
+
+  it("excludes samples older than 30 days when recent data exists", () => {
+    const samples: PriceSample[] = [
+      { priceCny: 100, at: NOW },
+      { priceCny: 500, at: NOW - 40 * DAY }, // stale, should be excluded
+    ];
+    const s = stableSellPrice(samples, NOW)!;
+    expect(s.highCny).toBe(100);
+    expect(s.sampleCount).toBe(1);
+  });
+});
+
+describe("computeProfit", () => {
+  it("subtracts the full cost stack and computes margin ÷ buy price", () => {
+    // 매입 34,900 / 안정가 380위안 @190 = 72,200원 매출
+    const p = computeProfit(34900, 380, DEFAULT_COST);
+    expect(p.revenueKrw).toBe(72200);
+    // 수수료 9% + 환전 1.5% + 검수 3% = 13.5% of 72200 + 배송 5000 + 포장 1000
+    expect(p.feeKrw).toBe(Math.round(72200 * 0.09));
+    expect(p.deductKrw).toBe(
+      p.feeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
+    );
+    expect(p.netProfitKrw).toBe(72200 - 34900 - p.deductKrw);
+    expect(p.marginPct).toBeCloseTo((p.netProfitKrw / 34900) * 100, 1);
+  });
+
+  it("guards divide-by-zero on 0 buy price", () => {
+    expect(computeProfit(0, 380).marginPct).toBe(0);
+  });
+});
+
+describe("stabilityGrade + recommendQty", () => {
+  it("grades a liquid, stable product A", () => {
+    const s = stableSellPrice(recent([100, 102, 101, 103, 100, 102]), NOW, 40)!;
+    expect(stabilityGrade(s)).toBe("A");
+  });
+
+  it("grades a thin/volatile product D and blocks buying", () => {
+    const s = stableSellPrice(recent([100]), NOW, 1)!;
+    expect(stabilityGrade(s)).toBe("D");
+    expect(recommendQty(80, "D", 1)).toBe(0);
+  });
+
+  it("blocks buying under 30% margin regardless of grade", () => {
+    expect(recommendQty(29, "A", 100)).toBe(0);
+  });
+
+  it("caps quantity by grade and by 15% of market volume", () => {
+    expect(recommendQty(50, "A", 200)).toBe(30); // A cap
+    expect(recommendQty(50, "B", 200)).toBe(15); // B cap
+    expect(recommendQty(50, "A", 40)).toBe(6); // 15% of 40
+  });
+});
+
+describe("evaluateDeal", () => {
+  it("produces a full verdict for the 크록스 특가 example", () => {
+    const v = evaluateDeal(34900, recent([380, 385, 390, 382, 388, 384]), NOW, DEFAULT_COST, 45)!;
+    expect(v.profit.marginPct).toBeGreaterThan(30);
+    expect(["A", "B"]).toContain(v.grade);
+    expect(v.recommendQty).toBeGreaterThan(0);
+    expect(v.stars).toBeGreaterThanOrEqual(4);
+  });
+
+  it("returns null without a buy price", () => {
+    expect(evaluateDeal(0, recent([380]), NOW)).toBeNull();
+  });
+});

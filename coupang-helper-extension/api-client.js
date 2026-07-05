@@ -280,6 +280,16 @@ class ApiClient {
     return this._call('reversePurchase.poizonSubmit', data, 'mutation');
   }
 
+  // ===== 역직구: POIZON 체결 시세 관측 (안정가 산출용, 사이즈/판매량) =====
+  async poizonObserve(data) {
+    return this._call('reverseDeals.poizonObserve', data, 'mutation');
+  }
+
+  // ===== 역직구: 국내몰 최저가 패시브 제출 =====
+  async domesticSubmit(data) {
+    return this._call('reverseDeals.domesticSubmit', data, 'mutation');
+  }
+
   // ===== v8.0: AI 제품 발견 시스템 =====
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');

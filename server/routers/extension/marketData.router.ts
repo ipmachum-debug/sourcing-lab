@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.8.3";
+const EXTENSION_LATEST_VERSION = "8.9.0";
 const EXTENSION_CHANGELOG = [
-  "역직구 POIZON 시세 패시브 수집 — 내가 본 상품 시세만 공유 풀에 반영",
-  "순수 패시브 유지 — 대량 크롤 없이 '본 것만' 저빈도로",
-  "쿠팡: 검색 읽기 + 원픽 on-expand 심화수집",
+  "역직구 매입 판단 — POIZON 안정 판매가(최근 30일 하위 25%) 기반 순이익·추천 매입 수량",
+  "국내몰 최저가 패시브 수집 — 무신사·ABC마트·크록스·나이키·아디다스 등 본 것만 공유",
+  "POIZON 체결 관측(사이즈·판매량)으로 거래량·변동폭까지 반영",
 ];
 import { getDb } from "../../db";
 import {
