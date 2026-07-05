@@ -1982,3 +1982,32 @@ export const productSnapshots = mysqlTable(
 
 export type ProductSnapshot = typeof productSnapshots.$inferSelect;
 export type InsertProductSnapshot = typeof productSnapshots.$inferInsert;
+
+// ==================== POIZON 랭킹·트렌드 정찰 (poizon_trending) ====================
+// ★ 시장 정찰: 유저가 본 POIZON 랭킹/신상 페이지의 상품을 패시브로 적립(userId 무관, 공유).
+//   "뭘 팔지" 발굴용 — 인기순위·신상·급상승. 능동 크롤 없이 본 페이지만 → 밴 리스크↓.
+export const poizonTrending = mysqlTable(
+  "poizon_trending",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    normKey: varchar("norm_key", { length: 255 }).notNull(), // 상품 매칭키(브랜드+상품)
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    brand: varchar("brand", { length: 100 }),
+    rankPos: int("rank_pos").default(0), // 랭킹 순위(1이 최상위)
+    category: varchar("category", { length: 80 }), // 랭킹 카테고리(있으면)
+    isNew: boolean("is_new").default(false), // 신상 페이지에서 관측
+    trendingScore: int("trending_score").default(0), // 급상승 지표(페이지 배지/파생)
+    priceCny: int("price_cny").default(0), // 카드에 노출된 시세(있으면)
+    soldCount: int("sold_count").default(0), // 카드에 노출된 판매량(있으면)
+    imageUrl: varchar("image_url", { length: 1000 }),
+    source: varchar("source", { length: 30 }).default("extension"),
+    observedAt: timestamp("observed_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    obsRankIdx: index("idx_ptr_obs_rank").on(t.observedAt, t.rankPos),
+    keyIdx: index("idx_ptr_key").on(t.normKey),
+  })
+);
+
+export type PoizonTrending = typeof poizonTrending.$inferSelect;
+export type InsertPoizonTrending = typeof poizonTrending.$inferInsert;

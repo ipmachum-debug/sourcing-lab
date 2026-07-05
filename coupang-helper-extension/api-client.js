@@ -303,6 +303,11 @@ class ApiClient {
     return this._call('myProducts.snapshotSubmit', data, 'mutation');
   }
 
+  // ===== POIZON 시장 정찰 (랭킹/신상 패시브 수집) =====
+  async poizonTrendingSubmit(data) {
+    return this._call('poizonTrending.submit', data, 'mutation');
+  }
+
   // ===== v8.0: AI 제품 발견 시스템 =====
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');

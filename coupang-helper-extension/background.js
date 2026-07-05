@@ -974,6 +974,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.11: POIZON 시장 정찰(랭킹/신상) 패시브 배치 제출
+    case 'SUBMIT_POIZON_TRENDING': {
+      (async () => {
+        const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+        const d = message.data || {};
+        if (!serverLoggedIn || !d.items || !d.items.length) { sendResponse({ ok: false }); return; }
+        try {
+          await apiClient.poizonTrendingSubmit(d);
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     // v8.10: 내 상품 스캔 수동 실행 / 상태 조회
     case 'RUN_MYPRODUCTS_SCAN': {
       (async () => {

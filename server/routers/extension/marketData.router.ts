@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.10.0";
+const EXTENSION_LATEST_VERSION = "8.11.0";
 const EXTENSION_CHANGELOG = [
+  "POIZON 시장 정찰 — 랭킹·신상 페이지를 열면 인기/급상승 상품 자동 발굴(패시브)",
   "내 상품 매일 1회 능동 스캔 — 지정 SKU만 순차·랜덤딜레이(20~60초)로 안전하게",
-  "안전장치 준수 — 실패 즉시 중단·동시접속 금지·CAPTCHA는 사람 처리·숫자만 저장",
-  "역직구 매입 판단 — POIZON 안정가 + 국내몰 최저가(패시브 수집) 유지",
+  "역직구 매입 판단 — POIZON 안정가 + 국내몰 최저가 유지",
 ];
 import { getDb } from "../../db";
 import {

@@ -30,6 +30,7 @@ import { sourcingWizardRouter } from "./routers/sourcingWizard.router";
 import { reversePurchaseRouter } from "./routers/reversePurchase.router";
 import { reverseDealsRouter } from "./routers/reverseDeals.router";
 import { myProductsRouter } from "./routers/myProducts.router";
+import { poizonTrendingRouter } from "./routers/poizonTrending.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -55,6 +56,7 @@ export const appRouter = router({
   reversePurchase: reversePurchaseRouter,
   reverseDeals: reverseDealsRouter,
   myProducts: myProductsRouter,
+  poizonTrending: poizonTrendingRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({
