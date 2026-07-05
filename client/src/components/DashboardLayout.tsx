@@ -138,6 +138,7 @@ const menuItems: MenuItem[] = [
   { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse" },
   { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse" },
   { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse" },
+  { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse" },
   { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse" },
   { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse" },
 

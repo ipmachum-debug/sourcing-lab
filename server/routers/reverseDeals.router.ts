@@ -190,6 +190,102 @@ export const reverseDealsRouter = router({
       return { ok: true };
     }),
 
+  // ===== 엑셀/CSV 일괄 업로드 (콜드스타트 시딩) =====
+  // 특가 리스트를 한 번에 시딩 → 국내 풀 + POIZON 관측 동시 적립.
+  // 크롤 없이 큐레이션한 스테디 SKU를 바로 "오늘 사야 할 상품"에 반영.
+  bulkImport: protectedProcedure
+    .input(
+      z.object({
+        rows: z
+          .array(
+            z.object({
+              brand: z.string().max(100).optional(),
+              productName: z.string().min(1).max(300),
+              size: z.string().max(40).optional(),
+              domesticPrice: z.number().int().min(0).default(0),
+              source: z.enum(DOMESTIC_SOURCES).default("other"),
+              poizonCny: z.number().int().min(0).default(0),
+              soldCount30d: z.number().int().min(0).default(0),
+            })
+          )
+          .min(1)
+          .max(1000),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      let domestic = 0;
+      let poizon = 0;
+      for (const r of input.rows) {
+        const normKey = normKeyOf(r.brand, r.productName);
+        // 국내 매입가 → 공유 풀
+        if (r.domesticPrice > 0) {
+          await db
+            .insert(domesticPricePool)
+            .values({
+              normKey,
+              source: r.source,
+              brand: r.brand ?? null,
+              productName: r.productName,
+              listPrice: r.domesticPrice,
+              salePrice: r.domesticPrice,
+              inStock: true,
+              observeCount: 1,
+            })
+            .onDuplicateKeyUpdate({
+              set: {
+                brand: r.brand ?? null,
+                productName: r.productName,
+                listPrice: r.domesticPrice,
+                salePrice: r.domesticPrice,
+                inStock: true,
+                observeCount: sql`${domesticPricePool.observeCount} + 1`,
+                lastObservedAt: sql`NOW()`,
+              },
+            })
+            .catch(() => {});
+          domestic++;
+        }
+        // POIZON 시세 → 체결 관측 + 최신 스냅샷
+        if (r.poizonCny > 0) {
+          await db
+            .insert(poizonSaleObservations)
+            .values({
+              normKey,
+              size: r.size ?? null,
+              brand: r.brand ?? null,
+              productName: r.productName,
+              priceCny: r.poizonCny,
+              soldCount30d: r.soldCount30d,
+              source: "manual",
+            })
+            .catch(() => {});
+          await db
+            .insert(poizonPricePool)
+            .values({
+              normKey,
+              brand: r.brand ?? null,
+              productName: r.productName,
+              priceCny: r.poizonCny,
+              source: "manual",
+              observeCount: 1,
+              contributorCount: 1,
+            })
+            .onDuplicateKeyUpdate({
+              set: {
+                priceCny: r.poizonCny,
+                observeCount: sql`${poizonPricePool.observeCount} + 1`,
+                lastObservedAt: sql`NOW()`,
+              },
+            })
+            .catch(() => {});
+          poizon++;
+        }
+      }
+      return { ok: true, rows: input.rows.length, domestic, poizon };
+    }),
+
   // ===== 오늘 사야 할 상품 TOP N (매입 판단) =====
   // 국내 매입가 × POIZON 안정 판매가 → 순이익·마진율·안정성·추천수량.
   todayDeals: protectedProcedure
