@@ -143,6 +143,7 @@ const menuItems: MenuItem[] = [
   { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse" },
   { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse" },
   { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse" },
+  { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세

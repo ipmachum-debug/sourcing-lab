@@ -2011,3 +2011,35 @@ export const poizonTrending = mysqlTable(
 
 export type PoizonTrending = typeof poizonTrending.$inferSelect;
 export type InsertPoizonTrending = typeof poizonTrending.$inferInsert;
+
+// ==================== 판매 리포트 (sales_records) ====================
+// ★ 판매 사이트(POIZON·쇼피 등)에서 엑셀로 내려받아 업로드한 실판매 라인.
+//   판매량 추이 + 프로그램 시장 데이터(poizon_sale_observations)와 norm_key로 매칭 분석.
+//   크롤 없이 실데이터 → 밴 리스크 0.
+export const salesRecords = mysqlTable(
+  "sales_records",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id").notNull(),
+    channel: varchar("channel", { length: 30 }).default("poizon"), // poizon/shopee/other
+    orderDate: varchar("order_date", { length: 10 }).notNull(), // YYYY-MM-DD
+    normKey: varchar("norm_key", { length: 255 }).notNull(), // 매칭키(브랜드+상품)
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    brand: varchar("brand", { length: 100 }),
+    sku: varchar("sku", { length: 120 }),
+    size: varchar("size", { length: 40 }),
+    qty: int("qty").default(1),
+    salePrice: int("sale_price").default(0), // 판매 단가(정산 전)
+    currency: varchar("currency", { length: 8 }).default("CNY"),
+    settleAmount: int("settle_amount").default(0), // 정산액(있으면)
+    externalOrderId: varchar("external_order_id", { length: 120 }), // 주문번호(중복 방지용, 있으면)
+    createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    userDateIdx: index("idx_sr_user_date").on(t.userId, t.orderDate),
+    keyIdx: index("idx_sr_key").on(t.normKey),
+  })
+);
+
+export type SalesRecord = typeof salesRecords.$inferSelect;
+export type InsertSalesRecord = typeof salesRecords.$inferInsert;

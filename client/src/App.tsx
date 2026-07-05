@@ -44,6 +44,7 @@ import ReverseImport from "./pages/ReverseImport";
 import ReverseMyProducts from "./pages/ReverseMyProducts";
 import ReverseMarket from "./pages/ReverseMarket";
 import ReverseSkuDetail from "./pages/ReverseSkuDetail";
+import ReverseSales from "./pages/ReverseSales";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
 import ContentManager from "./pages/marketing/ContentManager";
 import PublishQueue from "./pages/marketing/PublishQueue";
@@ -73,6 +74,7 @@ function Router() {
       <Route path="/reverse/import" component={ReverseImport} />
       <Route path="/reverse/my-products" component={ReverseMyProducts} />
       <Route path="/reverse/market" component={ReverseMarket} />
+      <Route path="/reverse/sales" component={ReverseSales} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/daily" component={DailySourcing as any} />
       <Route path="/daily-profit" component={DailyProfitBoard} />
