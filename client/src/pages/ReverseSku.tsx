@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
+import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Camera, Plus, Trash2 } from "lucide-react";
+import { Camera, Plus, Trash2, LineChart } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 
@@ -160,7 +161,10 @@ export default function ReverseSku() {
                           <span className={`inline-grid place-items-center h-6 w-6 rounded-md text-[11px] font-bold ${GRADE_STYLE[g]}`}>{g}</span>
                         </td>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-slate-100 truncate max-w-[240px]">{r.s.productName}</p>
+                          <Link href={`/reverse/sku/${r.s.id}`} className="group inline-flex items-center gap-1.5">
+                            <span className="font-medium text-slate-100 truncate max-w-[220px] group-hover:text-fuchsia-300 transition-colors">{r.s.productName}</span>
+                            <LineChart className="h-3.5 w-3.5 text-slate-600 group-hover:text-fuchsia-300" />
+                          </Link>
                           <p className="text-[11px] text-slate-500">{r.s.brand || "-"}</p>
                         </td>
                         <td className="text-right px-3 py-2.5 text-slate-300">{won(r.s.domesticPrice || 0)}</td>
