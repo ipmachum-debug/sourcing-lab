@@ -29,6 +29,7 @@ import { marketingRouter } from "./routers/marketing";
 import { sourcingWizardRouter } from "./routers/sourcingWizard.router";
 import { reversePurchaseRouter } from "./routers/reversePurchase.router";
 import { reverseDealsRouter } from "./routers/reverseDeals.router";
+import { myProductsRouter } from "./routers/myProducts.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -53,6 +54,7 @@ export const appRouter = router({
   sourcingWizard: sourcingWizardRouter,
   reversePurchase: reversePurchaseRouter,
   reverseDeals: reverseDealsRouter,
+  myProducts: myProductsRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

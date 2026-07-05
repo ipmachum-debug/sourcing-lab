@@ -135,6 +135,7 @@ const menuItems: MenuItem[] = [
   // ===== 역직구 채널 (국내매입 → 해외판매) =====
   { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse" },
   { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse" },
+  { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse" },
   { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse" },
   { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse" },
   { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse" },
