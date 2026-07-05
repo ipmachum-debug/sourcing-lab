@@ -26,7 +26,7 @@ import {
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
   Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar,
 } from "lucide-react";
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 
@@ -132,18 +132,21 @@ const menuItems: MenuItem[] = [
   { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: TrendingUp, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
 
-  // ===== 역직구 채널 (국내매입 → 해외판매) =====
-  { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse" },
-  { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse" },
-  { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse" },
-  { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse" },
-  { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse" },
-  { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse" },
-  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse" },
-  { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse" },
-  { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse" },
-  { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse" },
-  { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse" },
+  // ===== 역직구 채널 (국내매입 → 해외판매) — 3그룹: 의사결정 / 도구 / 운영 =====
+  { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse", group: "home" },
+  // 의사결정
+  { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "decide" },
+  { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "decide" },
+  { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse", group: "decide" },
+  // 도구
+  { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "tools" },
+  { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse", group: "tools" },
+  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse", group: "tools" },
+  // 운영
+  { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops" },
+  { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse", group: "ops" },
+  { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse", group: "ops" },
+  { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse", group: "ops" },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
@@ -348,10 +351,14 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             )}
             <SidebarMenu className="px-2 py-1">
               {/* ===== 메인 (초보자) ===== */}
-              {mainItems.map(item => {
+              {mainItems.map((item, idx) => {
                 const isActive = location === item.path;
+                const prev = mainItems[idx - 1];
+                const showDivider = !isCollapsed && idx > 0 && !!item.group && prev?.group !== item.group;
                 return (
-                  <SidebarMenuItem key={item.path}>
+                  <Fragment key={item.path}>
+                  {showDivider && <div className="my-1.5 mx-3 border-t border-white/10" />}
+                  <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
@@ -371,6 +378,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  </Fragment>
                 );
               })}
 
