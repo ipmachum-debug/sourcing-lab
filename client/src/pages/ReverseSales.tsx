@@ -4,7 +4,8 @@ import { trpc } from "@/lib/trpc";
 import ImportExportBar from "@/components/ImportExportBar";
 import Sparkline from "@/components/Sparkline";
 import type { FieldSpec } from "@/lib/csv";
-import { BarChart3, Package2, TrendingUp } from "lucide-react";
+import { BarChart3, Package2, TrendingUp, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 const SALES_SPECS: FieldSpec[] = [
   { key: "orderDate", alias: /(주문일|판매일|결제일|날짜|date|订单|时间|结算)/ },
@@ -49,10 +50,16 @@ export default function ReverseSales() {
   const cur = (n: number) => (currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${currency}`);
   const money = (n: number) => (d?.currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${d?.currency || ""}`);
 
+  const inv = () => utils.salesReport.summary.invalidate();
   const importMut = trpc.salesReport.bulkImport.useMutation({
-    onSuccess: r => { utils.salesReport.summary.invalidate(); },
-    onError: e => alert(e.message),
+    onSuccess: () => { toast.success("업로드 완료"); inv(); },
+    onError: e => toast.error(e.message),
   });
+  const removeSkuMut = trpc.salesReport.removeBySku.useMutation({ onSuccess: () => { toast.success("삭제됨"); inv(); }, onError: e => toast.error(e.message) });
+  const clearMut = trpc.salesReport.clear.useMutation({ onSuccess: () => { toast.success("삭제 완료"); inv(); }, onError: e => toast.error(e.message) });
+
+  const clearChannel = () => { if (confirm(`${CH_LABEL[channel]} 채널의 판매 데이터를 모두 삭제할까요?`)) clearMut.mutate({ channel }); };
+  const clearAll = () => { if (confirm("업로드한 모든 판매 데이터를 삭제할까요? (되돌릴 수 없습니다)")) clearMut.mutate({}); };
 
   const qtySeries = (d?.trend ?? []).map(t => t.qty);
   const revSeries = (d?.trend ?? []).map(t => t.revenue);
@@ -121,6 +128,18 @@ export default function ReverseSales() {
               <input type="number" value={rate} onChange={e => setRate(Number(e.target.value) || 190)}
                 className="w-16 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-400/60" />
             </label>
+            {d && d.totals.orders > 0 && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <button onClick={clearChannel} disabled={clearMut.isPending}
+                  className="text-[11px] text-slate-400 hover:text-red-300 border border-white/10 rounded-lg px-2.5 py-1.5 flex items-center gap-1">
+                  <Trash2 className="h-3.5 w-3.5" /> {CH_LABEL[channel]} 삭제
+                </button>
+                <button onClick={clearAll} disabled={clearMut.isPending}
+                  className="text-[11px] text-slate-400 hover:text-red-300 border border-white/10 rounded-lg px-2.5 py-1.5">
+                  전체 삭제
+                </button>
+              </div>
+            )}
           </div>
 
           {!d || d.totals.orders === 0 ? (
@@ -232,6 +251,7 @@ export default function ReverseSales() {
                         <th className="text-right font-medium px-3 py-2.5">시장 P50</th>
                         <th className="text-center font-medium px-3 py-2.5">시장 대비</th>
                         <th className="text-right font-medium px-3 py-2.5">회전일</th>
+                        <th className="px-3 py-2.5" />
                       </tr>
                     </thead>
                     <tbody>
@@ -253,6 +273,12 @@ export default function ReverseSales() {
                             )}
                           </td>
                           <td className="text-right px-3 py-2 text-slate-400">{s.turnoverDays != null ? `${s.turnoverDays}일` : "-"}</td>
+                          <td className="text-right px-3 py-2">
+                            <button onClick={() => { if (confirm(`"${s.productName}" 판매 기록을 삭제할까요?`)) removeSkuMut.mutate({ normKey: s.normKey }); }}
+                              className="text-slate-600 hover:text-red-400 transition-colors" title="이 상품 판매 데이터 삭제">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
