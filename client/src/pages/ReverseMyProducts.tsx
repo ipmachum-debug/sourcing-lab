@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { LineChart, Plus, Trash2, ShieldCheck, Bell, Save, Power } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
+import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 const PLATFORM_LABEL: Record<string, string> = { coupang: "쿠팡", poizon: "POIZON", domestic: "국내" };
@@ -22,9 +23,11 @@ interface Prod {
   id: number; platform: string | null; productName: string; brand: string | null;
   sku: string | null; myPriceKrw: number | null; targetStock: number | null; active: boolean;
 }
+interface SeriesPt { d: string; revenue: number; units: number; stock: number; cny: number; comp: number }
 interface DashItem {
   product: Prod;
   latest: { revenueKrw: number; unitsSold: number; stock: number; rankPos: number; poizonPriceCny: number; competitorLowKrw: number; capturedDate: string } | null;
+  series: SeriesPt[];
   poizonDeltaPct: number; stockLow: boolean; undercut: boolean;
 }
 
@@ -140,6 +143,20 @@ export default function ReverseMyProducts() {
             </div>
           )}
 
+          {/* 판매 현황 카드 (추이 시각화) */}
+          {dash && dash.items.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <LineChart className="h-4 w-4 text-fuchsia-300" />
+                <h2 className="text-sm font-semibold text-slate-100">판매 현황</h2>
+                <span className="text-[11px] text-slate-500">최근 30일 추이 · 데이터가 쌓일수록 선명해집니다</span>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {dash.items.map(it => <SkuCard key={it.product.id} it={it} />)}
+              </div>
+            </div>
+          )}
+
           {/* 등록 */}
           <div className="glass rounded-2xl p-4">
             <div className="grid sm:grid-cols-6 gap-2">
@@ -228,6 +245,62 @@ export default function ReverseMyProducts() {
 
 function Guard({ children }: { children: React.ReactNode }) {
   return <div className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span>{children}</div>;
+}
+
+function statusOf(it: DashItem): { dot: string; ring: string; label: string; tone: string } {
+  const unitsDown = trendOf(it.series.map(p => p.units)).dir === "down";
+  if (it.undercut || it.stockLow || it.poizonDeltaPct <= -20)
+    return { dot: "bg-red-400", ring: "ring-red-400/40", label: "🔴 검토", tone: "text-red-300" };
+  if (it.poizonDeltaPct <= -5 || unitsDown)
+    return { dot: "bg-amber-400", ring: "ring-amber-400/30", label: "🟡 관찰", tone: "text-amber-300" };
+  return { dot: "bg-emerald-400", ring: "ring-emerald-400/20", label: "🟢 안정", tone: "text-emerald-300" };
+}
+
+function SkuCard({ it }: { it: DashItem }) {
+  const s = it.series;
+  const hasData = s.length > 0;
+  const latest = it.latest;
+  const st = statusOf(it);
+  const avgUnits = s.length ? Math.round((s.reduce((a, p) => a + p.units, 0) / s.length) * 10) / 10 : 0;
+  const summary = !hasData
+    ? "데이터 수집 대기 — 확장 스캔/수동 기록 시 채워집니다"
+    : `재고 ${latest?.stock ?? 0}개 · 하루 평균 ${avgUnits}건${it.poizonDeltaPct ? ` · 시세 7일 ${it.poizonDeltaPct > 0 ? "+" : ""}${it.poizonDeltaPct}%` : ""}`;
+  return (
+    <div className={`glass rounded-2xl p-4 ring-1 ${st.ring}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${st.dot}`} />
+            <p className="font-bold text-slate-100 truncate max-w-[180px]">{it.product.productName}</p>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">{it.product.brand || "-"}</p>
+        </div>
+        <span className={`text-[11px] font-semibold ${st.tone}`}>{st.label}</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mt-3">
+        <Metric label="매출" values={s.map(p => p.revenue)} value={latest ? won(latest.revenueKrw) : "-"} />
+        <Metric label="재고" values={s.map(p => p.stock)} value={latest ? `${latest.stock}개` : "-"} />
+        <Metric label="시세" values={s.map(p => p.cny)} value={latest?.poizonPriceCny ? `${latest.poizonPriceCny}¥` : "-"} />
+      </div>
+
+      <p className={`text-[11px] mt-3 ${hasData ? "text-slate-400" : "text-slate-600"}`}>{summary}</p>
+    </div>
+  );
+}
+
+function Metric({ label, values, value }: { label: string; values: number[]; value: string }) {
+  const t = trendOf(values);
+  return (
+    <div className="text-slate-400">
+      <div className="flex items-center justify-between text-[10px] mb-0.5">
+        <span>{label}</span>
+        <TrendArrow dir={t.dir} />
+      </div>
+      <Sparkline values={values} width={92} height={24} className="w-full text-slate-500" />
+      <p className="text-[11px] font-semibold text-slate-200 mt-0.5">{value}</p>
+    </div>
+  );
 }
 function In({ placeholder, value, onChange, type, span2 }: { placeholder: string; value: string; onChange: (v: string) => void; type?: string; span2?: boolean }) {
   return <input type={type || "text"} placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)}

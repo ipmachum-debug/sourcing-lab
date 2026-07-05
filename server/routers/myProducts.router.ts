@@ -296,9 +296,22 @@ export const myProductsRouter = router({
       const cnyPrev = weekAgo?.poizonPriceCny ?? 0;
       const poizonDeltaPct =
         cnyPrev > 0 ? Math.round(((cny - cnyPrev) / cnyPrev) * 1000) / 10 : 0;
+      // 시계열 (오름차순) — sparkline용 최근 30일
+      const series = arr
+        .slice()
+        .reverse()
+        .map(s => ({
+          d: s.capturedDate,
+          revenue: s.revenueKrw ?? 0,
+          units: s.unitsSold ?? 0,
+          stock: s.stock ?? 0,
+          cny: s.poizonPriceCny ?? 0,
+          comp: s.competitorLowKrw ?? 0,
+        }));
       return {
         product: p,
         latest,
+        series,
         poizonDeltaPct,
         stockLow:
           latest != null &&
