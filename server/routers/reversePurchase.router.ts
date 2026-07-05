@@ -122,6 +122,42 @@ export const reversePurchaseRouter = router({
       return { ok: true };
     }),
 
+  // 매입 일괄 등록 (엑셀/CSV 업로드)
+  bulkCreate: protectedProcedure
+    .input(
+      z.object({
+        rows: z
+          .array(
+            z.object({
+              brand: z.string().max(100).optional(),
+              productName: z.string().min(1).max(300),
+              sku: z.string().max(120).optional(),
+              buyChannel: z.string().max(80).optional(),
+              buyPrice: z.number().int().min(0).default(0),
+              qty: z.number().int().min(1).default(1),
+              buyDate: z.string().max(10).optional(),
+              condition: z.enum(CONDITION).default("new"),
+              soldPrice: z.number().int().min(0).default(0),
+              sellChannel: z.enum(SELL_CHANNEL).optional(),
+              sellDate: z.string().max(10).optional(),
+              status: z.enum(STATUS).default("purchased"),
+              memo: z.string().max(500).optional(),
+            })
+          )
+          .min(1)
+          .max(1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const uid = ctx.user!.id;
+      await db
+        .insert(reversePurchases)
+        .values(input.rows.map(r => ({ userId: uid, ...r })));
+      return { ok: true, count: input.rows.length };
+    }),
+
   update: protectedProcedure
     .input(
       z.object({
@@ -216,6 +252,49 @@ export const reversePurchaseRouter = router({
         .delete(reverseSkuWatch)
         .where(and(eq(reverseSkuWatch.id, input.id), eq(reverseSkuWatch.userId, ctx.user!.id)));
       return { ok: true };
+    }),
+
+  // SKU 일괄 등록 (엑셀/CSV 업로드)
+  skuBulkCreate: protectedProcedure
+    .input(
+      z.object({
+        rows: z
+          .array(
+            z.object({
+              brand: z.string().max(100).optional(),
+              productName: z.string().min(1).max(300),
+              sku: z.string().max(120).optional(),
+              category: z.string().max(80).optional(),
+              domesticPrice: z.number().int().min(0).default(0),
+              poizonCny: z.number().int().min(0).default(0),
+              rate: z.number().int().min(1).default(190),
+              feePct: z.number().int().min(0).max(30).default(9),
+              note: z.string().max(300).optional(),
+            })
+          )
+          .min(1)
+          .max(1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const uid = ctx.user!.id;
+      await db
+        .insert(reverseSkuWatch)
+        .values(input.rows.map(r => ({ userId: uid, ...r })));
+      // POIZON 시세는 공유 풀에도 반영
+      for (const r of input.rows) {
+        if (r.poizonCny && r.poizonCny > 0) {
+          await upsertPoizon(db, {
+            brand: r.brand,
+            productName: r.productName,
+            priceCny: r.poizonCny,
+            source: "manual",
+          }).catch(() => {});
+        }
+      }
+      return { ok: true, count: input.rows.length };
     }),
 
   // ===== 공유 POIZON 시세 풀 (패시브 수집) =====

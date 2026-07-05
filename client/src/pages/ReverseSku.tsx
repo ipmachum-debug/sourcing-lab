@@ -3,6 +3,17 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Camera, Plus, Trash2 } from "lucide-react";
+import ImportExportBar from "@/components/ImportExportBar";
+import type { FieldSpec } from "@/lib/csv";
+
+const SKU_SPECS: FieldSpec[] = [
+  { key: "brand", alias: /^(브랜드|brand)/ },
+  { key: "productName", alias: /(상품명|상품|productname|name|모델)/ },
+  { key: "domesticPrice", alias: /(국내|매입가|특가|domesticprice)/, type: "number" },
+  { key: "poizonCny", alias: /(poizon|시세|위안|cny|판매가)/, type: "number" },
+  { key: "rate", alias: /(환율|rate)/, type: "number" },
+  { key: "feePct", alias: /(수수료|fee)/, type: "number" },
+];
 
 interface Sku {
   id: number; brand: string | null; productName: string; sku: string | null; category: string | null;
@@ -34,6 +45,7 @@ export default function ReverseSku() {
   const inv = () => utils.reversePurchase.skuList.invalidate();
   const createMut = trpc.reversePurchase.skuCreate.useMutation({ onSuccess: () => { toast.success("SKU 추가"); inv(); }, onError: e => toast.error(e.message) });
   const removeMut = trpc.reversePurchase.skuRemove.useMutation({ onSuccess: inv });
+  const bulkMut = trpc.reversePurchase.skuBulkCreate.useMutation({ onSuccess: r => { toast.success(`${r.count}건 업로드`); inv(); }, onError: e => toast.error(e.message) });
 
   const [f, setF] = useState({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "190", feePct: "9" });
   const lookupPool = async () => {
@@ -65,13 +77,42 @@ export default function ReverseSku() {
     <DashboardLayout>
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-5xl mx-auto space-y-6">
-          <div>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <Camera className="h-3.5 w-3.5" /> Today's SKU
-            </span>
-            <h1 className="text-3xl font-black mt-4 neon-text">오늘의 SKU TOP100</h1>
-            <p className="text-slate-300/80 mt-2">아비트리지 후보를 워치리스트에 넣으면 <b className="text-white">스프레드 순으로 랭킹</b>. 오늘 살 것만 위에서 봅니다.</p>
-            <p className="text-[11px] text-amber-300/80 mt-1">ⓘ 지금은 수동 등록 · POIZON 자동 시세 피드는 다음 단계</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
+                <Camera className="h-3.5 w-3.5" /> Today's SKU
+              </span>
+              <h1 className="text-3xl font-black mt-4 neon-text">오늘의 SKU TOP100</h1>
+              <p className="text-slate-300/80 mt-2">아비트리지 후보를 워치리스트에 넣으면 <b className="text-white">스프레드 순으로 랭킹</b>. 오늘 살 것만 위에서 봅니다.</p>
+              <p className="text-[11px] text-amber-300/80 mt-1">ⓘ 엑셀로 한 번에 올리거나, 확장이 본 시세를 자동으로 채웁니다</p>
+            </div>
+            <ImportExportBar
+              filename="오늘의SKU"
+              importSpecs={SKU_SPECS}
+              requiredKey="productName"
+              importing={bulkMut.isPending}
+              templateHeaders={["브랜드", "상품명", "국내매입가", "POIZON시세(위안)", "환율", "수수료"]}
+              templateExample={[["크록스", "크록스 클래식 클로그 블랙", 34900, 380, 190, 9]]}
+              onImport={rows =>
+                bulkMut.mutate({
+                  rows: rows.map(r => ({
+                    brand: r.brand || undefined,
+                    productName: r.productName,
+                    domesticPrice: r.domesticPrice || 0,
+                    poizonCny: r.poizonCny || 0,
+                    rate: r.rate > 0 ? r.rate : undefined,
+                    feePct: r.feePct > 0 ? r.feePct : undefined,
+                  })),
+                })
+              }
+              onExport={() => ({
+                headers: ["브랜드", "상품명", "국내가", "POIZON(위안)", "환율", "매출(원)", "순익(원)", "마진율(%)"],
+                rows: ranked.map(r => [
+                  r.s.brand || "", r.s.productName, r.s.domesticPrice || 0, r.s.poizonCny || 0,
+                  r.s.rate || 190, r.poizonKRW, r.net, r.marginRate.toFixed(1),
+                ]),
+              })}
+            />
           </div>
 
           {/* 등록 */}
