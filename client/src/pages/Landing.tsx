@@ -76,22 +76,22 @@ export default function Landing() {
       <div className="max-w-6xl w-full grid md:grid-cols-2 gap-8 items-center relative z-10">
         {/* Left: Illustration */}
         <div className="flex flex-col items-center justify-center space-y-6 text-center">
-          <div className="w-64 h-64 bg-white/60 rounded-3xl p-8 shadow-xl shadow-pink-100/40 backdrop-blur-sm border border-white/60 animate-float">
-            <img 
-              src={CHARACTERS.EMPTY_STATE} 
-              alt="Sourcing Lab" 
+          <div className="w-64 h-64 glass rounded-3xl p-8 border border-white/10 animate-float" style={{ boxShadow: "0 0 40px rgba(217,70,239,0.18)" }}>
+            <img
+              src={CHARACTERS.EMPTY_STATE}
+              alt="Sourcing Lab"
               className="w-full h-full object-contain drop-shadow-md"
             />
           </div>
           <div className="space-y-3">
             <h1 className="text-4xl font-bold gradient-text flex items-center justify-center gap-2">
-              <Sparkles className="h-7 w-7 text-pink-400 animate-sparkle" />
+              <Sparkles className="h-7 w-7 text-fuchsia-400 animate-sparkle" />
               Sourcing Lab
             </h1>
-            <p className="text-lg text-gray-700 font-medium">
+            <p className="text-lg text-slate-200 font-medium">
               데일리 소싱 & 주간 리뷰 시스템에 오신 것을 환영합니다!
             </p>
-            <p className="text-sm text-gray-500 max-w-md mx-auto leading-relaxed">
+            <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
               매일 상품을 소싱하고 분석하세요. 자동 점수 계산, 마진 분석,
               주간 리뷰로 효율적인 소싱 관리가 가능합니다.
             </p>
@@ -99,20 +99,20 @@ export default function Landing() {
         </div>
 
         {/* Right: Login form */}
-        <Card className="shadow-2xl shadow-pink-200/30 border-2 border-pink-100/60 backdrop-blur-sm bg-white/90 rounded-3xl overflow-hidden">
+        <Card className="glass border border-white/10 rounded-3xl overflow-hidden" style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(217,70,239,0.12)" }}>
           <div className="h-1.5 bg-gradient-to-r from-pink-400 via-fuchsia-400 to-purple-500" />
           <CardHeader className="space-y-1 pt-6">
             <CardTitle className="text-2xl text-center gradient-text">
               로그인
             </CardTitle>
-            <CardDescription className="text-center text-pink-400/80">
+            <CardDescription className="text-center text-fuchsia-300/80">
               소싱 관리 시스템에 로그인하세요
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium text-gray-600">이메일</Label>
+                <Label htmlFor="email" className="text-sm font-medium text-slate-300">이메일</Label>
                 <Input
                   id="email"
                   type="email"
@@ -124,7 +124,7 @@ export default function Landing() {
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-sm font-medium text-gray-600">비밀번호</Label>
+                  <Label htmlFor="password" className="text-sm font-medium text-slate-300">비밀번호</Label>
                   <a 
                     href="/forgot-password" 
                     className="text-xs text-pink-400 hover:text-pink-500 hover:underline transition-colors"
@@ -162,7 +162,7 @@ export default function Landing() {
                   </span>
                 )}
               </Button>
-              <div className="text-center text-sm text-gray-500">
+              <div className="text-center text-sm text-slate-400">
                 계정이 없으신가요?{" "}
                 <a 
                   href="/register" 
@@ -177,7 +177,7 @@ export default function Landing() {
       </div>
 
       {/* Company Info Footer */}
-      <div className="fixed bottom-4 left-0 right-0 z-10 text-center text-[11px] text-gray-400 leading-relaxed">
+      <div className="fixed bottom-4 left-0 right-0 z-10 text-center text-[11px] text-slate-500 leading-relaxed">
         <p>
           (주)골든터틀컴퍼니 | 대표전화 <a href="tel:032-322-9958" className="hover:text-pink-400">032-322-9958</a> | <a href="mailto:sokoorymall@naver.com" className="hover:text-pink-400">sokoorymall@naver.com</a> | 사업자등록번호 603-81-93743
         </p>
