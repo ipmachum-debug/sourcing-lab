@@ -88,6 +88,32 @@ export const salesReportRouter = router({
       return { ok: true, count: values.length, skipped: input.rows.length - values.length };
     }),
 
+  // ===== 판매 데이터 삭제 =====
+  // 특정 SKU(norm_key)의 내 판매 기록 전부 삭제
+  removeBySku: protectedProcedure
+    .input(z.object({ normKey: z.string().min(1).max(255) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db
+        .delete(salesRecords)
+        .where(and(eq(salesRecords.userId, ctx.user!.id), eq(salesRecords.normKey, input.normKey)));
+      return { ok: true };
+    }),
+
+  // 채널 전체 또는 내 판매 데이터 전부 삭제
+  clear: protectedProcedure
+    .input(z.object({ channel: z.enum(["poizon", "shopee", "other"]).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const cond = input.channel
+        ? and(eq(salesRecords.userId, ctx.user!.id), eq(salesRecords.channel, input.channel))
+        : eq(salesRecords.userId, ctx.user!.id);
+      await db.delete(salesRecords).where(cond);
+      return { ok: true };
+    }),
+
   // ===== 판매 분석 (추이 + SKU별 + 시장 매칭) =====
   summary: protectedProcedure
     .input(

@@ -119,6 +119,15 @@ export const myProductsRouter = router({
         .where(
           and(eq(myProducts.id, input.id), eq(myProducts.userId, ctx.user!.id))
         );
+      // 스냅샷도 함께 정리 (고아 데이터 방지)
+      await db
+        .delete(productSnapshots)
+        .where(
+          and(
+            eq(productSnapshots.myProductId, input.id),
+            eq(productSnapshots.userId, ctx.user!.id)
+          )
+        );
       return { ok: true };
     }),
 
