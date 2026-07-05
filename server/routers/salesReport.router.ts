@@ -1,6 +1,6 @@
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { salesRecords, poizonSaleObservations } from "../../drizzle/schema";
+import { salesRecords, poizonSaleObservations, reversePurchases } from "../../drizzle/schema";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -90,12 +90,20 @@ export const salesReportRouter = router({
 
   // ===== 판매 분석 (추이 + SKU별 + 시장 매칭) =====
   summary: protectedProcedure
-    .input(z.object({ days: z.number().int().min(7).max(365).default(90) }).optional())
+    .input(
+      z
+        .object({
+          days: z.number().int().min(7).max(365).default(90),
+          rate: z.number().int().min(1).max(1000).default(190), // 원가(KRW) → 판매통화 환산
+        })
+        .optional()
+    )
     .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const uid = ctx.user!.id;
       const days = input?.days ?? 90;
+      const rate = input?.rate ?? 190;
       const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
       const recs = await db
         .select()
@@ -103,9 +111,41 @@ export const salesReportRouter = router({
         .where(and(eq(salesRecords.userId, uid), gte(salesRecords.orderDate, since)))
         .limit(20000);
       if (recs.length === 0)
-        return { trend: [], bySku: [], totals: { orders: 0, qty: 0, revenue: 0 }, matched: 0, currency: "CNY" };
+        return {
+          trend: [], bySku: [], totals: { orders: 0, qty: 0, revenue: 0 },
+          matched: 0, currency: "CNY", channels: [], monthly: [], avgTurnoverDays: null,
+        };
 
       const currency = recs[0].currency || "CNY";
+      // 원가 환산: 매입가는 KRW. 판매통화가 CNY면 /rate, KRW면 그대로.
+      const costToSale = (krw: number) => (currency === "KRW" ? krw : Math.round(krw / rate));
+
+      // 매입 데이터 — norm_key별 평균 매입가(KRW) + 회전일(매입→판매)
+      const purchases = await db
+        .select()
+        .from(reversePurchases)
+        .where(eq(reversePurchases.userId, uid))
+        .limit(20000);
+      const costByKey = new Map<string, number[]>();
+      const turnByKey = new Map<string, number[]>();
+      for (const p of purchases) {
+        const nk = normKeyOf(p.brand, p.productName);
+        if ((p.buyPrice ?? 0) > 0) {
+          const arr = costByKey.get(nk) ?? [];
+          arr.push(p.buyPrice ?? 0);
+          costByKey.set(nk, arr);
+        }
+        if (p.buyDate && p.sellDate) {
+          const t = (new Date(p.sellDate).getTime() - new Date(p.buyDate).getTime()) / 86400000;
+          if (Number.isFinite(t) && t >= 0) {
+            const arr = turnByKey.get(nk) ?? [];
+            arr.push(Math.round(t));
+            turnByKey.set(nk, arr);
+          }
+        }
+      }
+      const avgOf = (a: number[] | undefined) =>
+        a && a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0;
 
       // 일별 추이
       const dayMap = new Map<string, { qty: number; revenue: number }>();
@@ -165,19 +205,74 @@ export const salesReportRouter = router({
           if (hasMarket) matched++;
           const vsMarketPct =
             hasMarket && myAvg > 0 ? Math.round(((myAvg - marketP50) / marketP50) * 1000) / 10 : null;
+          const turnoverDays = avgOf(turnByKey.get(normKey)) || null;
           return {
             normKey, productName: e.productName, brand: e.brand,
             qty: e.qty, revenue: e.revenue, myAvg, marketP50: hasMarket ? marketP50 : 0,
-            vsMarketPct, lastDate: e.last,
+            vsMarketPct, lastDate: e.last, turnoverDays,
           };
         })
         .sort((a, b) => b.qty - a.qty);
+
+      // 채널별 실적 (POIZON vs 쇼피 …)
+      const chMap = new Map<string, { qty: number; revenue: number; settle: number; orders: number }>();
+      for (const r of recs) {
+        const ch = r.channel || "other";
+        const e = chMap.get(ch) ?? { qty: 0, revenue: 0, settle: 0, orders: 0 };
+        e.qty += r.qty ?? 0;
+        e.revenue += (r.salePrice ?? 0) * (r.qty ?? 0);
+        e.settle += (r.settleAmount ?? 0) * (r.qty ?? 0);
+        e.orders += 1;
+        chMap.set(ch, e);
+      }
+      const channels = [...chMap.entries()]
+        .map(([channel, v]) => ({
+          channel, ...v,
+          avgPrice: v.qty ? Math.round(v.revenue / v.qty) : 0,
+          net: v.settle > 0 ? v.settle : v.revenue,
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
+
+      // 월별 손익계산서 — 매출·정산(수령)·원가(매입 환산)·순이익
+      const moMap = new Map<
+        string,
+        { revenue: number; settle: number; qty: number; orders: number; cost: number; costQty: number }
+      >();
+      for (const r of recs) {
+        const mo = r.orderDate.slice(0, 7); // YYYY-MM
+        const e = moMap.get(mo) ?? { revenue: 0, settle: 0, qty: 0, orders: 0, cost: 0, costQty: 0 };
+        const q = r.qty ?? 0;
+        e.revenue += (r.salePrice ?? 0) * q;
+        e.settle += (r.settleAmount ?? 0) * q;
+        e.qty += q;
+        e.orders += 1;
+        const unitCostKrw = avgOf(costByKey.get(r.normKey));
+        if (unitCostKrw > 0) { e.cost += costToSale(unitCostKrw) * q; e.costQty += q; }
+        moMap.set(mo, e);
+      }
+      const monthly = [...moMap.entries()]
+        .map(([month, v]) => {
+          const net = v.settle > 0 ? v.settle : v.revenue; // 수령액(정산 없으면 매출)
+          const profit = net - v.cost;
+          return {
+            month, revenue: v.revenue, settle: v.settle, net, cost: v.cost, profit,
+            qty: v.qty, orders: v.orders,
+            marginPct: net > 0 ? Math.round((profit / net) * 1000) / 10 : 0,
+            costCoveragePct: v.qty ? Math.round((v.costQty / v.qty) * 100) : 0,
+          };
+        })
+        .sort((a, b) => a.month.localeCompare(b.month));
+
+      const allTurns = [...turnByKey.values()].flat();
+      const avgTurnoverDays = allTurns.length
+        ? Math.round(allTurns.reduce((a, b) => a + b, 0) / allTurns.length)
+        : null;
 
       const totals = {
         orders: recs.length,
         qty: recs.reduce((a, r) => a + (r.qty ?? 0), 0),
         revenue: recs.reduce((a, r) => a + (r.salePrice ?? 0) * (r.qty ?? 0), 0),
       };
-      return { trend, bySku, totals, matched, currency };
+      return { trend, bySku, totals, matched, currency, channels, monthly, avgTurnoverDays };
     }),
 });

@@ -21,20 +21,30 @@ const SALES_SPECS: FieldSpec[] = [
 interface SkuRow {
   normKey: string; productName: string; brand: string | null;
   qty: number; revenue: number; myAvg: number; marketP50: number; vsMarketPct: number | null; lastDate: string;
+  turnoverDays: number | null;
+}
+interface ChannelRow { channel: string; qty: number; revenue: number; settle: number; orders: number; avgPrice: number; net: number }
+interface MonthRow {
+  month: string; revenue: number; settle: number; net: number; cost: number; profit: number;
+  qty: number; orders: number; marginPct: number; costCoveragePct: number;
 }
 interface Summary {
   trend: { d: string; qty: number; revenue: number }[];
   bySku: SkuRow[];
   totals: { orders: number; qty: number; revenue: number };
   matched: number; currency: string;
+  channels: ChannelRow[]; monthly: MonthRow[]; avgTurnoverDays: number | null;
 }
+
+const CH_LABEL: Record<string, string> = { poizon: "POIZON", shopee: "Shopee", other: "기타" };
 
 export default function ReverseSales() {
   const utils = trpc.useUtils();
   const [channel, setChannel] = useState<"poizon" | "shopee" | "other">("poizon");
   const [currency, setCurrency] = useState("CNY");
   const [days, setDays] = useState(90);
-  const q = trpc.salesReport.summary.useQuery({ days });
+  const [rate, setRate] = useState(190);
+  const q = trpc.salesReport.summary.useQuery({ days, rate });
   const d = q.data as Summary | undefined;
   const cur = (n: number) => (currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${currency}`);
   const money = (n: number) => (d?.currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${d?.currency || ""}`);
@@ -89,21 +99,28 @@ export default function ReverseSales() {
                   })),
                 })}
                 onExport={() => ({
-                  headers: ["상품", "브랜드", "판매량", "매출", "내평균가", "시장P50", "대비%", "최근판매"],
-                  rows: (d?.bySku ?? []).map(s => [s.productName, s.brand || "", s.qty, s.revenue, s.myAvg, s.marketP50, s.vsMarketPct ?? "", s.lastDate]),
+                  headers: ["상품", "브랜드", "판매량", "매출", "내평균가", "시장P50", "대비%", "회전일", "최근판매"],
+                  rows: (d?.bySku ?? []).map(s => [s.productName, s.brand || "", s.qty, s.revenue, s.myAvg, s.marketP50, s.vsMarketPct ?? "", s.turnoverDays ?? "", s.lastDate]),
                 })}
               />
             </div>
           </div>
 
-          {/* 기간 */}
-          <div className="flex gap-1">
-            {[30, 90, 180].map(r => (
-              <button key={r} onClick={() => setDays(r)}
-                className={`text-xs px-3 py-1 rounded-lg border ${days === r ? "bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/50" : "border-white/10 text-slate-400"}`}>
-                {r}일
-              </button>
-            ))}
+          {/* 기간 + 원가환산 환율 */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex gap-1">
+              {[30, 90, 180].map(r => (
+                <button key={r} onClick={() => setDays(r)}
+                  className={`text-xs px-3 py-1 rounded-lg border ${days === r ? "bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/50" : "border-white/10 text-slate-400"}`}>
+                  {r}일
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              원가환산 환율(원/위안)
+              <input type="number" value={rate} onChange={e => setRate(Number(e.target.value) || 190)}
+                className="w-16 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-400/60" />
+            </label>
           </div>
 
           {!d || d.totals.orders === 0 ? (
@@ -119,11 +136,73 @@ export default function ReverseSales() {
             <>
               {/* 요약 */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <Tile label="총 주문" value={`${d.totals.orders.toLocaleString()}건`} />
                 <Tile label="총 판매량" value={`${d.totals.qty.toLocaleString()}개`} />
                 <Tile label="총 매출" value={money(d.totals.revenue)} tone="good" />
+                <Tile label="평균 회전일" value={d.avgTurnoverDays != null ? `${d.avgTurnoverDays}일` : "-"} />
                 <Tile label="시장 매칭" value={`${d.matched}/${d.bySku.length} SKU`} />
               </div>
+
+              {/* 채널별 실적 */}
+              {d.channels.length > 0 && (
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100 mb-2">채널별 실적</h2>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {d.channels.map(c => (
+                      <div key={c.channel} className="glass rounded-2xl p-4">
+                        <p className="font-bold text-white">{CH_LABEL[c.channel] || c.channel}</p>
+                        <p className="text-2xl font-black neon-text mt-1">{money(c.net)}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {c.qty}개 · {c.orders}건 · 평균 {cur(c.avgPrice)}
+                          {c.settle > 0 && <span className="text-slate-500"> · 정산 {money(c.settle)}</span>}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 월별 손익계산서 */}
+              {d.monthly.length > 0 && (
+                <div className="glass rounded-2xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/10">
+                    <h2 className="text-sm font-semibold text-slate-100">월별 손익계산서</h2>
+                    <p className="text-[11px] text-slate-500">순이익 = 수령액(정산 없으면 매출) − 매입원가(환율 {rate}원/위안 환산). 원가는 매입 관리와 매칭된 SKU만 반영.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead className="bg-white/5 text-xs text-slate-400">
+                        <tr>
+                          <th className="text-left font-medium px-3 py-2.5">월</th>
+                          <th className="text-right font-medium px-3 py-2.5">판매량</th>
+                          <th className="text-right font-medium px-3 py-2.5">매출</th>
+                          <th className="text-right font-medium px-3 py-2.5">원가</th>
+                          <th className="text-right font-medium px-3 py-2.5">순이익</th>
+                          <th className="text-center font-medium px-3 py-2.5">마진</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d.monthly.map(m => (
+                          <tr key={m.month} className="border-t border-white/8">
+                            <td className="px-3 py-2 font-medium text-slate-100">{m.month}</td>
+                            <td className="text-right px-3 py-2 text-slate-300">{m.qty}</td>
+                            <td className="text-right px-3 py-2 text-slate-300">{money(m.net)}</td>
+                            <td className="text-right px-3 py-2 text-slate-400">
+                              {m.cost ? money(m.cost) : "-"}
+                              {m.cost > 0 && m.costCoveragePct < 100 && <span className="text-[10px] text-amber-400/80"> ({m.costCoveragePct}%)</span>}
+                            </td>
+                            <td className={`text-right px-3 py-2 font-bold ${m.cost ? (m.profit >= 0 ? "text-emerald-300" : "text-red-400") : "text-slate-500"}`}>
+                              {m.cost ? money(m.profit) : "원가 미매칭"}
+                            </td>
+                            <td className="text-center px-3 py-2">
+                              {m.cost ? <span className={`text-xs font-semibold ${m.marginPct >= 0 ? "text-emerald-300" : "text-red-400"}`}>{m.marginPct}%</span> : <span className="text-slate-600 text-xs">-</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* 추이 */}
               <div className="glass rounded-2xl p-4 sm:p-5">
@@ -152,6 +231,7 @@ export default function ReverseSales() {
                         <th className="text-right font-medium px-3 py-2.5">내 평균가</th>
                         <th className="text-right font-medium px-3 py-2.5">시장 P50</th>
                         <th className="text-center font-medium px-3 py-2.5">시장 대비</th>
+                        <th className="text-right font-medium px-3 py-2.5">회전일</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -172,6 +252,7 @@ export default function ReverseSales() {
                               </span>
                             )}
                           </td>
+                          <td className="text-right px-3 py-2 text-slate-400">{s.turnoverDays != null ? `${s.turnoverDays}일` : "-"}</td>
                         </tr>
                       ))}
                     </tbody>
