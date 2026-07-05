@@ -6,7 +6,7 @@ import {
   poizonPricePool,
   reverseSkuWatch,
 } from "../../drizzle/schema";
-import { desc, eq, gte, like, sql } from "drizzle-orm";
+import { and, desc, eq, gte, like, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -188,6 +188,118 @@ export const reverseDealsRouter = router({
         })
         .catch(() => {});
       return { ok: true };
+    }),
+
+  // ===== SKU 상세 (시세/판매 추이 + P25/P50/P75 안정가 밴드) =====
+  skuDetail: protectedProcedure
+    .input(z.object({ skuId: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [sku] = await db
+        .select()
+        .from(reverseSkuWatch)
+        .where(
+          and(
+            eq(reverseSkuWatch.id, input.skuId),
+            eq(reverseSkuWatch.userId, ctx.user!.id)
+          )
+        )
+        .limit(1);
+      if (!sku) throw new TRPCError({ code: "NOT_FOUND" });
+      const nk = normKeyOf(sku.brand, sku.productName);
+      const now = Date.now();
+      const obs = await db
+        .select()
+        .from(poizonSaleObservations)
+        .where(
+          and(
+            eq(poizonSaleObservations.normKey, nk),
+            gte(
+              poizonSaleObservations.observedAt,
+              sql`DATE_SUB(NOW(), INTERVAL 90 DAY)`
+            )
+          )
+        )
+        .orderBy(poizonSaleObservations.observedAt)
+        .limit(3000);
+
+      const series = obs.map(o => ({
+        t: o.observedAt ? new Date(o.observedAt).getTime() : now,
+        d: o.observedAt ? String(o.observedAt).slice(0, 10) : "",
+        price: o.priceCny,
+        sold: o.soldCount30d ?? 0,
+        size: o.size ?? null,
+      }));
+
+      const pct = (sortedAsc: number[], p: number) => {
+        if (sortedAsc.length === 0) return 0;
+        if (sortedAsc.length === 1) return sortedAsc[0];
+        const idx = (p / 100) * (sortedAsc.length - 1);
+        const lo = Math.floor(idx), hi = Math.ceil(idx);
+        return lo === hi
+          ? sortedAsc[lo]
+          : Math.round(sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo));
+      };
+      const DAY = 86400000;
+      const statsFor = (days: number) => {
+        const prices = series
+          .filter(s => now - s.t <= days * DAY && s.price > 0)
+          .map(s => s.price)
+          .sort((a, b) => a - b);
+        return {
+          p25: pct(prices, 25),
+          p50: pct(prices, 50),
+          p75: pct(prices, 75),
+          min: prices[0] ?? 0,
+          max: prices[prices.length - 1] ?? 0,
+          count: prices.length,
+        };
+      };
+      const stats30 = statsFor(30);
+      const stats90 = statsFor(90);
+
+      // 현재 시세 위치 (최근 30일 내 백분위: 0=최저, 100=최고)
+      const win30 = series
+        .filter(s => now - s.t <= 30 * DAY && s.price > 0)
+        .map(s => s.price)
+        .sort((a, b) => a - b);
+      const latest = series.length ? series[series.length - 1].price : 0;
+      const posPct =
+        win30.length > 0
+          ? Math.round((win30.filter(p => p <= latest).length / win30.length) * 100)
+          : 0;
+
+      // 사이즈별 (30일)
+      const bySizeMap = new Map<string, { prices: number[]; latest: number; latestT: number }>();
+      for (const s of series) {
+        if (!s.size || now - s.t > 30 * DAY || s.price <= 0) continue;
+        const e = bySizeMap.get(s.size) ?? { prices: [], latest: 0, latestT: 0 };
+        e.prices.push(s.price);
+        if (s.t >= e.latestT) { e.latest = s.price; e.latestT = s.t; }
+        bySizeMap.set(s.size, e);
+      }
+      const bySize = [...bySizeMap.entries()]
+        .map(([size, e]) => ({
+          size,
+          p50: pct(e.prices.slice().sort((a, b) => a - b), 50),
+          latest: e.latest,
+          count: e.prices.length,
+        }))
+        .sort((a, b) => a.size.localeCompare(b.size, undefined, { numeric: true }));
+
+      return {
+        sku: {
+          id: sku.id, brand: sku.brand, productName: sku.productName,
+          domesticPrice: sku.domesticPrice ?? 0, poizonCny: sku.poizonCny ?? 0,
+          rate: sku.rate ?? 190, feePct: sku.feePct ?? 9,
+        },
+        series,
+        stats30,
+        stats90,
+        current: { price: latest, posPct },
+        bySize,
+      };
     }),
 
   // ===== 워치리스트 알림 (앱 메인 표시) =====
