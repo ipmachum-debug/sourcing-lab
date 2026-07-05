@@ -3,6 +3,17 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Package, Plus, Trash2, Check, X, Clock } from "lucide-react";
+import ImportExportBar from "@/components/ImportExportBar";
+import type { FieldSpec } from "@/lib/csv";
+
+const BUY_SPECS: FieldSpec[] = [
+  { key: "brand", alias: /^(브랜드|brand)/ },
+  { key: "productName", alias: /(상품명|상품|productname|name|모델)/ },
+  { key: "buyChannel", alias: /(매입처|구매처|채널|channel|몰)/ },
+  { key: "buyPrice", alias: /(매입가|단가|buyprice|가격)/, type: "number" },
+  { key: "qty", alias: /(수량|qty|개수)/, type: "number" },
+  { key: "buyDate", alias: /(매입일|구매일|날짜|date)/ },
+];
 
 interface Row {
   id: number;
@@ -37,6 +48,7 @@ export default function ReversePurchases() {
   const createMut = trpc.reversePurchase.create.useMutation({ onSuccess: () => { toast.success("매입 등록"); invalidate(); }, onError: e => toast.error(e.message) });
   const updateMut = trpc.reversePurchase.update.useMutation({ onSuccess: invalidate, onError: e => toast.error(e.message) });
   const removeMut = trpc.reversePurchase.remove.useMutation({ onSuccess: () => { toast.success("삭제됨"); invalidate(); } });
+  const bulkMut = trpc.reversePurchase.bulkCreate.useMutation({ onSuccess: r => { toast.success(`${r.count}건 업로드`); invalidate(); }, onError: e => toast.error(e.message) });
 
   // 등록 폼
   const [f, setF] = useState({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new" });
@@ -68,12 +80,42 @@ export default function ReversePurchases() {
     <DashboardLayout>
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-6xl mx-auto space-y-6">
-          <div>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <Package className="h-3.5 w-3.5" /> Purchases
-            </span>
-            <h1 className="text-3xl font-black mt-4 neon-text">매입 관리</h1>
-            <p className="text-slate-300/80 mt-2">매입 → 검수 → 판매를 기록하면 <b className="text-white">검수 탈락률·회전일</b>이 쌓여 추천이 똑똑해집니다</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
+                <Package className="h-3.5 w-3.5" /> Purchases
+              </span>
+              <h1 className="text-3xl font-black mt-4 neon-text">매입 관리</h1>
+              <p className="text-slate-300/80 mt-2">매입 → 검수 → 판매를 기록하면 <b className="text-white">검수 탈락률·회전일</b>이 쌓여 추천이 똑똑해집니다</p>
+            </div>
+            <ImportExportBar
+              filename="매입내역"
+              importSpecs={BUY_SPECS}
+              requiredKey="productName"
+              importing={bulkMut.isPending}
+              templateHeaders={["브랜드", "상품명", "매입처", "매입가", "수량", "매입일"]}
+              templateExample={[["크록스", "크록스 클래식 클로그 블랙", "ABC마트", 34900, 20, today()]]}
+              onImport={rows =>
+                bulkMut.mutate({
+                  rows: rows.map(r => ({
+                    brand: r.brand || undefined,
+                    productName: r.productName,
+                    buyChannel: r.buyChannel || undefined,
+                    buyPrice: r.buyPrice || 0,
+                    qty: r.qty > 0 ? r.qty : 1,
+                    buyDate: r.buyDate || today(),
+                  })),
+                })
+              }
+              onExport={() => ({
+                headers: ["브랜드", "상품명", "매입처", "매입가", "수량", "매입액", "검수", "상태", "판매가", "매입일", "판매일"],
+                rows: rows.map(r => [
+                  r.brand || "", r.productName, r.buyChannel || "", r.buyPrice || 0, r.qty || 1,
+                  (r.buyPrice || 0) * (r.qty || 1), r.inspectStatus || "", STATUS_LABEL[r.status] || r.status,
+                  r.soldPrice || 0, r.buyDate || "", r.sellDate || "",
+                ]),
+              })}
+            />
           </div>
 
           {/* 요약 */}

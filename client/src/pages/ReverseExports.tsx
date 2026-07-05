@@ -2,6 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Ship, CheckCircle2 } from "lucide-react";
+import ImportExportBar from "@/components/ImportExportBar";
 
 interface Row {
   id: number; productName: string; brand: string | null;
@@ -41,12 +42,25 @@ export default function ReverseExports() {
     <DashboardLayout>
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-6xl mx-auto space-y-6">
-          <div>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <Ship className="h-3.5 w-3.5" /> Exports
-            </span>
-            <h1 className="text-3xl font-black mt-4 neon-text">수출 관리</h1>
-            <p className="text-slate-300/80 mt-2">판매·정산·회계를 채널별로 — 매입 관리에 기록한 판매 건이 여기로 흘러옵니다</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
+                <Ship className="h-3.5 w-3.5" /> Exports
+              </span>
+              <h1 className="text-3xl font-black mt-4 neon-text">수출 관리</h1>
+              <p className="text-slate-300/80 mt-2">판매·정산·회계를 채널별로 — 매입 관리에 기록한 판매 건이 여기로 흘러옵니다</p>
+            </div>
+            <ImportExportBar
+              filename="판매정산내역"
+              onExport={() => ({
+                headers: ["상품", "브랜드", "채널", "판매가", "매입가", "순익", "회전일", "상태", "매입일", "판매일"],
+                rows: rows.map(r => [
+                  r.productName, r.brand || "", r.sellChannel ? CH_LABEL[r.sellChannel] : "",
+                  r.soldPrice || 0, r.buyPrice || 0, (r.soldPrice || 0) - (r.buyPrice || 0),
+                  turnDays(r) ?? "", r.status, r.buyDate || "", r.sellDate || "",
+                ]),
+              })}
+            />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

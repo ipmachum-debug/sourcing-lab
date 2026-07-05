@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Flame, Settings2, Star, TrendingUp, Info, Calculator } from "lucide-react";
+import ImportExportBar from "@/components/ImportExportBar";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 
@@ -71,18 +72,30 @@ export default function ReverseDeals() {
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-6xl mx-auto space-y-6">
           {/* 헤더 */}
-          <div>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <Flame className="h-3.5 w-3.5" /> Buy Signals
-            </span>
-            <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">오늘 사야 할 상품</h1>
-            <p className="text-slate-300/80 mt-2">
-              감으로 사지 말고 <b className="text-white">숫자로</b> 삽니다. POIZON <b className="text-fuchsia-300">안정 판매가(최근 30일 하위 25%)</b> 기준으로
-              순이익·마진율·추천 매입 수량을 계산해요.
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1.5">
-              후보 {data?.totalCandidates ?? 0}개 · 실측 시세 보유 {data?.withObservations ?? 0}개
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
+                <Flame className="h-3.5 w-3.5" /> Buy Signals
+              </span>
+              <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">오늘 사야 할 상품</h1>
+              <p className="text-slate-300/80 mt-2">
+                감으로 사지 말고 <b className="text-white">숫자로</b> 삽니다. POIZON <b className="text-fuchsia-300">안정 판매가(최근 30일 하위 25%)</b> 기준으로
+                순이익·마진율·추천 매입 수량을 계산해요.
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                후보 {data?.totalCandidates ?? 0}개 · 실측 시세 보유 {data?.withObservations ?? 0}개
+              </p>
+            </div>
+            <ImportExportBar
+              filename="오늘사야할상품_발주서"
+              onExport={() => ({
+                headers: ["브랜드", "상품", "국내특가", "안정판매가(원)", "예상순이익", "마진율(%)", "안정성", "추천수량"],
+                rows: deals.map(d => [
+                  d.brand || "", d.productName, d.domesticBuyKrw, d.revenueKrw,
+                  d.netProfitKrw, d.marginPct.toFixed(1), d.grade, d.recommendQty,
+                ]),
+              })}
+            />
           </div>
 
           {/* 즉석 매입 계산기 */}
