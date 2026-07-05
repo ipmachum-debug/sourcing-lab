@@ -1,16 +1,68 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useLocation } from "wouter";
-import { Globe2, Camera, Scale, Dices, Package, Ship, Sparkles } from "lucide-react";
+import { useLocation, Link } from "wouter";
+import { trpc } from "@/lib/trpc";
+import { Globe2, Camera, Scale, Dices, Package, Ship, Sparkles, Radar, Flame, Activity, Bell, ArrowRight } from "lucide-react";
 
-// 역직구 채널 홈 — 국내매입 → 해외판매(POIZON·당근·아마존). 도구는 순차 오픈.
+// 역직구 채널 홈 — 국내매입 → 해외판매(POIZON·당근·아마존).
 const TOOLS = [
+  { icon: Radar, emoji: "📡", title: "시장 정찰", desc: "POIZON 랭킹·신상·급상승 자동 발굴 — 뭘 팔지 찾기", path: "/reverse/market" },
+  { icon: Flame, emoji: "🔥", title: "오늘 사야 할 상품", desc: "POIZON 안정가 기준 순익·마진·추천 매입 수량", path: "/reverse/deals" },
+  { icon: Activity, emoji: "📊", title: "내 상품 관리", desc: "내 SKU 매일 스냅샷 · 추이 그래프 · 알림", path: "/reverse/my-products" },
   { icon: Camera, emoji: "📸", title: "오늘의 SKU TOP100", desc: "국내가 × POIZON 스프레드로 오늘 살 SKU 랭킹", path: "/reverse/sku" },
   { icon: Scale, emoji: "⚖️", title: "아비트리지 계산", desc: "POIZON 수수료·검수탈락·부가세환급까지 반영한 순익", path: "/reverse/arbitrage" },
   { icon: Dices, emoji: "🎲", title: "베팅 사이징", desc: "자금 회전 기준으로 SKU별 매입 수량 추천", path: "/reverse/betting" },
   { icon: Package, emoji: "📦", title: "매입 관리", desc: "매입·검수·판매 기록 → 검수탈락률·회전일 축적", path: "/reverse/purchases" },
   { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "채널별 판매·정산·회계", path: "/reverse/exports" },
 ];
+
+const SEV_STYLE: Record<string, string> = {
+  high: "border-red-400/40 bg-red-500/10",
+  med: "border-amber-400/30 bg-amber-500/10",
+  info: "border-emerald-400/25 bg-emerald-500/10",
+};
+const SEV_DOT: Record<string, string> = { high: "bg-red-400", med: "bg-amber-400", info: "bg-emerald-400" };
+
+interface AlertRow {
+  skuId: number; productName: string; brand: string | null;
+  type: string; deltaPct: number; latestCny: number; severity: string; message: string;
+}
+
+function WatchlistAlerts() {
+  const q = trpc.reverseDeals.watchAlerts.useQuery(undefined, { refetchOnWindowFocus: false });
+  const d = q.data as { alerts: AlertRow[]; watched: number; withData: number } | undefined;
+  if (!d || d.watched === 0) return null;
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Bell className="h-4 w-4 text-fuchsia-300" />
+        <h2 className="text-sm font-semibold text-slate-100 tracking-wide">워치리스트 알림</h2>
+        <span className="text-[11px] text-slate-500">감시 {d.watched}개 · 시세 표본 {d.withData}개</span>
+        <Link href="/reverse/sku" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
+          워치리스트 <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+      {d.alerts.length === 0 ? (
+        <div className="glass rounded-2xl p-4 text-sm text-slate-400">
+          ✅ 조용합니다 — 워치리스트 SKU에 ±10% 시세 변동·판매 급증 없음. (시세가 쌓이면 자동 감지)
+        </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-2.5">
+          {d.alerts.slice(0, 8).map((a, i) => (
+            <div key={i} className={`rounded-xl border p-3 flex items-start gap-2.5 ${SEV_STYLE[a.severity]}`}>
+              <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${SEV_DOT[a.severity]}`} />
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-100 text-sm truncate">{a.productName}</p>
+                <p className="text-[12px] text-slate-300">{a.message}</p>
+                <p className="text-[10px] text-slate-500">{a.brand || ""}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 
 const STEPS = [
   { n: 1, title: "국내 싸게 매입", desc: "아울렛·무신사 할인 상품 확보" },
@@ -42,6 +94,9 @@ export default function Reverse() {
               <Sparkles className="h-3.5 w-3.5" /> 새 채널 · 도구 순차 오픈 중
             </span>
           </div>
+
+          {/* 워치리스트 알림 (앱 메인 표시) */}
+          <WatchlistAlerts />
 
           {/* 3단계 */}
           <section>
