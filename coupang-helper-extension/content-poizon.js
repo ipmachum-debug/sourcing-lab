@@ -28,6 +28,23 @@
     return el && el.textContent ? el.textContent.trim().slice(0, 100) : "";
   }
 
+  // 사이즈 추출 (defensive: 선택된 사이즈 버튼/활성 옵션)
+  function pickSize() {
+    const sel = document.querySelector(
+      '[class*="size" i][class*="active" i], [class*="size" i][class*="selected" i], [class*="sku" i][aria-selected="true"]'
+    );
+    const t = sel && sel.textContent ? sel.textContent.trim() : "";
+    const m = t.match(/\d{2,3}(?:\.\d)?/);
+    return m ? m[0] : "";
+  }
+
+  // 30일 판매량 추출 (defensive: "已售/月销/최근 판매 N" 패턴)
+  function pickSold30d() {
+    const txt = (document.body && document.body.innerText) || "";
+    const m = txt.match(/(?:已售|月销|최근\s*판매|sold)\D{0,6}([0-9][0-9,]{0,6})/i);
+    return m ? toNum(m[1]) : 0;
+  }
+
   // 위안(¥) 시세 추출 (defensive: 명시 가격요소 → ¥ 텍스트 스캔)
   function pickPriceCny() {
     // 1) 가격으로 보이는 요소 우선
@@ -52,11 +69,22 @@
       const priceCny = pickPriceCny();
       if (!productName || !priceCny) return; // 상품/가격 신호 없으면 스킵
       const brand = pickBrand();
-      const key = productName + "|" + priceCny;
+      const size = pickSize();
+      const soldCount30d = pickSold30d();
+      const key = productName + "|" + size + "|" + priceCny;
       if (key === lastKey) return; // 같은 페이지 중복 방지
       lastKey = key;
+      const base = { productName, brand: brand || undefined, priceCny };
+      // 1) 최신 시세 스냅샷 (오늘의 SKU 자동 채움)
       chrome.runtime
-        .sendMessage({ type: "SUBMIT_POIZON_PRICE", data: { productName, brand: brand || undefined, priceCny } })
+        .sendMessage({ type: "SUBMIT_POIZON_PRICE", data: base })
+        .catch(() => {});
+      // 2) 체결 관측 (안정가 산출용, 사이즈/판매량 포함)
+      chrome.runtime
+        .sendMessage({
+          type: "SUBMIT_POIZON_OBSERVE",
+          data: { ...base, size: size || undefined, soldCount30d },
+        })
         .catch(() => {});
     } catch (_) {}
   }

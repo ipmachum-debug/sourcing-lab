@@ -931,6 +931,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    // v8.9: 역직구 POIZON 체결 시세 관측 (안정가 산출용, 사이즈/판매량 포함)
+    case 'SUBMIT_POIZON_OBSERVE': {
+      (async () => {
+        const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+        const d = message.data || {};
+        if (!serverLoggedIn || !d.productName || !d.priceCny) { sendResponse({ ok: false }); return; }
+        try {
+          await apiClient.poizonObserve({ ...d, source: 'extension' });
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
+    // v8.9: 역직구 국내몰 최저가 패시브 제출 (content-domestic.js → 국내 공유 풀)
+    case 'SUBMIT_DOMESTIC_PRICE': {
+      (async () => {
+        const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+        const d = message.data || {};
+        if (!serverLoggedIn || !d.productName) { sendResponse({ ok: false }); return; }
+        if (!d.listPrice && !d.salePrice && !d.couponPrice) { sendResponse({ ok: false }); return; }
+        try {
+          await apiClient.domesticSubmit({ ...d, source: d.source || 'other' });
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+
     case 'STOP_AUTO_COLLECT': {
       stopAutoCollect();
       sendResponse({ ok: true });

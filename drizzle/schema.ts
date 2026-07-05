@@ -1,4 +1,4 @@
-import { boolean, decimal, int, json, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, decimal, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 // ★ MySQL 서버가 KST(+09:00)로 동작하며, drizzle-orm의 timestamp()는
 //   내부적으로 `new Date(value + "+0000")`으로 UTC 강제 변환하여 9시간 오차 발생.
@@ -1846,3 +1846,68 @@ export const poizonPricePool = mysqlTable("poizon_price_pool", {
 
 export type PoizonPrice = typeof poizonPricePool.$inferSelect;
 export type InsertPoizonPrice = typeof poizonPricePool.$inferInsert;
+
+// ==================== 공유 국내 최저가 풀 (domestic_price_pool) ====================
+// ★ 역직구 소싱의 국내 절반: 유저가 본 국내몰(무신사/ABC마트/크록스/나이키/아디다스/
+//   뉴발란스/LF몰/롯데ON/SSG/29CM…) 상품가를 패시브로 공유(userId 무관).
+//   (norm_key, source) 유니크 → 상품별·소스별 1행. 상품별 MIN 실구매가로 최저가 산출.
+//   POIZON 시세 풀과 norm_key로 조인 → "오늘 사야 할 상품 TOP 20".
+export const domesticPricePool = mysqlTable(
+  "domestic_price_pool",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    normKey: varchar("norm_key", { length: 255 }).notNull(), // 정규화(브랜드+상품) 매칭키
+    source: varchar("source", { length: 40 }).notNull(), // musinsa/abcmart/crocs/nike/adidas/newbalance/lfmall/lotteon/ssg/29cm/other
+    brand: varchar("brand", { length: 100 }),
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    sku: varchar("sku", { length: 120 }), // 모델번호/품번(있으면)
+    listPrice: int("list_price").default(0), // 정상가(원)
+    salePrice: int("sale_price").default(0), // 할인 후 판매가(원)
+    couponPrice: int("coupon_price").default(0), // 쿠폰/카드 적용 최저가(원, 있으면)
+    discountPct: int("discount_pct").default(0), // 할인율(%)
+    imageUrl: varchar("image_url", { length: 1000 }),
+    productUrl: varchar("product_url", { length: 1000 }),
+    inStock: boolean("in_stock").default(true), // 품절 여부
+    observeCount: int("observe_count").default(0), // 총 관측 횟수
+    lastObservedAt: timestamp("last_observed_at", tsOpts).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", tsOpts)
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => ({
+    srcKey: uniqueIndex("dpp_src_key_unique").on(t.normKey, t.source),
+    nameIdx: index("idx_dpp_name").on(t.productName),
+  })
+);
+
+export type DomesticPrice = typeof domesticPricePool.$inferSelect;
+export type InsertDomesticPrice = typeof domesticPricePool.$inferInsert;
+
+// ==================== POIZON 체결 시세 관측 (poizon_sale_observations) ====================
+// ★ 안정 판매가(최근 30일 P25)·거래량·변동폭 산출용 사이즈별 체결 표본 (append-only, 공유).
+//   유저가 본 상품 페이지의 사이즈별 시세/판매량을 패시브로 적립.
+//   대량 크롤 없이 "본 것만" 저빈도로 쌓아 보수적 안정가를 계산 → 밴 리스크↓.
+export const poizonSaleObservations = mysqlTable(
+  "poizon_sale_observations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    normKey: varchar("norm_key", { length: 255 }).notNull(), // 상품 매칭키(브랜드+상품)
+    size: varchar("size", { length: 40 }), // 사이즈(있으면) — 사이즈별 회전율
+    brand: varchar("brand", { length: 100 }),
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    priceCny: int("price_cny").notNull(), // 체결/호가 시세(위안)
+    soldCount30d: int("sold_count_30d").default(0), // 페이지에 노출된 30일 판매량(있으면)
+    source: varchar("source", { length: 30 }).default("extension"), // manual/extension
+    observedAt: timestamp("observed_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    keyIdx: index("idx_pso_key").on(t.normKey),
+    keySizeIdx: index("idx_pso_key_size").on(t.normKey, t.size),
+    obsIdx: index("idx_pso_observed").on(t.observedAt),
+  })
+);
+
+export type PoizonSaleObservation = typeof poizonSaleObservations.$inferSelect;
+export type InsertPoizonSaleObservation =
+  typeof poizonSaleObservations.$inferInsert;
