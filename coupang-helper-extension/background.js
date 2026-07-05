@@ -41,6 +41,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('discoveryPolling', { periodInMinutes: 1 });
   // R5: 심화수집 폴링 (매 1분마다 원픽 결과 카드 요청 픽업) — scheduleEnabled 옵트인 시에만 실동작
   chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
+  // v8.10: 내 상품 매일 1회 능동 스캔 (기본 09:00). 안전장치는 서버 scanConfig 준수.
+  scheduleDailyMyProductsScan();
 
   // 설치 또는 업데이트 시 열린 쿠팡 탭을 새로고침하여 새 content script 적용
   if (details.reason === 'install' || details.reason === 'update') {
@@ -71,6 +73,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   // deepScanPolling 알람 보장 (on-expand 심화수집)
   const dsAlarm = await chrome.alarms.get('deepScanPolling').catch(() => null);
   if (!dsAlarm) chrome.alarms.create('deepScanPolling', { periodInMinutes: 1 });
+  // v8.10: 내 상품 일일 스캔 알람 보장
+  const mpAlarm = await chrome.alarms.get('dailyMyProductsScan').catch(() => null);
+  if (!mpAlarm) scheduleDailyMyProductsScan();
   // 10초 후 즉시 체크
   setTimeout(async () => {
     console.log('[Discovery] 서비스 워커 시작 — 자동 체크 실행');
@@ -104,6 +109,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // R5: 심화수집 폴링 (1분마다)
   if (alarm.name === 'deepScanPolling') {
     await runDeepScanPoll();
+  }
+  // v8.10: 내 상품 매일 1회 능동 스캔
+  if (alarm.name === 'dailyMyProductsScan') {
+    await runMyProductsScan('scheduled');
+    scheduleDailyMyProductsScan(); // 다음 날 09:00 재예약
   }
 });
 
@@ -961,6 +971,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: e.message });
         }
       })();
+      return true;
+    }
+
+    // v8.10: 내 상품 스캔 수동 실행 / 상태 조회
+    case 'RUN_MYPRODUCTS_SCAN': {
+      (async () => {
+        try {
+          const res = await runMyProductsScan('manual');
+          sendResponse({ ok: true, ...res });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+      })();
+      return true;
+    }
+    case 'GET_MYPRODUCTS_SCAN_STATE': {
+      sendResponse({ ok: true, state: myScanState });
       return true;
     }
 
@@ -3182,4 +3209,176 @@ async function crawlDetailPages(jobId, keyword, filteredProducts) {
 
   discoveryState.progress = `"${keyword}" AI 분석 진행 중... (서버에서 처리)`;
   console.log(`[Discovery] ✅ "${keyword}" 상세 ${detailResults.length}개 전송 완료, AI 분석 시작`);
+}
+
+
+// ============================================================
+// v8.10: 내 상품 매일 1회 능동 스캔 (My Products Daily Scan)
+// ============================================================
+// 원칙: 내가 지정한 소수 SKU만, 하루 1회, 서버 scanConfig의 안전장치를 그대로 준수.
+//   딜레이 20~60초·순차(동시금지)·실패 즉시중단·CAPTCHA는 사람 처리·숫자만 저장.
+//   서버에도 상한(50개·하루1회·레이트리밋)이 있어 확장을 뜯어고쳐도 최후 방벽 유지.
+
+let myScanState = { running: false, lastRun: null, lastResult: null, progress: '' };
+
+// 다음 09:00에 맞춰 알람 예약 (이후 24시간 주기)
+function scheduleDailyMyProductsScan() {
+  try {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(9, 0, 0, 0);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+    chrome.alarms.create('dailyMyProductsScan', {
+      when: next.getTime(),
+      periodInMinutes: 1440,
+    });
+    console.log('[MyScan] 다음 스캔 예약:', next.toLocaleString());
+  } catch (e) {
+    console.warn('[MyScan] 알람 예약 실패:', e.message);
+  }
+}
+
+function randDelay(cfg) {
+  const lo = cfg?.minDelayMs ?? 20000;
+  const hi = cfg?.maxDelayMs ?? 60000;
+  return Math.floor(lo + Math.random() * Math.max(1, hi - lo));
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 상품 → 방문 URL. externalId가 URL이면 그대로, 아니면 플랫폼 기본 상품 URL.
+function buildScanUrl(p) {
+  const ext = (p.externalId || '').trim();
+  if (/^https?:\/\//i.test(ext)) return ext;
+  if (p.platform === 'coupang' && ext) return `https://www.coupang.com/vp/products/${ext}`;
+  return null; // URL을 못 만들면 스킵 (무차별 검색 금지)
+}
+
+// 페이지 컨텍스트에서 실행될 추출기 (숫자만 반환). ⚠️ 실제 페이지 기준 셀렉터 튜닝 필요.
+function scrapeMetricsInPage() {
+  const out = { stock: 0, poizonPriceCny: 0, competitorLowKrw: 0, reviewCount: 0, rating: 0, rankPos: 0, priceKrw: 0, captcha: false };
+  try {
+    const body = (document.body && document.body.innerText) || '';
+    // CAPTCHA/차단 신호 → 즉시 표시(사람이 처리)
+    if (/보안문자|자동입력 방지|captcha|로봇이 아닙니다|unusual traffic/i.test(body)) {
+      out.captcha = true;
+      return out;
+    }
+    const num = s => {
+      const m = String(s || '').replace(/[,\s]/g, '').match(/([0-9]+(?:\.[0-9]+)?)/);
+      return m ? parseFloat(m[1]) : 0;
+    };
+    // 위안(¥) 시세 (POIZON/得物)
+    const cny = body.match(/[¥￥]\s*([0-9][0-9,]{1,7})/);
+    if (cny) out.poizonPriceCny = Math.round(num(cny[1]));
+    // 원(₩) 가격
+    const krwEl = document.querySelector('[class*="price" i], [class*="Price" i]');
+    if (krwEl) out.priceKrw = Math.round(num(krwEl.textContent));
+    // 재고
+    const stockM = body.match(/(?:재고|남은 수량|잔여)\D{0,4}([0-9][0-9,]{0,5})/);
+    if (stockM) out.stock = Math.round(num(stockM[1]));
+    // 리뷰 수 / 별점
+    const revM = body.match(/(?:리뷰|후기)\D{0,4}([0-9][0-9,]{0,6})/);
+    if (revM) out.reviewCount = Math.round(num(revM[1]));
+    const ratM = body.match(/([0-5](?:\.[0-9])?)\s*(?:점|\/\s*5|stars?)/i);
+    if (ratM) out.rating = Math.min(5, num(ratM[1]));
+  } catch (_) {}
+  return out;
+}
+
+// 탭을 열어 추출기를 주입하고 숫자만 회수. (한 번에 한 탭 = 동시 접속 금지)
+async function scanOneProduct(p) {
+  const url = buildScanUrl(p);
+  if (!url) return { skipped: true, reason: 'no_url' };
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    // 로드 대기 (최대 20초)
+    await new Promise(resolve => {
+      const t0 = Date.now();
+      const iv = setInterval(async () => {
+        const cur = await chrome.tabs.get(tab.id).catch(() => null);
+        if (!cur || cur.status === 'complete' || Date.now() - t0 > 20000) {
+          clearInterval(iv);
+          resolve();
+        }
+      }, 800);
+    });
+    await sleep(1500); // 렌더 여유
+    const [inj] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scrapeMetricsInPage,
+    });
+    const m = inj?.result || {};
+    if (m.captcha) return { captcha: true };
+    // 숫자 하나라도 있으면 스냅샷 제출 (0만 있으면 스킵 — 덮어쓰기 방지)
+    const hasData = (m.stock || m.poizonPriceCny || m.competitorLowKrw || m.reviewCount || m.priceKrw);
+    if (!hasData) return { empty: true };
+    const source = p.platform === 'coupang' ? 'coupang_wing' : (p.platform || 'manual');
+    await apiClient.myProductsSnapshot({
+      myProductId: p.id,
+      source,
+      stock: m.stock || 0,
+      poizonPriceCny: m.poizonPriceCny || 0,
+      competitorLowKrw: m.competitorLowKrw || (p.platform === 'domestic' ? m.priceKrw : 0) || 0,
+      reviewCount: m.reviewCount || 0,
+      rating: m.rating || undefined,
+      rankPos: m.rankPos || 0,
+    });
+    return { ok: true };
+  } catch (e) {
+    return { error: e.message };
+  } finally {
+    if (tab && tab.id) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+// 전체 스캔 — 순차 + 랜덤 딜레이 + 실패 즉시 중단 + CAPTCHA 일시정지
+async function runMyProductsScan(trigger) {
+  if (myScanState.running) return { alreadyRunning: true };
+  const { serverLoggedIn } = await chrome.storage.local.get('serverLoggedIn');
+  if (!serverLoggedIn) return { notLoggedIn: true };
+
+  myScanState = { running: true, lastRun: Date.now(), lastResult: null, progress: '설정 로딩' };
+  let done = 0, ok = 0, skipped = 0, stoppedReason = null;
+  try {
+    const cfg = (await apiClient.myProductsScanConfig()) || { minDelayMs: 20000, maxDelayMs: 60000, maxActiveSkus: 50, stopOnError: true };
+    const all = await apiClient.myProductsList();
+    // 활성만 + 상한 준수 (서버 상한과 이중 안전)
+    const targets = (all || []).filter(p => p.active).slice(0, cfg.maxActiveSkus || 50);
+    myScanState.progress = `대상 ${targets.length}개`;
+    console.log(`[MyScan] (${trigger}) 시작 — 대상 ${targets.length}개`);
+
+    for (let i = 0; i < targets.length; i++) {
+      const p = targets[i];
+      myScanState.progress = `${i + 1}/${targets.length} · ${p.productName?.slice(0, 20) || ''}`;
+      const r = await scanOneProduct(p);
+      done++;
+      if (r.ok) ok++;
+      else if (r.skipped || r.empty) skipped++;
+      if (r.captcha) {
+        stoppedReason = 'captcha';
+        chrome.notifications?.create(`myscan-captcha-${Date.now()}`, {
+          type: 'basic', iconUrl: 'icon48.png',
+          title: '내 상품 스캔 일시정지', message: 'CAPTCHA/보안 확인이 필요합니다. 직접 로그인/확인 후 다시 실행하세요.',
+        }).catch(() => {});
+        break; // 사람이 처리
+      }
+      if (r.error && cfg.stopOnError !== false) {
+        stoppedReason = 'error:' + r.error;
+        console.warn('[MyScan] 실패 → 즉시 중단:', r.error);
+        break; // 실패 즉시 중단
+      }
+      // 마지막이 아니면 랜덤 딜레이 (사람같이, 순차)
+      if (i < targets.length - 1) await sleep(randDelay(cfg));
+    }
+  } catch (e) {
+    stoppedReason = 'fatal:' + e.message;
+    console.warn('[MyScan] 치명적 오류:', e.message);
+  } finally {
+    myScanState.running = false;
+    myScanState.lastResult = { done, ok, skipped, stoppedReason, at: Date.now() };
+    myScanState.progress = stoppedReason ? `중단(${stoppedReason})` : `완료 ${ok}/${done}`;
+    console.log('[MyScan] 종료:', JSON.stringify(myScanState.lastResult));
+  }
+  return myScanState.lastResult;
 }
