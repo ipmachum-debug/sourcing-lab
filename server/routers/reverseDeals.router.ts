@@ -190,6 +190,95 @@ export const reverseDealsRouter = router({
       return { ok: true };
     }),
 
+  // ===== 워치리스트 알림 (앱 메인 표시) =====
+  // 워치리스트 SKU의 POIZON 시세 ±10% 변동·판매 급증을 관측 표본에서 계산.
+  watchAlerts: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const uid = ctx.user!.id;
+    const skus = await db
+      .select()
+      .from(reverseSkuWatch)
+      .where(eq(reverseSkuWatch.userId, uid))
+      .limit(300);
+    if (skus.length === 0) return { alerts: [], watched: 0, withData: 0 };
+
+    const now = Date.now();
+    const obs = await db
+      .select()
+      .from(poizonSaleObservations)
+      .where(
+        gte(
+          poizonSaleObservations.observedAt,
+          sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`
+        )
+      )
+      .limit(6000);
+    const byKey = new Map<
+      string,
+      { at: number; price: number; sold: number }[]
+    >();
+    for (const o of obs) {
+      const arr = byKey.get(o.normKey) ?? [];
+      arr.push({
+        at: o.observedAt ? new Date(o.observedAt).getTime() : now,
+        price: o.priceCny,
+        sold: o.soldCount30d ?? 0,
+      });
+      byKey.set(o.normKey, arr);
+    }
+
+    const DAY = 86400000;
+    type Alert = {
+      skuId: number; productName: string; brand: string | null;
+      type: "price_drop" | "price_up" | "sold_surge";
+      deltaPct: number; latestCny: number; severity: "high" | "med" | "info"; message: string;
+    };
+    const alerts: Alert[] = [];
+    let withData = 0;
+    for (const s of skus) {
+      const nk = normKeyOf(s.brand, s.productName);
+      const arr = (byKey.get(nk) ?? []).sort((a, b) => a.at - b.at);
+      if (arr.length < 2) continue;
+      withData++;
+      const latest = arr[arr.length - 1];
+      // 기준가: 최신에서 7일 이전 표본(없으면 최초)
+      const base = arr.find(x => latest.at - x.at <= 7 * DAY) ?? arr[0];
+      const deltaPct =
+        base.price > 0
+          ? Math.round(((latest.price - base.price) / base.price) * 1000) / 10
+          : 0;
+      if (deltaPct <= -10)
+        alerts.push({
+          skuId: s.id, productName: s.productName, brand: s.brand,
+          type: "price_drop", deltaPct, latestCny: latest.price,
+          severity: deltaPct <= -20 ? "high" : "med",
+          message: `시세 ${deltaPct}% (${latest.price}¥) — ${deltaPct <= -20 ? "손절/조정 검토" : "조정 관찰"}`,
+        });
+      else if (deltaPct >= 10)
+        alerts.push({
+          skuId: s.id, productName: s.productName, brand: s.brand,
+          type: "price_up", deltaPct, latestCny: latest.price, severity: "info",
+          message: `시세 +${deltaPct}% (${latest.price}¥) — 판매 기회`,
+        });
+      // 판매 급증
+      const soldBase = base.sold, soldNow = latest.sold;
+      if (soldBase > 0 && soldNow >= soldBase * 1.5 && soldNow - soldBase >= 5)
+        alerts.push({
+          skuId: s.id, productName: s.productName, brand: s.brand,
+          type: "sold_surge",
+          deltaPct: Math.round(((soldNow - soldBase) / soldBase) * 1000) / 10,
+          latestCny: latest.price, severity: "info",
+          message: `판매 급증 ${soldBase}→${soldNow}건`,
+        });
+    }
+    const rank = { high: 0, med: 1, info: 2 } as const;
+    alerts.sort(
+      (a, b) => rank[a.severity] - rank[b.severity] || Math.abs(b.deltaPct) - Math.abs(a.deltaPct)
+    );
+    return { alerts, watched: skus.length, withData };
+  }),
+
   // ===== 엑셀/CSV 일괄 업로드 (콜드스타트 시딩) =====
   // 특가 리스트를 한 번에 시딩 → 국내 풀 + POIZON 관측 동시 적립.
   // 크롤 없이 큐레이션한 스테디 SKU를 바로 "오늘 사야 할 상품"에 반영.
