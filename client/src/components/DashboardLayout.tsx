@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar, ScanLine,
 } from "lucide-react";
 import { CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -135,6 +135,7 @@ const menuItems: MenuItem[] = [
   // ===== 역직구 채널 (국내매입 → 해외판매) — 3그룹: 의사결정 / 도구 / 운영 =====
   { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse", group: "home" },
   // 의사결정
+  { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "decide" },
   { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "decide" },
   { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "decide" },
   { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse", group: "decide" },

@@ -33,6 +33,7 @@ import { myProductsRouter } from "./routers/myProducts.router";
 import { poizonTrendingRouter } from "./routers/poizonTrending.router";
 import { salesReportRouter } from "./routers/salesReport.router";
 import { aiMemoryRouter } from "./routers/aiMemory.router";
+import { photoSourcingRouter } from "./routers/photoSourcing.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -61,6 +62,7 @@ export const appRouter = router({
   poizonTrending: poizonTrendingRouter,
   salesReport: salesReportRouter,
   aiMemory: aiMemoryRouter,
+  photoSourcing: photoSourcingRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

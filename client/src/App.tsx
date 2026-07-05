@@ -43,6 +43,7 @@ import ReverseDeals from "./pages/ReverseDeals";
 import ReverseImport from "./pages/ReverseImport";
 import ReverseMyProducts from "./pages/ReverseMyProducts";
 import ReverseMarket from "./pages/ReverseMarket";
+import ReversePhoto from "./pages/ReversePhoto";
 import ReverseSkuDetail from "./pages/ReverseSkuDetail";
 import ReverseSales from "./pages/ReverseSales";
 import MarketingDashboard from "./pages/marketing/MarketingDashboard";
@@ -74,6 +75,7 @@ function Router() {
       <Route path="/reverse/import" component={ReverseImport} />
       <Route path="/reverse/my-products" component={ReverseMyProducts} />
       <Route path="/reverse/market" component={ReverseMarket} />
+      <Route path="/reverse/photo" component={ReversePhoto} />
       <Route path="/reverse/sales" component={ReverseSales} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/daily" component={DailySourcing as any} />
