@@ -32,6 +32,7 @@ import { reverseDealsRouter } from "./routers/reverseDeals.router";
 import { myProductsRouter } from "./routers/myProducts.router";
 import { poizonTrendingRouter } from "./routers/poizonTrending.router";
 import { salesReportRouter } from "./routers/salesReport.router";
+import { aiMemoryRouter } from "./routers/aiMemory.router";
 
 export const appRouter = router({
   system: systemRouter,
@@ -59,6 +60,7 @@ export const appRouter = router({
   myProducts: myProductsRouter,
   poizonTrending: poizonTrendingRouter,
   salesReport: salesReportRouter,
+  aiMemory: aiMemoryRouter,
 
   // ===== 인증 (기존 유지) =====
   auth: router({

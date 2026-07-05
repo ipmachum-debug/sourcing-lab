@@ -4,7 +4,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import PriceBandChart from "@/components/PriceBandChart";
 import Sparkline from "@/components/Sparkline";
-import { ArrowLeft, Calculator, TrendingUp, Package2 } from "lucide-react";
+import { ArrowLeft, Calculator, TrendingUp, Package2, BrainCircuit } from "lucide-react";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 const cny = (n: number) => `¥${Math.round(n || 0).toLocaleString()}`;
@@ -17,6 +17,22 @@ interface Detail {
   current: { price: number; posPct: number };
   bySize: { size: string; p50: number; latest: number; count: number }[];
 }
+interface AiAdvice {
+  sku: { id: number; brand: string | null; productName: string; color: string | null };
+  memory: { buyCount: number; buyQty: number; avgTurnover: number | null; passRate: number | null; avgProfit: number | null; salesQty: number; peakMonth: string | null };
+  seasonalByMonth: number[];
+  variants: { color: string; qty: number }[];
+  verdict: "buy" | "watch" | "hold" | "unknown";
+  headline: string;
+  reasons: string[];
+}
+
+const VERDICT: Record<string, { label: string; cls: string }> = {
+  buy: { label: "매입 추천", cls: "bg-emerald-400/15 text-emerald-300 border-emerald-400/40" },
+  watch: { label: "마진 확인 후", cls: "bg-cyan-400/15 text-cyan-300 border-cyan-400/40" },
+  hold: { label: "관망", cls: "bg-amber-400/15 text-amber-300 border-amber-400/40" },
+  unknown: { label: "기록 없음", cls: "bg-slate-500/20 text-slate-300 border-white/15" },
+};
 
 export default function ReverseSkuDetail() {
   const [, params] = useRoute("/reverse/sku/:id");
@@ -24,6 +40,8 @@ export default function ReverseSkuDetail() {
   const [range, setRange] = useState<30 | 90>(30);
   const q = trpc.reverseDeals.skuDetail.useQuery({ skuId: id }, { enabled: Number.isFinite(id) });
   const d = q.data as Detail | undefined;
+  const aiQ = trpc.aiMemory.advise.useQuery({ skuId: id }, { enabled: Number.isFinite(id) });
+  const ai = aiQ.data as AiAdvice | undefined;
 
   const now = Date.now();
   const windowPts = useMemo(
@@ -60,6 +78,55 @@ export default function ReverseSkuDetail() {
               <Calculator className="h-4 w-4" /> 매입 판단
             </Link>
           </div>
+
+          {/* 🤖 AI 메모리 — "이번에도 살까?" */}
+          {ai && (
+            <div className="glass rounded-2xl p-4 sm:p-5 ring-1 ring-fuchsia-400/30"
+              style={{ background: "linear-gradient(135deg, rgba(232,121,249,0.08), rgba(103,232,249,0.04))" }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <BrainCircuit className="h-4 w-4 text-fuchsia-300" />
+                  <h2 className="text-sm font-semibold text-slate-100">AI 메모리 · 이번에도 살까?</h2>
+                </div>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${VERDICT[ai.verdict].cls}`}>{VERDICT[ai.verdict].label}</span>
+              </div>
+              <p className="text-slate-100 text-[15px] leading-relaxed">{ai.headline}</p>
+
+              {/* 기억 지표 */}
+              {(ai.memory.buyCount > 0 || ai.memory.salesQty > 0) && (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3">
+                  <MemStat label="누적 매입" value={ai.memory.buyCount > 0 ? `${ai.memory.buyCount}회` : "-"} sub={ai.memory.buyQty ? `${ai.memory.buyQty}개` : ""} />
+                  <MemStat label="평균 회전" value={ai.memory.avgTurnover != null ? `${ai.memory.avgTurnover}일` : "-"} />
+                  <MemStat label="검수 통과" value={ai.memory.passRate != null ? `${ai.memory.passRate}%` : "-"} />
+                  <MemStat label="평균 순익" value={ai.memory.avgProfit != null ? `${ai.memory.avgProfit.toLocaleString()}원` : "-"} good={(ai.memory.avgProfit ?? 0) > 0} />
+                  <MemStat label="성수기" value={ai.memory.peakMonth || "-"} />
+                </div>
+              )}
+
+              {/* 근거 */}
+              {ai.reasons.length > 0 && (
+                <ul className="flex flex-wrap gap-1.5 mt-3">
+                  {ai.reasons.map((r, i) => (
+                    <li key={i} className="text-[11px] text-slate-300 border border-white/10 bg-white/5 rounded-full px-2.5 py-1">{r}</li>
+                  ))}
+                </ul>
+              )}
+
+              {/* 컬러 변형 비교 */}
+              {ai.variants.length >= 2 && (
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  <p className="text-[11px] text-slate-500 mb-1.5">같은 모델 컬러별 판매량</p>
+                  <div className="flex flex-wrap gap-2">
+                    {ai.variants.slice(0, 6).map(v => (
+                      <span key={v.color} className={`text-[11px] px-2 py-1 rounded-lg ${v.color === ai.sku.color ? "bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40" : "bg-white/5 text-slate-300 border border-white/10"}`}>
+                        {v.color} <b>{v.qty}</b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 안정가 요약 */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -117,6 +184,15 @@ export default function ReverseSkuDetail() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function MemStat({ label, value, sub, good }: { label: string; value: string; sub?: string; good?: boolean }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-2.5">
+      <p className="text-[10px] text-slate-400">{label}</p>
+      <p className={`text-sm font-black mt-0.5 ${good ? "text-emerald-300" : "text-white"}`}>{value}{sub ? <span className="text-[10px] font-normal text-slate-500"> {sub}</span> : null}</p>
+    </div>
   );
 }
 
