@@ -290,6 +290,19 @@ class ApiClient {
     return this._call('reverseDeals.domesticSubmit', data, 'mutation');
   }
 
+  // ===== 내 상품 모니터링 (매일 1회 능동 스캔) =====
+  async myProductsScanConfig() {
+    const resp = await this._call('myProducts.scanConfig', undefined, 'query');
+    return resp?.result?.data || null;
+  }
+  async myProductsList() {
+    const resp = await this._call('myProducts.list', undefined, 'query');
+    return resp?.result?.data || [];
+  }
+  async myProductsSnapshot(data) {
+    return this._call('myProducts.snapshotSubmit', data, 'mutation');
+  }
+
   // ===== v8.0: AI 제품 발견 시스템 =====
   async discoveryGetPendingJobs() {
     return this._call('extension.getPendingJobs', undefined, 'query');

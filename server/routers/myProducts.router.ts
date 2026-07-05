@@ -4,6 +4,7 @@ import { myProducts, productSnapshots } from "../../drizzle/schema";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { rateLimit } from "../lib/rateLimit";
 
 // ★ 안전장치 — 능동 스캔의 밴 리스크를 코드로 강제.
 export const SCAN_CONFIG = {
@@ -178,6 +179,13 @@ export const myProductsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const uid = ctx.user!.id;
+      // 레이트 리밋: 유저당 시간당 300건 (하루 1회 × 50 SKU + 재시도 여유).
+      const rl = rateLimit(`snap:${uid}`, 300, 60 * 60 * 1000);
+      if (!rl.ok)
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `요청이 너무 많습니다. ${rl.retryAfterSec}초 후 다시 시도하세요.`,
+        });
       // 소유 검증
       const [own] = await db
         .select({ id: myProducts.id })

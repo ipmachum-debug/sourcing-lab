@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.9.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.9.0 — 역직구 매입 판단(POIZON 안정가 + 국내몰 최저가 패시브 수집)",
+  "version": "8.10.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.10.0 — 내 상품 매일 1회 능동 스캔(안전장치 준수) + 역직구 매입 판단",
   "permissions": [
     "storage",
     "tabs",
