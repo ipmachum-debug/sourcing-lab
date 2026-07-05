@@ -1911,3 +1911,74 @@ export const poizonSaleObservations = mysqlTable(
 export type PoizonSaleObservation = typeof poizonSaleObservations.$inferSelect;
 export type InsertPoizonSaleObservation =
   typeof poizonSaleObservations.$inferInsert;
+
+// ==================== 내 판매 상품 (my_products) ====================
+// ★ 유저가 지정한 "내가 파는/관찰하는" SKU 리스트. 매일 1회 능동 스냅샷 대상.
+//   안전장치: active 개수는 앱에서 MAX_ACTIVE_SKUS(기본 50)로 제한 → 소량 저빈도.
+export const myProducts = mysqlTable(
+  "my_products",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id").notNull(),
+    platform: mysqlEnum("platform", ["coupang", "poizon", "domestic"]).default(
+      "coupang"
+    ),
+    externalId: varchar("external_id", { length: 120 }), // 쿠팡 상품ID/POIZON SPU/국내 코드
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    brand: varchar("brand", { length: 100 }),
+    sku: varchar("sku", { length: 120 }),
+    myPriceKrw: int("my_price_krw").default(0), // 내 판매가(원)
+    targetStock: int("target_stock").default(0), // 목표/안전 재고 (품절 임박 알림 기준)
+    memo: varchar("memo", { length: 300 }),
+    active: boolean("active").default(true).notNull(), // 매일 스냅샷 on/off
+    createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", tsOpts)
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => ({
+    userIdx: index("idx_myp_user").on(t.userId),
+  })
+);
+
+export type MyProduct = typeof myProducts.$inferSelect;
+export type InsertMyProduct = typeof myProducts.$inferInsert;
+
+// ==================== 내 상품 일별 스냅샷 (product_snapshots) ====================
+// ★ 매일 1회 수집한 지표. (my_product_id, captured_date, source) 유니크로
+//   "하루 1회" 자연 강제. 원본 HTML이 아니라 필요한 숫자만 저장.
+export const productSnapshots = mysqlTable(
+  "product_snapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id").notNull(),
+    myProductId: int("my_product_id").notNull(),
+    capturedDate: varchar("captured_date", { length: 10 }).notNull(), // YYYY-MM-DD
+    source: varchar("source", { length: 30 }).default("manual"), // coupang_wing/poizon/domestic/manual
+    // 쿠팡윙 지표
+    revenueKrw: int("revenue_krw").default(0), // 당일 매출
+    unitsSold: int("units_sold").default(0), // 당일 판매수량
+    stock: int("stock").default(0), // 재고
+    rankPos: int("rank_pos").default(0), // 카테고리/키워드 순위
+    reviewCount: int("review_count").default(0),
+    rating: decimal("rating", { precision: 3, scale: 1 }), // 별점
+    // POIZON 내 SKU 시세
+    poizonPriceCny: int("poizon_price_cny").default(0),
+    poizonSold30d: int("poizon_sold_30d").default(0),
+    // 국내 경쟁사 최저가
+    competitorLowKrw: int("competitor_low_krw").default(0),
+    createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    dayKey: uniqueIndex("ps_product_day_src_unique").on(
+      t.myProductId,
+      t.capturedDate,
+      t.source
+    ),
+    userDayIdx: index("idx_ps_user_day").on(t.userId, t.capturedDate),
+  })
+);
+
+export type ProductSnapshot = typeof productSnapshots.$inferSelect;
+export type InsertProductSnapshot = typeof productSnapshots.$inferInsert;
