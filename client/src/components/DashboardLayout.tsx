@@ -140,17 +140,14 @@ const menuItems: MenuItem[] = [
   { icon: BarChart3, label: "소싱 인사이트", path: "/reverse/insights", emoji: "📊", section: "main", channel: "reverse", group: "engine" },
   { icon: ListChecks, label: "소싱 큐", path: "/reverse/queue", emoji: "🧭", section: "main", channel: "reverse", group: "engine" },
   { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "engine" },
+  { icon: Scale, label: "정밀 계산기", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "engine" },
   // 운영 (매입 후)
   { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse", group: "ops" },
   { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse", group: "ops" },
   { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse", group: "ops" },
   { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "ops" },
-  // 숨김(레거시·중복) — 라우트/딥링크는 유지, 사이드바에서만 감춤
+  // 숨김(중복) — 라우트/딥링크는 유지, 사이드바에서만 감춤
   { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "ops", hidden: true },
-  { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse", group: "ops", hidden: true },
-  { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "ops", hidden: true },
-  { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse", group: "ops", hidden: true },
-  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse", group: "ops", hidden: true },
   { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops", hidden: true },
 
   // ===== 고급 (더보기) =====

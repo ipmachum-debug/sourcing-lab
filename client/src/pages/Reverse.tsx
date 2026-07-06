@@ -3,16 +3,16 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { Globe2, Camera, Scale, Dices, Package, Ship, Sparkles, Radar, Flame, Activity, Bell, ArrowRight } from "lucide-react";
+import { Globe2, Camera, Scale, Store, ListChecks, BarChart3, Package, Ship, Sparkles, Flame, Activity, Bell, ArrowRight } from "lucide-react";
 
-// 역직구 채널 홈 — 국내매입 → 해외판매(POIZON·당근·아마존).
+// 역직구 채널 홈 — 판매자 카탈로그(엑셀) 주도 소싱 엔진.
 const TOOLS = [
-  { icon: Radar, emoji: "📡", title: "시장 정찰", desc: "POIZON 랭킹·신상·급상승 자동 발굴 — 뭘 팔지 찾기", path: "/reverse/market" },
-  { icon: Flame, emoji: "🔥", title: "오늘 사야 할 상품", desc: "POIZON 안정가 기준 순익·마진·추천 매입 수량", path: "/reverse/deals" },
+  { icon: Store, emoji: "🏬", title: "판매자 엑셀", desc: "POIZON 판매자센터 전체 내보내기 → 카탈로그 시딩", path: "/reverse/seller" },
+  { icon: BarChart3, emoji: "📊", title: "소싱 인사이트", desc: "잘 팔리는 모델·가격대·사이즈 한눈에", path: "/reverse/insights" },
+  { icon: ListChecks, emoji: "🧭", title: "소싱 큐", desc: "국내가만 잡으면 딜 — 발굴/딜 우선순위 + 추천 수량", path: "/reverse/queue" },
+  { icon: Camera, emoji: "📸", title: "사진 소싱", desc: "매장 가격표 사진 → AI OCR → 즉시 매입 판단", path: "/reverse/photo" },
+  { icon: Scale, emoji: "⚖️", title: "정밀 계산기", desc: "검수 탈락·부가세 환급까지 반영한 진짜 순익", path: "/reverse/arbitrage" },
   { icon: Activity, emoji: "📊", title: "내 상품 관리", desc: "내 SKU 매일 스냅샷 · 추이 그래프 · 알림", path: "/reverse/my-products" },
-  { icon: Camera, emoji: "📸", title: "오늘의 SKU TOP100", desc: "국내가 × POIZON 스프레드로 오늘 살 SKU 랭킹", path: "/reverse/sku" },
-  { icon: Scale, emoji: "⚖️", title: "아비트리지 계산", desc: "POIZON 수수료·검수탈락·부가세환급까지 반영한 순익", path: "/reverse/arbitrage" },
-  { icon: Dices, emoji: "🎲", title: "베팅 사이징", desc: "자금 회전 기준으로 SKU별 매입 수량 추천", path: "/reverse/betting" },
   { icon: Package, emoji: "📦", title: "매입 관리", desc: "매입·검수·판매 기록 → 검수탈락률·회전일 축적", path: "/reverse/purchases" },
   { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "채널별 판매·정산·회계", path: "/reverse/exports" },
 ];
@@ -53,8 +53,8 @@ function MarketSurge() {
         <Flame className="h-4 w-4 text-orange-300" />
         <h2 className="text-sm font-semibold text-slate-100 tracking-wide">시장 급상승</h2>
         <span className="text-[11px] text-slate-500">POIZON 시세·판매 급변 {d.total}건</span>
-        <Link href="/reverse/market" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
-          시장 정찰 <ArrowRight className="h-3 w-3" />
+        <Link href="/reverse/insights" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
+          소싱 인사이트 <ArrowRight className="h-3 w-3" />
         </Link>
       </div>
       {cats.length > 2 && (
@@ -94,8 +94,8 @@ function WatchlistAlerts() {
         <Bell className="h-4 w-4 text-fuchsia-300" />
         <h2 className="text-sm font-semibold text-slate-100 tracking-wide">워치리스트 알림</h2>
         <span className="text-[11px] text-slate-500">감시 {d.watched}개 · 시세 표본 {d.withData}개</span>
-        <Link href="/reverse/sku" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
-          워치리스트 <ArrowRight className="h-3 w-3" />
+        <Link href="/reverse/queue" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
+          소싱 큐 <ArrowRight className="h-3 w-3" />
         </Link>
       </div>
       {d.alerts.length === 0 ? (
@@ -121,9 +121,9 @@ function WatchlistAlerts() {
 }
 
 const STEPS = [
-  { n: 1, title: "국내 싸게 매입", desc: "아울렛·무신사 할인 상품 확보" },
-  { n: 2, title: "해외 시세 비교", desc: "POIZON·당근으로 순익 확인" },
-  { n: 3, title: "회전 맞춰 베팅", desc: "자금 묶임 없이 매입량 결정" },
+  { n: 1, title: "카탈로그 확보", desc: "판매자 엑셀로 뭐가·얼마에 팔리나 시딩" },
+  { n: 2, title: "국내가 발굴", desc: "소싱 큐에서 국내 싸게 살 곳 찾기" },
+  { n: 3, title: "수요 맞춰 매입", desc: "추천 수량으로 재고 리스크 없이 베팅" },
 ];
 
 export default function Reverse() {
@@ -210,7 +210,7 @@ export default function Reverse() {
           </section>
 
           <p className="text-center text-xs text-slate-500 pt-2">
-            대부분의 도구는 <b className="text-slate-400">쿠팡 채널의 엔진(원픽 랭킹·마진·베팅)</b>을 재활용합니다 — 피드만 바꾸면 됩니다.
+            엔진은 <b className="text-slate-400">판매자 카탈로그(엑셀)</b> 하나로 돕니다 — 뭐가 팔리는지는 자료가 답을 갖고 있고, 남은 건 <b className="text-slate-400">국내가 발굴</b>뿐.
           </p>
         </div>
       </div>

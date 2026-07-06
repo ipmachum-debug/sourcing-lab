@@ -254,12 +254,10 @@ function QueueRow({ r }: { r: Row }) {
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-center">
           {r.status === "deal" ? (
-            <Link
-              href="/reverse/deals"
-              className="inline-flex items-center gap-1 text-[12px] font-semibold neon-chip neon-magenta rounded-full px-2.5 py-1"
-            >
-              <Flame className="h-3 w-3" /> 매입
-            </Link>
+            <span className="inline-flex items-center gap-1 text-[12px] font-semibold neon-chip neon-magenta rounded-full px-2.5 py-1" title="추천 매입 수량 (수요·마진·등급 기반 사이징)">
+              <Flame className="h-3 w-3" />
+              {r.recommendQty > 0 ? `${r.recommendQty}개 매입` : "매입"}
+            </span>
           ) : (
             <FindDomestic name={r.productName} brand={r.brand} />
           )}
