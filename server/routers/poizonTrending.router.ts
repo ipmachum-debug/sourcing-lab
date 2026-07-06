@@ -24,6 +24,24 @@ function normalizeCat(c: string | null): string | null {
   return null;
 }
 
+// 상품명으로 대분류 추론 (저장 카테고리가 없어도 분류) — 위→아래 우선순위
+function inferCategory(name: string): string | null {
+  const s = String(name || "").toLowerCase();
+  if (/향수|퍼퓸|퍼퓸|perfume|오드|edp|edt|크림|립스틱|파운데이션|세럼|샴푸/.test(s)) return "뷰티";
+  if (/팝마트|pop\s?mart|인형|피규어|건담|gundam|plush|토이|블록|레고/.test(s)) return "장난감";
+  if (/가방|백팩|크로스\s?백|숄더|슬링|메신저|토트|파우치|bag|backpack|지갑|월렛/.test(s)) return "가방";
+  if (/모자|캡|비니|버킷|시계|watch|벨트|양말|목걸이|반지|팔찌|스카프|선글라스|sunglass|안경|키링|장갑/.test(s)) return "액세서리";
+  if (/자켓|재킷|jacket|후드|hood|맨투맨|스웨트|sweat|바지|팬츠|pants|반바지|shorts|셔츠|shirt|코트|coat|니트|스웨터|데님|denim|청바지|티셔츠|tee|원피스|레깅스|트랙\s?팬츠/.test(s)) return "의류";
+  if (/러닝화|스니커즈|sneaker|running|농구화|축구화|테니스화|운동화|트레이너|trainer|스케이트보드화|스케이트보드 신발/.test(s)) return "운동화";
+  if (/슬리퍼|슬라이드|slide|클로그|clog|부츠|boots|샌들|sandal|로퍼|구두|더비|derby|플립\s?플롭|flip|뮬|mule/.test(s)) return "신발";
+  return null;
+}
+
+// 저장 카테고리(대분류) 우선, 없으면 상품명 추론
+function catOf(r: { category: string | null; productName: string }): string | null {
+  return normalizeCat(r.category) ?? inferCategory(r.productName);
+}
+
 export const poizonTrendingRouter = router({
   // ===== 정찰 수집 (랭킹/신상 페이지 → 배치 적립) =====
   submit: protectedProcedure
@@ -126,10 +144,10 @@ export const poizonTrendingRouter = router({
         .limit(8000);
 
       const CANON = CANON_CATS;
-      // 카테고리 목록(전체 기준, 상품수 순) — 탭 렌더용
+      // 카테고리 목록(전체 기준, 상품수 순) — 탭 렌더용. 저장값 없으면 상품명 추론.
       const catCount = new Map<string, Set<string>>();
       for (const r of allRows) {
-        const c = normalizeCat(r.category);
+        const c = catOf(r);
         if (!c) continue;
         const set = catCount.get(c) ?? new Set<string>();
         set.add(r.normKey);
@@ -142,7 +160,7 @@ export const poizonTrendingRouter = router({
       const catFilter =
         input?.category && input.category !== "전체" ? input.category : null;
       const rows = catFilter
-        ? allRows.filter(r => normalizeCat(r.category) === catFilter)
+        ? allRows.filter(r => catOf(r) === catFilter)
         : allRows;
 
       const now = Date.now();
@@ -249,7 +267,7 @@ export const poizonTrendingRouter = router({
       const catSold = new Map<string, number[]>();
       for (const [, arr] of byKey) {
         const last = arr[arr.length - 1];
-        const cat = normalizeCat(last.category);
+        const cat = catOf(last);
         if (!cat) continue;
         const s = catSold.get(cat) ?? [];
         s.push(last.soldCount ?? 0);
@@ -271,7 +289,7 @@ export const poizonTrendingRouter = router({
       for (const [key, arr] of byKey) {
         const last = arr[arr.length - 1];
         const first = arr[0];
-        const cat = normalizeCat(last.category);
+        const cat = catOf(last);
         if (!cat) continue;
         const latestCny = last.priceCny ?? 0;
         const soldNow = last.soldCount ?? 0;
