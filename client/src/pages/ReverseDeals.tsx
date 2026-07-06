@@ -46,6 +46,7 @@ interface Deal {
   domesticBuyKrw: number; stableCny: number; avg30Cny: number; volume30: number; volatilityPct: number;
   revenueKrw: number; deductKrw: number; netProfitKrw: number; marginPct: number;
   grade: "A" | "B" | "C" | "D"; recommendQty: number; stars: number; hasObservations: boolean;
+  matchType?: "exact" | "watchlist" | "fuzzy";
 }
 
 export default function ReverseDeals() {
@@ -218,7 +219,8 @@ function DealCard({ d, rank }: { d: Deal; rank: number }) {
       <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
         <div className="text-[11px] text-slate-500">
           거래량 {d.volume30} · 변동 {d.volatilityPct.toFixed(0)}%
-          {!d.hasObservations && <span className="text-amber-400/80"> · 수동 시세</span>}
+          {d.matchType === "fuzzy" && <span className="text-cyan-400/80"> · 유사매칭</span>}
+          {d.matchType === "watchlist" && !d.hasObservations && <span className="text-amber-400/80"> · 수동 시세</span>}
         </div>
         {rec ? (
           <span className="inline-flex items-center gap-1 text-sm font-bold text-fuchsia-200 bg-fuchsia-500/15 rounded-lg px-2.5 py-1">

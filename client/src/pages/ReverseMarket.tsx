@@ -3,7 +3,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Link } from "wouter";
-import { Radar, Flame, Sparkles, TrendingDown, Star, Calculator, Info } from "lucide-react";
+import { Radar, Flame, Sparkles, TrendingDown, Star, Calculator, Info, Search } from "lucide-react";
+import { domesticSearchLinks } from "@/lib/domesticSearch";
 
 const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 
@@ -86,7 +87,7 @@ export default function ReverseMarket() {
                         <p className="text-[11px] text-slate-500">이전 {cny(r.prevCny)}{r.soldCount ? ` · 판매 ${r.soldCount}` : ""}</p>
                       </div>
                     </div>
-                    <CardActions onWatch={() => addWatch(r.productName, r.brand, r.latestCny)} />
+                    <CardActions onWatch={() => addWatch(r.productName, r.brand, r.latestCny)} name={r.productName} brand={r.brand} />
                   </div>
                 ))}
               </div>
@@ -102,7 +103,7 @@ export default function ReverseMarket() {
                     <p className="text-[11px] text-slate-500">{r.brand || "-"}</p>
                     <p className="font-bold text-slate-100 leading-tight line-clamp-2">{r.productName}</p>
                     <p className="text-base font-black neon-text mt-2">{r.priceCny ? cny(r.priceCny) : "시세 미상"}{r.soldCount ? <span className="text-[11px] text-slate-400 font-normal"> · 판매 {r.soldCount}</span> : null}</p>
-                    <CardActions onWatch={() => addWatch(r.productName, r.brand, r.priceCny || 0)} />
+                    <CardActions onWatch={() => addWatch(r.productName, r.brand, r.priceCny || 0)} name={r.productName} brand={r.brand} />
                   </div>
                 ))}
               </div>
@@ -135,9 +136,12 @@ export default function ReverseMarket() {
                           <td className="text-right px-3 py-2 text-slate-200">{r.priceCny ? cny(r.priceCny) : "-"}</td>
                           <td className="text-right px-3 py-2 text-slate-400">{r.soldCount || "-"}</td>
                           <td className="text-right px-3 py-2">
-                            <button onClick={() => addWatch(r.productName, r.brand, r.priceCny || 0)} className="text-slate-500 hover:text-amber-300" title="워치리스트 추가">
-                              <Star className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <DomesticLinks name={r.productName} brand={r.brand} />
+                              <button onClick={() => addWatch(r.productName, r.brand, r.priceCny || 0)} className="text-slate-500 hover:text-amber-300" title="워치리스트 추가">
+                                <Star className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -166,15 +170,41 @@ function Section({ icon, title, desc, children }: { icon: React.ReactNode; title
   );
 }
 
-function CardActions({ onWatch }: { onWatch: () => void }) {
+function CardActions({ onWatch, name, brand }: { onWatch: () => void; name: string; brand: string | null }) {
   return (
-    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
-      <Link href="/reverse/deals" className="text-[11px] neon-chip rounded-lg px-2.5 py-1.5 text-slate-200 flex items-center gap-1">
-        <Calculator className="h-3.5 w-3.5" /> 매입 판단
-      </Link>
+    <div className="flex items-center flex-wrap gap-2 mt-3 pt-3 border-t border-white/10">
+      <DomesticLinks name={name} brand={brand} chip />
       <button onClick={onWatch} className="text-[11px] neon-chip rounded-lg px-2.5 py-1.5 text-slate-200 flex items-center gap-1">
         <Star className="h-3.5 w-3.5" /> 워치리스트
       </button>
+    </div>
+  );
+}
+
+// 국내 최저가 찾기 — 네이버·무신사·ABC마트·다나와 검색 링크 드롭다운
+function DomesticLinks({ name, brand, chip }: { name: string; brand: string | null; chip?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const links = domesticSearchLinks(name, brand);
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={() => setOpen(o => !o)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className={chip
+          ? "text-[11px] neon-chip rounded-lg px-2.5 py-1.5 text-slate-200 flex items-center gap-1"
+          : "text-slate-500 hover:text-cyan-300"}
+        title="국내 최저가 찾기"
+      >
+        <Search className="h-3.5 w-3.5" />{chip && " 국내가 찾기"}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-36 glass rounded-xl border border-white/10 py-1 shadow-2xl">
+          {links.map(l => (
+            <a key={l.label} href={l.url} target="_blank" rel="noopener noreferrer"
+              className="block px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10">{l.label}</a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
