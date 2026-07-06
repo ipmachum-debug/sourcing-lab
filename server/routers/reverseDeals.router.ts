@@ -12,12 +12,15 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   evaluateDeal,
+  stableSellPrice,
   DEFAULT_COST,
   type CostParams,
   type PriceSample,
 } from "../lib/reverseProfit";
 import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
+import { catOf, CANON_CATS } from "../lib/category";
+import { isConfigured as poizonApiConfigured } from "../lib/poizonApi";
 
 const DOMESTIC_SOURCES = [
   "musinsa",
@@ -83,6 +86,7 @@ export const reverseDealsRouter = router({
         brand: z.string().max(100).optional(),
         productName: z.string().min(1).max(300),
         sku: z.string().max(120).optional(),
+        barcode: z.string().max(40).optional(), // 바코드(GTIN, JSON-LD) — POIZON SKU와 exact 매칭
         listPrice: z.number().int().min(0).default(0),
         salePrice: z.number().int().min(0).default(0),
         couponPrice: z.number().int().min(0).default(0),
@@ -104,6 +108,7 @@ export const reverseDealsRouter = router({
           brand: input.brand ?? null,
           productName: input.productName,
           sku: input.sku ?? null,
+          barcode: input.barcode ?? null,
           listPrice: input.listPrice,
           salePrice: input.salePrice,
           couponPrice: input.couponPrice,
@@ -118,6 +123,7 @@ export const reverseDealsRouter = router({
             brand: input.brand ?? null,
             productName: input.productName,
             sku: input.sku ?? null,
+            barcode: input.barcode ?? null,
             listPrice: input.listPrice,
             salePrice: input.salePrice,
             couponPrice: input.couponPrice,
@@ -502,6 +508,7 @@ export const reverseDealsRouter = router({
           .array(
             z.object({
               spuId: z.string().max(60).optional(),
+              barcode: z.string().max(40).optional(), // 바코드(GTIN) — 국내 exact 매칭
               productName: z.string().min(1).max(300),
               brand: z.string().max(100).optional(),
               category: z.string().max(40).optional(), // 대분류
@@ -535,6 +542,7 @@ export const reverseDealsRouter = router({
           obsRows.push({
             normKey,
             spuId: r.spuId ?? null,
+            barcode: r.barcode ?? null,
             size: r.size ?? null,
             brand,
             productName: r.productName,
@@ -798,4 +806,236 @@ export const reverseDealsRouter = router({
         withObservations: [...byKey.keys()].length,
       };
     }),
+
+  // ===== 소싱 큐 (카탈로그 주도) =====
+  // POIZON 전체 카탈로그(판매자 엑셀)를 SPU(상품)로 묶어, "국내가만 잡으면 딜"인
+  // 순서로 세운다. 두 축:
+  //   · 발굴(hunt): 판매량은 높은데 국내 매입가 미확보 → 국내 소싱 우선순위
+  //   · 딜(deal):   국내가 확보 + 마진 통과 → 바로 매입
+  // 검색(상품명/브랜드)·카테고리(대분류)·상태 탭 지원.
+  sourcingQueue: protectedProcedure
+    .input(
+      costInput.extend({
+        search: z.string().max(100).optional(),
+        category: z.string().max(40).optional(),
+        status: z.enum(["all", "hunt", "deal"]).default("all"),
+        minMargin: z.number().min(0).max(200).default(30),
+        minSold: z.number().int().min(0).max(10_000_000).default(1),
+        limit: z.number().int().min(1).max(200).default(60),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const now = Date.now();
+      const cost = resolveCost(input);
+      const q = (input.search ?? "").trim();
+
+      // 1) POIZON 관측(카탈로그) — 검색어 있으면 SQL LIKE 선필터
+      const obs = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          barcode: poizonSaleObservations.barcode,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+          observedAt: poizonSaleObservations.observedAt,
+        })
+        .from(poizonSaleObservations)
+        .where(
+          q
+            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
+            : sql`1=1`
+        )
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(20000);
+
+      // 2) 카테고리 맵(정찰 보드/판매자 시딩) normKey → 대분류
+      const trows = await db
+        .select({
+          normKey: poizonTrending.normKey,
+          category: poizonTrending.category,
+          productName: poizonTrending.productName,
+          imageUrl: poizonTrending.imageUrl,
+        })
+        .from(poizonTrending)
+        .limit(20000);
+      const catByKey = new Map<string, string | null>();
+      const imgByKey = new Map<string, string | null>();
+      for (const t of trows) {
+        if (!catByKey.has(t.normKey))
+          catByKey.set(t.normKey, t.category ?? null);
+        if (t.imageUrl && !imgByKey.get(t.normKey))
+          imgByKey.set(t.normKey, t.imageUrl);
+      }
+
+      // 3) 국내 공유 풀 — normKey별 최저 실구매가 + 바코드 인덱스
+      const dpool = await db
+        .select()
+        .from(domesticPricePool)
+        .where(eq(domesticPricePool.inStock, true))
+        .limit(8000);
+      const domByNorm = new Map<
+        string,
+        { buy: number; source: string; url: string | null; img: string | null }
+      >();
+      const domByBarcode = new Map<
+        string,
+        { buy: number; source: string; url: string | null; img: string | null }
+      >();
+      for (const d of dpool) {
+        const buy = effectiveBuyKrw(d);
+        if (buy <= 0) continue;
+        const rec = {
+          buy,
+          source: d.source,
+          url: d.productUrl ?? null,
+          img: d.imageUrl ?? null,
+        };
+        const pn = domByNorm.get(d.normKey);
+        if (!pn || buy < pn.buy) domByNorm.set(d.normKey, rec);
+        if (d.barcode) {
+          const pb = domByBarcode.get(d.barcode);
+          if (!pb || buy < pb.buy) domByBarcode.set(d.barcode, rec);
+        }
+      }
+
+      // 4) SPU(상품)로 묶음 — 사이즈별 SKU → 모델 1줄 롤업
+      type Grp = {
+        groupKey: string; normKey: string; spuId: string | null;
+        brand: string; name: string; barcodes: Set<string>;
+        samples: PriceSample[]; soldMax: number; sizes: Set<string>;
+      };
+      const groups = new Map<string, Grp>();
+      for (const o of obs) {
+        const gk = o.spuId || o.normKey;
+        const at = o.observedAt ? new Date(o.observedAt).getTime() : now;
+        const g =
+          groups.get(gk) ??
+          ({
+            groupKey: gk, normKey: o.normKey, spuId: o.spuId ?? null,
+            brand: o.brand ?? "", name: o.productName, barcodes: new Set(),
+            samples: [], soldMax: 0, sizes: new Set(),
+          } as Grp);
+        if (o.priceCny > 0) g.samples.push({ priceCny: o.priceCny, at });
+        g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        if (o.barcode) g.barcodes.add(o.barcode);
+        if (o.size) g.sizes.add(o.size);
+        groups.set(gk, g);
+      }
+
+      // 5) 매입 판단 + 상태 분류
+      const catFilter =
+        input.category && input.category !== "전체" ? input.category : null;
+      let huntCount = 0, dealCount = 0, thinCount = 0;
+      const catCount = new Map<string, Set<string>>();
+      type Row = {
+        groupKey: string; normKey: string; spuId: string | null;
+        brand: string; productName: string; category: string | null;
+        imageUrl: string | null; sizeCount: number;
+        stableUsd: number; lowUsd: number; highUsd: number;
+        soldCount: number; volatilityPct: number;
+        hasDomestic: boolean; domesticBuyKrw: number; domesticSource: string | null;
+        domesticUrl: string | null; matchBy: "barcode" | "name" | null;
+        netProfitKrw: number; marginPct: number; grade: string; recommendQty: number;
+        status: "hunt" | "deal" | "thin"; score: number;
+      };
+      const rows: Row[] = [];
+      for (const g of groups.values()) {
+        const stable = stableSellPrice(g.samples, now, g.soldMax);
+        if (!stable) continue;
+        const category = catOf({
+          category: catByKey.get(g.normKey) ?? null,
+          productName: g.name,
+        });
+        if (catFilter && category !== catFilter) continue;
+        if (category) {
+          const set = catCount.get(category) ?? new Set<string>();
+          set.add(g.groupKey);
+          catCount.set(category, set);
+        }
+
+        // 국내 매칭: 바코드 exact 우선 → normKey
+        let dom: { buy: number; source: string; url: string | null; img: string | null } | undefined;
+        let matchBy: "barcode" | "name" | null = null;
+        for (const bc of g.barcodes) {
+          const hit = domByBarcode.get(bc);
+          if (hit && (!dom || hit.buy < dom.buy)) { dom = hit; matchBy = "barcode"; }
+        }
+        if (!dom) {
+          const hit = domByNorm.get(g.normKey);
+          if (hit) { dom = hit; matchBy = "name"; }
+        }
+
+        let netProfitKrw = 0, marginPct = 0, grade = "-", recommendQty = 0;
+        let status: "hunt" | "deal" | "thin";
+        if (dom) {
+          const v = evaluateDeal(dom.buy, g.samples, now, cost, g.soldMax);
+          if (v) {
+            netProfitKrw = v.profit.netProfitKrw;
+            marginPct = v.profit.marginPct;
+            grade = v.grade;
+            recommendQty = v.recommendQty;
+          }
+          status = marginPct >= input.minMargin ? "deal" : "thin";
+        } else {
+          // 국내가 미확보: 판매량 있으면 발굴 대상, 없으면 thin
+          status = g.soldMax >= input.minSold ? "hunt" : "thin";
+        }
+        if (status === "deal") dealCount++;
+        else if (status === "hunt") huntCount++;
+        else thinCount++;
+
+        // 정렬 점수: 딜(마진) → 발굴(수요) → 기타
+        const score =
+          status === "deal"
+            ? 2e9 + marginPct
+            : status === "hunt"
+              ? 1e9 + Math.min(g.soldMax, 9e8)
+              : Math.min(g.soldMax, 1e8);
+
+        rows.push({
+          groupKey: g.groupKey, normKey: g.normKey, spuId: g.spuId,
+          brand: g.brand, productName: g.name, category,
+          imageUrl: dom?.img ?? imgByKey.get(g.normKey) ?? null,
+          sizeCount: g.sizes.size,
+          stableUsd: stable.stableCny, lowUsd: stable.lowCny, highUsd: stable.highCny,
+          soldCount: g.soldMax, volatilityPct: stable.volatilityPct,
+          hasDomestic: !!dom, domesticBuyKrw: dom?.buy ?? 0,
+          domesticSource: dom?.source ?? null, domesticUrl: dom?.url ?? null,
+          matchBy, netProfitKrw, marginPct, grade, recommendQty, status, score,
+        });
+      }
+
+      const filtered = rows
+        .filter(r => (input.status === "all" ? true : r.status === input.status))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, input.limit);
+
+      const categories = CANON_CATS.map(name => ({
+        name,
+        count: catCount.get(name)?.size ?? 0,
+      })).filter(c => c.count > 0);
+
+      return {
+        rows: filtered,
+        cost,
+        counts: { hunt: huntCount, deal: dealCount, thin: thinCount, total: groups.size },
+        categories,
+      };
+    }),
+
+  // ===== Open API 자동 동기화 상태 (Phase 2) =====
+  // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
+  openApiStatus: protectedProcedure.query(() => {
+    return {
+      configured: poizonApiConfigured(),
+      note: poizonApiConfigured()
+        ? "POIZON Open API 자격증명 확인됨 — 자동 동기화 준비 완료."
+        : "Phase 2: POIZON_APP_KEY/SECRET/ACCESS_TOKEN 설정 + 공식 Sign 문서 검증 후 자동 동기화 활성화.",
+    };
+  }),
 });

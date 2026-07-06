@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.11.3",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.11.3 — POIZON 카테고리 대분류 정리(운동화/신발/의류…) + 정찰 재수집",
+  "version": "8.12.0",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.12.0 — 국내몰 바코드(GTIN) 캡처로 POIZON SKU exact 매칭 · 소싱 큐 연동",
   "permissions": [
     "storage",
     "tabs",

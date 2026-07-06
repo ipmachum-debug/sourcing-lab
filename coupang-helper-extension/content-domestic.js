@@ -1,5 +1,6 @@
 // ============================================================
-// content-domestic.js — 국내몰 상품 페이지 패시브 최저가 리더 (v8.9)
+// content-domestic.js — 국내몰 상품 페이지 패시브 최저가 리더 (v8.12)
+//   v8.12: JSON-LD gtin13/gtin/mpn → barcode 캡처 (POIZON SKU exact 매칭 다리)
 // ============================================================
 // 원칙: 유저가 "직접 본" 국내몰 상품가만, 저빈도로, 본인 세션에서 읽어 공유 풀에 적립.
 //   대량 크롤·자동 네비게이션 없음 → 역직구 매입가(국내 절반) 데이터 축적.
@@ -49,6 +50,13 @@
         if (it.name) out.productName = String(it.name).trim().slice(0, 300);
         if (it.brand) out.brand = String(it.brand.name || it.brand).trim().slice(0, 100);
         if (it.sku) out.sku = String(it.sku).trim().slice(0, 120);
+        // 바코드(GTIN) — POIZON SKU와 exact 매칭 다리. 여러 표기 방어적으로.
+        const gtin =
+          it.gtin13 || it.gtin || it.gtin14 || it.gtin12 || it.gtin8 || it.mpn;
+        if (gtin) {
+          const g = String(gtin).replace(/[^0-9A-Za-z]/g, "").slice(0, 40);
+          if (g) out.barcode = g;
+        }
         if (it.image) out.imageUrl = String(Array.isArray(it.image) ? it.image[0] : it.image).slice(0, 1000);
         const offers = it.offers && (Array.isArray(it.offers) ? it.offers[0] : it.offers);
         if (offers && offers.price) out.salePrice = toNum(offers.price);
@@ -103,6 +111,7 @@
             productName,
             brand: ld.brand || undefined,
             sku: ld.sku || undefined,
+            barcode: ld.barcode || undefined,
             listPrice: listPrice || salePrice,
             salePrice,
             discountPct,

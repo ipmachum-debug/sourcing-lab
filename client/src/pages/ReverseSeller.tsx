@@ -15,6 +15,7 @@ const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 interface SellerRow {
   spuId?: string;
+  barcode?: string;
   productName: string;
   brand?: string;
   category?: string;
@@ -44,6 +45,7 @@ function colIndex(headers: string[]): Record<string, number> {
   headers.forEach((raw, i) => {
     const h = String(raw || "").trim().toLowerCase().replace(/\s+/g, "");
     if (idx.spuId == null && /spuid/.test(h)) idx.spuId = i;
+    else if (idx.barcode == null && /바코드|barcode|gtin/.test(h)) idx.barcode = i;
     else if (idx.productName == null && /^상품명|productname/.test(h))
       idx.productName = i;
     else if (idx.brand == null && /브랜드|brand/.test(h)) idx.brand = i;
@@ -90,6 +92,10 @@ async function parseWorkbook(
         idx.spuId != null
           ? String(cells[idx.spuId] ?? "").trim().slice(0, 60) || undefined
           : undefined,
+      barcode:
+        idx.barcode != null
+          ? String(cells[idx.barcode] ?? "").trim().slice(0, 40) || undefined
+          : undefined,
       productName: name.slice(0, 300),
       brand:
         idx.brand != null
@@ -126,7 +132,13 @@ export default function ReverseSeller() {
     pool: number;
   } | null>(null);
 
+  const [onlyTradable, setOnlyTradable] = useState(true);
   const importMut = trpc.reverseDeals.sellerImport.useMutation();
+  const apiStatus = trpc.reverseDeals.openApiStatus.useQuery();
+
+  // 실제로 거래되는 것만: 시세($) + 판매량 둘 다 있는 SKU (죽은 SKU 제외)
+  const tradable = rows.filter(r => r.priceUsd > 0 && r.soldCount > 0);
+  const active = onlyTradable ? tradable : rows;
 
   const onFile = async (f: File) => {
     setParsing(true);
@@ -149,10 +161,11 @@ export default function ReverseSeller() {
   };
 
   const upload = async () => {
-    if (rows.length === 0) return toast.error("업로드할 행이 없어요");
+    const up = active;
+    if (up.length === 0) return toast.error("업로드할 행이 없어요");
     const chunks: SellerRow[][] = [];
-    for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
-    setProgress({ done: 0, total: rows.length });
+    for (let i = 0; i < up.length; i += CHUNK) chunks.push(up.slice(i, i + CHUNK));
+    setProgress({ done: 0, total: up.length });
     let observations = 0,
       spus = 0,
       pool = 0;
@@ -163,8 +176,8 @@ export default function ReverseSeller() {
         spus += r.spus;
         pool += r.pool;
         setProgress({
-          done: Math.min(rows.length, (c + 1) * CHUNK),
-          total: rows.length,
+          done: Math.min(up.length, (c + 1) * CHUNK),
+          total: up.length,
         });
       }
       setResult({ observations, spus, pool });
@@ -176,7 +189,6 @@ export default function ReverseSeller() {
     }
   };
 
-  const withPrice = rows.filter(r => r.priceUsd > 0).length;
   const busy = importMut.isPending || !!progress;
 
   return (
@@ -222,25 +234,51 @@ export default function ReverseSeller() {
             <p className="text-[12px] text-slate-400 flex items-start gap-1.5">
               <Info className="h-4 w-4 mt-0.5 shrink-0 text-fuchsia-300" />
               시세는 <b className="text-slate-200">중국 시장(득물) 달러($)</b> 기준입니다. 순이익은
-              환율(원/$)로 환산해 <b className="text-white">오늘 사야 할 상품</b>에 반영돼요.
+              환율(원/$)로 환산해 <b className="text-white">소싱 큐 · 오늘 사야 할 상품</b>에 반영돼요.
             </p>
+            {apiStatus.data && (
+              <p className="text-[11px] text-slate-500 flex items-start gap-1.5">
+                <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${apiStatus.data.configured ? "bg-emerald-400" : "bg-slate-600"}`} />
+                <span>
+                  <b className="text-slate-400">자동 동기화(Phase 2):</b> {apiStatus.data.note}
+                </span>
+              </p>
+            )}
           </div>
 
           {rows.length > 0 && (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Tile label="인식 SKU" value={rows.length.toLocaleString()} />
-                <Tile label="시세 있는 SKU" value={withPrice.toLocaleString()} tone="good" />
+                <Tile label="거래 SKU (시세+판매량)" value={tradable.length.toLocaleString()} tone="good" />
                 <Tile
                   label="상품(SPU)"
-                  value={new Set(rows.map(r => r.spuId || r.productName)).size.toLocaleString()}
+                  value={new Set(active.map(r => r.spuId || r.productName)).size.toLocaleString()}
                 />
                 <Tile
-                  label="무시(상품명 없음)"
-                  value={skipped.toLocaleString()}
-                  tone={skipped > 0 ? "warn" : "normal"}
+                  label="업로드 대상"
+                  value={active.length.toLocaleString()}
+                  tone="good"
                 />
               </div>
+
+              {/* 죽은 SKU(시세·판매량 없음) 제외 토글 */}
+              <label className="glass rounded-xl px-4 py-3 flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={onlyTradable}
+                  onChange={e => setOnlyTradable(e.target.checked)}
+                  className="accent-fuchsia-500 h-4 w-4"
+                />
+                <span className="text-sm text-slate-200">
+                  <b className="text-white">거래되는 것만 올리기</b> — 시세($)·판매량이 모두 있는 SKU만.
+                  {rows.length > tradable.length && (
+                    <span className="text-slate-400">
+                      {" "}죽은 SKU {(rows.length - tradable.length).toLocaleString()}개 제외.
+                    </span>
+                  )}
+                </span>
+              </label>
 
               <div className="flex items-center justify-between gap-3">
                 <div className="flex-1">
@@ -263,7 +301,7 @@ export default function ReverseSeller() {
                 </div>
                 <button
                   onClick={upload}
-                  disabled={busy || rows.length === 0}
+                  disabled={busy || active.length === 0}
                   className="neon-btn rounded-lg px-5 py-2 text-sm font-semibold flex items-center gap-1.5 disabled:opacity-40 shrink-0"
                 >
                   {busy ? (
@@ -271,7 +309,7 @@ export default function ReverseSeller() {
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  {busy ? "업로드 중…" : `${rows.length.toLocaleString()}개 업로드`}
+                  {busy ? "업로드 중…" : `${active.length.toLocaleString()}개 업로드`}
                 </button>
               </div>
 
@@ -280,8 +318,8 @@ export default function ReverseSeller() {
                   <Check className="h-4 w-4" /> 완료 — 관측{" "}
                   {result.observations.toLocaleString()}건 · 상품 {result.spus.toLocaleString()}개 ·
                   시세 풀 {result.pool.toLocaleString()}건 적립.
-                  <a href="/reverse/deals" className="underline text-fuchsia-300">
-                    오늘 사야 할 상품 보기 →
+                  <a href="/reverse/queue" className="underline text-fuchsia-300">
+                    소싱 큐에서 발굴 대상 보기 →
                   </a>
                 </p>
               )}
@@ -299,7 +337,7 @@ export default function ReverseSeller() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.slice(0, 30).map((r, i) => (
+                      {active.slice(0, 30).map((r, i) => (
                         <tr key={i} className="border-t border-white/8">
                           <td className="px-3 py-2">
                             <p className="text-slate-100 truncate max-w-[300px]">
@@ -309,6 +347,9 @@ export default function ReverseSeller() {
                               {r.brand || "-"}
                               {r.spuId && (
                                 <span className="text-slate-600"> · SPU {r.spuId}</span>
+                              )}
+                              {r.barcode && (
+                                <span className="text-slate-600"> · {r.barcode}</span>
                               )}
                             </p>
                           </td>
@@ -329,9 +370,9 @@ export default function ReverseSeller() {
                     </tbody>
                   </table>
                 </div>
-                {rows.length > 30 && (
+                {active.length > 30 && (
                   <p className="text-center text-[11px] text-slate-500 py-2">
-                    …외 {(rows.length - 30).toLocaleString()}건
+                    …외 {(active.length - 30).toLocaleString()}건
                   </p>
                 )}
               </div>

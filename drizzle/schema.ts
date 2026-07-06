@@ -1861,6 +1861,7 @@ export const domesticPricePool = mysqlTable(
     brand: varchar("brand", { length: 100 }),
     productName: varchar("product_name", { length: 300 }).notNull(),
     sku: varchar("sku", { length: 120 }), // 모델번호/품번(있으면)
+    barcode: varchar("barcode", { length: 40 }), // 바코드(GTIN) — POIZON SKU와 exact 매칭
     listPrice: int("list_price").default(0), // 정상가(원)
     salePrice: int("sale_price").default(0), // 할인 후 판매가(원)
     couponPrice: int("coupon_price").default(0), // 쿠폰/카드 적용 최저가(원, 있으면)
@@ -1878,6 +1879,7 @@ export const domesticPricePool = mysqlTable(
   t => ({
     srcKey: uniqueIndex("dpp_src_key_unique").on(t.normKey, t.source),
     nameIdx: index("idx_dpp_name").on(t.productName),
+    barcodeIdx: index("idx_dpp_barcode").on(t.barcode),
   })
 );
 
@@ -1894,6 +1896,7 @@ export const poizonSaleObservations = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     normKey: varchar("norm_key", { length: 255 }).notNull(), // 상품 매칭키(브랜드+상품)
     spuId: varchar("spu_id", { length: 60 }), // POIZON SPU_ID(있으면 정확 매칭키)
+    barcode: varchar("barcode", { length: 40 }), // 바코드(GTIN) — 국내몰 exact 매칭 다리
     size: varchar("size", { length: 40 }), // 사이즈(있으면) — 사이즈별 회전율
     brand: varchar("brand", { length: 100 }),
     productName: varchar("product_name", { length: 300 }).notNull(),
@@ -1906,6 +1909,8 @@ export const poizonSaleObservations = mysqlTable(
     keyIdx: index("idx_pso_key").on(t.normKey),
     keySizeIdx: index("idx_pso_key_size").on(t.normKey, t.size),
     obsIdx: index("idx_pso_observed").on(t.observedAt),
+    spuIdx: index("idx_pso_spu").on(t.spuId),
+    barcodeIdx: index("idx_pso_barcode").on(t.barcode),
   })
 );
 
