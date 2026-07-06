@@ -1,8 +1,9 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Ship, CheckCircle2 } from "lucide-react";
+import { Ship, CheckCircle2, Warehouse, Phone, Copy, MapPin } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
+import { POIZON_WAREHOUSES } from "@/lib/warehouses";
 
 interface Row {
   id: number; productName: string; brand: string | null;
@@ -62,6 +63,9 @@ export default function ReverseExports() {
               })}
             />
           </div>
+
+          {/* POIZON 한국 입고 창고 */}
+          <WarehouseInfo />
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Tile label="총 매출" value={won(revenue)} />
@@ -131,6 +135,48 @@ export default function ReverseExports() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function WarehouseInfo() {
+  const copy = (text: string, what: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => toast.success(`${what} 복사됨`),
+      () => toast.error("복사 실패")
+    );
+  };
+  return (
+    <div className="glass rounded-2xl p-4 sm:p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Warehouse className="h-4 w-4 text-fuchsia-300" />
+        <h2 className="text-sm font-semibold text-slate-100">POIZON 한국 입고 창고</h2>
+        <span className="text-[11px] text-slate-500">발송 시 주소·연락처 (탭해서 복사)</span>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {POIZON_WAREHOUSES.map(w => (
+          <div key={w.name} className="rounded-xl border border-white/10 bg-white/5 p-3.5">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-slate-100">{w.name}{w.note && <span className="text-[11px] font-normal text-fuchsia-300/80 ml-1.5">{w.note}</span>}</p>
+              <span className="text-[11px] text-slate-500">우편번호 {w.zip}</span>
+            </div>
+            <button onClick={() => copy(w.address, "주소")}
+              className="mt-2 w-full text-left flex items-start gap-1.5 text-[13px] text-slate-200 hover:text-white group">
+              <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-slate-500 group-hover:text-fuchsia-300" />
+              <span className="flex-1">{w.address}</span>
+              <Copy className="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-fuchsia-300" />
+            </button>
+            <div className="flex items-center gap-2 mt-2">
+              <a href={`tel:${w.phone.replace(/-/g, "")}`} className="text-[12px] text-slate-300 flex items-center gap-1 hover:text-emerald-300">
+                <Phone className="h-3.5 w-3.5" /> {w.phone}
+              </a>
+              <button onClick={() => copy(w.intlPhone, "국제전화")} className="text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
+                <Copy className="h-3 w-3" /> {w.intlPhone}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
