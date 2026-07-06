@@ -24,11 +24,13 @@ export interface CostParams {
   inspectRiskPct: number; // 반품/검수 리스크 비용 (매출 대비 %)
 }
 
+// ★ POIZON(한국) 시세·정산이 원화 → 환산 불필요. rate=1, 환전손실=0.
+//   (dewu 위안 기준으로 쓰려면 rate=환율, fxLossPct>0 로 조정)
 export const DEFAULT_COST: CostParams = {
-  rate: 190,
+  rate: 1,
   poizonFeePct: 9,
   chinaShipKrw: 5000,
-  fxLossPct: 1.5,
+  fxLossPct: 0,
   packingKrw: 1000,
   inspectRiskPct: 3,
 };

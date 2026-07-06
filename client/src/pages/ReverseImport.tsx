@@ -79,10 +79,10 @@ function parseTable(text: string): { rows: Row[]; errors: number } {
 }
 
 const TEMPLATE =
-  "브랜드,상품명,사이즈,국내매입가,국내소스,POIZON시세(위안),30일거래량\n" +
-  "크록스,크록스 클래식 클로그 블랙,260,34900,ABC마트,380,45\n" +
-  "크록스,크록스 클래식 클로그 화이트,265,32900,크록스,375,38\n" +
-  "나이키,나이키 에어포스1 07 화이트,270,89000,나이키,720,60\n";
+  "브랜드,상품명,사이즈,국내매입가,국내소스,POIZON시세(원),30일거래량\n" +
+  "크록스,크록스 클래식 클로그 블랙,260,34900,ABC마트,50400,45\n" +
+  "크록스,크록스 클래식 클로그 화이트,265,32900,크록스,47100,38\n" +
+  "나이키,나이키 에어포스1 07 화이트,270,89000,나이키,135000,60\n";
 
 export default function ReverseImport() {
   const [raw, setRaw] = useState("");
@@ -203,7 +203,7 @@ export default function ReverseImport() {
                         <td className="text-center px-3 py-2 text-slate-300">{r.size || "-"}</td>
                         <td className="text-right px-3 py-2 text-slate-300">{r.domesticPrice ? won(r.domesticPrice) : "-"}</td>
                         <td className="text-center px-3 py-2 text-slate-400 text-xs">{r.source}</td>
-                        <td className="text-right px-3 py-2 text-slate-300">{r.poizonCny ? `${r.poizonCny}¥` : "-"}</td>
+                        <td className="text-right px-3 py-2 text-slate-300">{r.poizonCny ? `${r.poizonCny.toLocaleString()}원` : "-"}</td>
                         <td className="text-right px-3 py-2 text-slate-400">{r.soldCount30d || "-"}</td>
                       </tr>
                     ))}

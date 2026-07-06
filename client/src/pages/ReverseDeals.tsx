@@ -7,11 +7,12 @@ import ImportExportBar from "@/components/ImportExportBar";
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 
 // 서버 reverseProfit 엔진과 동일한 기본 코스트 (즉석 계산기 미러)
+// POIZON(한국)이 원화라 환산 불필요: rate=1, 환전손실=0
 const DEFAULT_COST = {
-  rate: 190,
+  rate: 1,
   poizonFeePct: 9,
   chinaShipKrw: 5000,
-  fxLossPct: 1.5,
+  fxLossPct: 0,
   packingKrw: 1000,
   inspectRiskPct: 3,
 };
@@ -110,7 +111,7 @@ export default function ReverseDeals() {
                 <input type="number" value={calc.buy} onChange={e => setCalc({ ...calc, buy: e.target.value })}
                   placeholder="34900" className="calc-in" />
               </Field>
-              <Field label="POIZON 안정 판매가 (위안)">
+              <Field label="POIZON 안정 판매가 (원)">
                 <input type="number" value={calc.stable} onChange={e => setCalc({ ...calc, stable: e.target.value })}
                   placeholder="380" className="calc-in" />
               </Field>
@@ -128,7 +129,7 @@ export default function ReverseDeals() {
             </div>
             {calcRes && (
               <p className="text-[11px] text-slate-500 mt-2">
-                매출 {won(calcRes.revenueKrw)} − 매입 {won(Number(calc.buy))} − 수수료·배송·환전·포장·검수 {won(calcRes.deductKrw)} = <b className="text-slate-300">{won(calcRes.netProfitKrw)}</b>
+                매출 {won(calcRes.revenueKrw)} − 매입 {won(Number(calc.buy))} − 수수료·배송·포장·검수 {won(calcRes.deductKrw)} = <b className="text-slate-300">{won(calcRes.netProfitKrw)}</b>
               </p>
             )}
           </div>
@@ -151,10 +152,8 @@ export default function ReverseDeals() {
             </div>
             {showSettings && (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
-                <CostIn label="환율(원/위안)" v={cost.rate} on={v => setCost({ ...cost, rate: v })} />
                 <CostIn label="수수료(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={0.5} />
-                <CostIn label="중국배송(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
-                <CostIn label="환전손실(%)" v={cost.fxLossPct} on={v => setCost({ ...cost, fxLossPct: v })} step={0.5} />
+                <CostIn label="배송비(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
                 <CostIn label="포장비(원)" v={cost.packingKrw} on={v => setCost({ ...cost, packingKrw: v })} step={500} />
                 <CostIn label="검수리스크(%)" v={cost.inspectRiskPct} on={v => setCost({ ...cost, inspectRiskPct: v })} step={0.5} />
               </div>
@@ -209,7 +208,7 @@ function DealCard({ d, rank }: { d: Deal; rank: number }) {
 
       <div className="mt-3 space-y-1.5 text-sm">
         <Row label="국내 특가" value={won(d.domesticBuyKrw)} />
-        <Row label="POIZON 안정 판매가" value={<>{won(d.revenueKrw)} <span className="text-slate-600 text-[11px]">({d.stableCny}¥)</span></>} />
+        <Row label="POIZON 안정 판매가" value={<>{won(d.revenueKrw)}</>} />
         <Row label="예상 수수료·배송비" value={<span className="text-slate-400">−{won(d.deductKrw)}</span>} />
         <div className="border-t border-white/10 my-1.5" />
         <Row label="예상 순이익" value={<b className={d.netProfitKrw >= 0 ? "text-emerald-300" : "text-red-400"}>{won(d.netProfitKrw)}</b>} big />

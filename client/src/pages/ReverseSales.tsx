@@ -42,13 +42,14 @@ const CH_LABEL: Record<string, string> = { poizon: "POIZON", shopee: "Shopee", o
 export default function ReverseSales() {
   const utils = trpc.useUtils();
   const [channel, setChannel] = useState<"poizon" | "shopee" | "other">("poizon");
-  const [currency, setCurrency] = useState("CNY");
+  const [currency, setCurrency] = useState("KRW");
   const [days, setDays] = useState(90);
-  const [rate, setRate] = useState(190);
+  const [rate, setRate] = useState(1);
   const q = trpc.salesReport.summary.useQuery({ days, rate });
   const d = q.data as Summary | undefined;
-  const cur = (n: number) => (currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${currency}`);
-  const money = (n: number) => (d?.currency === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${d?.currency || ""}`);
+  const unit = (n: number, c: string) => (c === "KRW" ? `${Math.round(n).toLocaleString()}원` : c === "CNY" ? `¥${Math.round(n).toLocaleString()}` : `${Math.round(n).toLocaleString()} ${c}`);
+  const cur = (n: number) => unit(n, currency);
+  const money = (n: number) => unit(n, d?.currency || "KRW");
 
   const inv = () => utils.salesReport.summary.invalidate();
   const importMut = trpc.salesReport.bulkImport.useMutation({
@@ -87,7 +88,7 @@ export default function ReverseSales() {
               </select>
               <select value={currency} onChange={e => setCurrency(e.target.value)}
                 className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-fuchsia-400/60">
-                {["CNY", "KRW", "USD"].map(c => <option key={c} value={c} className="bg-[#0a0b1e]">{c}</option>)}
+                {["KRW", "CNY", "USD"].map(c => <option key={c} value={c} className="bg-[#0a0b1e]">{c}</option>)}
               </select>
               <ImportExportBar
                 filename={`판매분석_${channel}`}
@@ -123,11 +124,13 @@ export default function ReverseSales() {
                 </button>
               ))}
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-slate-400">
-              원가환산 환율(원/위안)
-              <input type="number" value={rate} onChange={e => setRate(Number(e.target.value) || 190)}
-                className="w-16 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-400/60" />
-            </label>
+            {currency !== "KRW" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                원가환산 환율(원/{currency === "CNY" ? "위안" : currency})
+                <input type="number" value={rate} onChange={e => setRate(Number(e.target.value) || 1)}
+                  className="w-16 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-400/60" />
+              </label>
+            )}
             {d && d.totals.orders > 0 && (
               <div className="flex items-center gap-1.5 ml-auto">
                 <button onClick={clearChannel} disabled={clearMut.isPending}
@@ -185,7 +188,7 @@ export default function ReverseSales() {
                 <div className="glass rounded-2xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-white/10">
                     <h2 className="text-sm font-semibold text-slate-100">월별 손익계산서</h2>
-                    <p className="text-[11px] text-slate-500">순이익 = 수령액(정산 없으면 매출) − 매입원가(환율 {rate}원/위안 환산). 원가는 매입 관리와 매칭된 SKU만 반영.</p>
+                    <p className="text-[11px] text-slate-500">순이익 = 수령액(정산 없으면 매출) − 매입원가{currency !== "KRW" ? `(환율 ${rate} 환산)` : ""}. 원가는 매입 관리와 매칭된 SKU만 반영.</p>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[640px]">
@@ -264,7 +267,7 @@ export default function ReverseSales() {
                           <td className="text-right px-3 py-2 font-semibold text-slate-100">{s.qty}</td>
                           <td className="text-right px-3 py-2 text-slate-300">{money(s.revenue)}</td>
                           <td className="text-right px-3 py-2 text-slate-300">{s.myAvg ? cur(s.myAvg) : "-"}</td>
-                          <td className="text-right px-3 py-2 text-slate-400">{s.marketP50 ? `¥${s.marketP50.toLocaleString()}` : "-"}</td>
+                          <td className="text-right px-3 py-2 text-slate-400">{s.marketP50 ? `${s.marketP50.toLocaleString()}원` : "-"}</td>
                           <td className="text-center px-3 py-2">
                             {s.vsMarketPct == null ? <span className="text-slate-600 text-xs">미매칭</span> : (
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${s.vsMarketPct >= 0 ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-300"}`}>

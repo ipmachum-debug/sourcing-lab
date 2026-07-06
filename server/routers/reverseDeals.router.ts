@@ -365,13 +365,13 @@ export const reverseDealsRouter = router({
           skuId: s.id, productName: s.productName, brand: s.brand,
           type: "price_drop", deltaPct, latestCny: latest.price,
           severity: deltaPct <= -20 ? "high" : "med",
-          message: `시세 ${deltaPct}% (${latest.price}¥) — ${deltaPct <= -20 ? "손절/조정 검토" : "조정 관찰"}`,
+          message: `시세 ${deltaPct}% (${latest.price.toLocaleString()}원) — ${deltaPct <= -20 ? "손절/조정 검토" : "조정 관찰"}`,
         });
       else if (deltaPct >= 10)
         alerts.push({
           skuId: s.id, productName: s.productName, brand: s.brand,
           type: "price_up", deltaPct, latestCny: latest.price, severity: "info",
-          message: `시세 +${deltaPct}% (${latest.price}¥) — 판매 기회`,
+          message: `시세 +${deltaPct}% (${latest.price.toLocaleString()}원) — 판매 기회`,
         });
       // 판매 급증
       const soldBase = base.sold, soldNow = latest.sold;

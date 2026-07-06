@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Coupang Sourcing Helper",
-  "version": "8.11.0",
-  "description": "쿠팡+알리 AI 소싱 코치 v8.11.0 — POIZON 시장 정찰(랭킹·신상·급상승 패시브 수집) + 내 상품 능동 스캔",
+  "version": "8.11.1",
+  "description": "쿠팡+알리 AI 소싱 코치 v8.11.1 — POIZON(kr) 원화·거래량 리더 + 시장 정찰(랭킹·신상) 패시브 수집",
   "permissions": [
     "storage",
     "tabs",

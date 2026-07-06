@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.11.0";
+const EXTENSION_LATEST_VERSION = "8.11.1";
 const EXTENSION_CHANGELOG = [
-  "POIZON 시장 정찰 — 랭킹·신상 페이지를 열면 인기/급상승 상품 자동 발굴(패시브)",
-  "내 상품 매일 1회 능동 스캔 — 지정 SKU만 순차·랜덤딜레이(20~60초)로 안전하게",
-  "역직구 매입 판단 — POIZON 안정가 + 국내몰 최저가 유지",
+  "POIZON(kr.poizon.com) 원화(₩)·거래량(만/천·K/M sold) 리더로 교체 — 실제 시세 수집",
+  "홈·카테고리·검색·랭킹·신상 리스트 모두 패시브 수집(본 페이지만)",
+  "역직구 전면 원화 기준 — 순이익=POIZON원화−국내매입가−배송−수수료−포장−검수",
 ];
 import { getDb } from "../../db";
 import {

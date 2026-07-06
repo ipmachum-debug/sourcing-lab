@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { Radar, Flame, Sparkles, TrendingDown, Star, Calculator, Info } from "lucide-react";
 
-const cny = (n: number) => `¥${Math.round(n || 0).toLocaleString()}`;
+const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 
 interface TrendRow {
   normKey: string; productName: string; brand: string | null;
