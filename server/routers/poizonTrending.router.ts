@@ -115,25 +115,33 @@ export const poizonTrendingRouter = router({
         .orderBy(poizonTrending.observedAt)
         .limit(8000);
 
+      // 대분류 카테고리만 인정(페이지 title 등 garbage 제외)
+      const CANON = ["운동화", "신발", "의류", "가방", "액세서리", "장난감", "뷰티"];
+      const normalizeCat = (c: string | null): string | null => {
+        const s = (c || "").trim();
+        if (!s) return null;
+        if (CANON.includes(s)) return s;
+        if (/뷰티|퍼스널\s*케어/.test(s)) return "뷰티";
+        return null; // 그 외(title·검색어 등)는 탭에 넣지 않음(전체에만 노출)
+      };
+
       // 카테고리 목록(전체 기준, 상품수 순) — 탭 렌더용
       const catCount = new Map<string, Set<string>>();
       for (const r of allRows) {
-        const c = (r.category || "").trim();
+        const c = normalizeCat(r.category);
         if (!c) continue;
         const set = catCount.get(c) ?? new Set<string>();
         set.add(r.normKey);
         catCount.set(c, set);
       }
-      const categories = [...catCount.entries()]
-        .map(([name, set]) => ({ name, count: set.size }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 14);
+      const categories = CANON.map(name => ({ name, count: catCount.get(name)?.size ?? 0 }))
+        .filter(c => c.count > 0);
 
       // 선택 카테고리로 범위 좁힘
       const catFilter =
         input?.category && input.category !== "전체" ? input.category : null;
       const rows = catFilter
-        ? allRows.filter(r => (r.category || "").trim() === catFilter)
+        ? allRows.filter(r => normalizeCat(r.category) === catFilter)
         : allRows;
 
       const now = Date.now();

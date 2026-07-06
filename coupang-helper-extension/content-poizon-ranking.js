@@ -46,17 +46,21 @@
     return out;
   }
 
-  // 카테고리: URL 슬러그 → 한글, 없으면 활성 탭, 없으면 title 앞부분
+  // 카테고리: URL 슬러그만 대분류로 매핑. 판별 불가 시 "" (title 절대 사용 안 함).
+  //   → 서버 탭은 대분류(운동화/신발/의류/가방/액세서리/장난감/뷰티)만 노출.
   function pickCategory() {
     const m = location.pathname.match(/\/category\/([a-z0-9-]+)/i);
     if (m) {
-      const map = { sneakers: "운동화", shoes: "신발", clothing: "의류", clothes: "의류", bag: "가방", bags: "가방", accessories: "액세서리", toys: "장난감", beauty: "뷰티" };
-      return map[m[1].toLowerCase()] || m[1];
+      const map = {
+        sneakers: "운동화", shoes: "신발", clothing: "의류", clothes: "의류", apparel: "의류",
+        bag: "가방", bags: "가방", accessories: "액세서리", accessory: "액세서리",
+        toys: "장난감", toy: "장난감", beauty: "뷰티",
+      };
+      return map[m[1].toLowerCase()] || ""; // 모르는 슬러그는 태그 안 함
     }
     const q = new URLSearchParams(location.search).get("keyword") || new URLSearchParams(location.search).get("q");
     if (q) return "검색:" + q.slice(0, 30);
-    const t = (document.title || "").split("|")[0].replace(/POIZON[^가-힣A-Za-z]*/i, "").trim();
-    return (t || "POIZON").slice(0, 40);
+    return ""; // 홈·기타: 카테고리 불명 → 전체에만 노출
   }
   function isNewPage() {
     return /new|上新|신상/i.test(location.href) || /신상/.test((document.body && document.body.innerText || "").slice(0, 300));
