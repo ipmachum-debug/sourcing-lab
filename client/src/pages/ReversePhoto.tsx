@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { ScanLine, Camera, Sparkles, Star, Calculator, X, Loader2 } from "lucide-react";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
-const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
+const cny = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 const VERDICT: Record<string, { label: string; cls: string; dot: string }> = {
   buy: { label: "추천", cls: "ring-emerald-400/40", dot: "bg-emerald-400" },
@@ -64,7 +64,7 @@ export default function ReversePhoto() {
     } catch { toast.error("이미지 처리 실패"); }
   };
 
-  const run = () => { if (!imgs.length) return toast.error("사진을 먼저 올리세요"); setResult(null); scanMut.mutate({ images: imgs, rate: 190 }); };
+  const run = () => { if (!imgs.length) return toast.error("사진을 먼저 올리세요"); setResult(null); scanMut.mutate({ images: imgs, rate: 1350 }); };
   const reset = () => { setImgs([]); setResult(null); };
 
   return (
@@ -172,7 +172,7 @@ export default function ReversePhoto() {
                             </div>
                           ) : <span />}
                           <button
-                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 190, feePct: 9 })}
+                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 1350, feePct: 9 })}
                             className="text-[11px] neon-chip rounded-lg px-2 py-1 text-slate-200 flex items-center gap-1">
                             <Star className="h-3 w-3" /> 워치
                           </button>

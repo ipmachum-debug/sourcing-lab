@@ -6,7 +6,7 @@ import { Link } from "wouter";
 import { Radar, Flame, Sparkles, TrendingDown, Star, Calculator, Info, Search } from "lucide-react";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
 
-const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
+const cny = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 interface TrendRow {
   normKey: string; productName: string; brand: string | null;

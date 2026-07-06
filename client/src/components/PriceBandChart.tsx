@@ -10,7 +10,8 @@ interface Props {
   height?: number;
 }
 
-const won = (n: number) => Math.round(n).toLocaleString();
+// POIZON 시세는 중국시장 달러($) 기준
+const won = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
 export default function PriceBandChart({ points, band, width = 640, height = 240 }: Props) {
   const pts = points.filter(p => p.price > 0).sort((a, b) => a.t - b.t);
@@ -60,7 +61,7 @@ export default function PriceBandChart({ points, band, width = 640, height = 240
 
       {/* y 라벨 */}
       {yTicks.map((v, i) => (
-        <text key={i} x={padL - 6} y={Y(v) + 3} textAnchor="end" fontSize="10" fill="#64748b">{won(v)}원</text>
+        <text key={i} x={padL - 6} y={Y(v) + 3} textAnchor="end" fontSize="10" fill="#64748b">{won(v)}</text>
       ))}
       {/* 밴드 라벨 */}
       <text x={padL + iw} y={Y(band.p25) - 3} textAnchor="end" fontSize="9" fill="#6ee7b7">P25 안정가</text>
@@ -72,7 +73,7 @@ export default function PriceBandChart({ points, band, width = 640, height = 240
       {pts.map((p, i) => <circle key={i} cx={X(p.t)} cy={Y(p.price)} r="1.8" fill="#e879f9" fillOpacity="0.5" />)}
       {/* 현재 시세 강조 */}
       <circle cx={X(last.t)} cy={Y(last.price)} r="3.5" fill="#e879f9" />
-      <text x={X(last.t) - 6} y={Y(last.price) - 6} textAnchor="end" fontSize="10" fill="#f5d0fe" fontWeight="bold">{won(last.price)}원</text>
+      <text x={X(last.t) - 6} y={Y(last.price) - 6} textAnchor="end" fontSize="10" fill="#f5d0fe" fontWeight="bold">{won(last.price)}</text>
 
       {/* x 라벨 (양끝 + 중앙) */}
       <text x={padL} y={height - 6} fontSize="10" fill="#64748b">{fmtDate(tMin)}</text>

@@ -287,7 +287,7 @@ export default function ReverseSales() {
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[11px] text-slate-500 px-3 py-2">💡 <b className="text-slate-400">시장 대비</b> = 내 실판매 평균가 vs 프로그램이 수집한 POIZON 시세 중앙값(P50). +면 시장보다 비싸게, −면 싸게 판 것.</p>
+                <p className="text-[11px] text-slate-500 px-3 py-2">💡 <b className="text-slate-400">시장 대비</b> = 내 실판매 평균가(원) vs POIZON 시세 중앙값(P50, 중국시장 $를 원으로 환산). +면 시장보다 비싸게, −면 싸게 판 것.</p>
               </div>
             </>
           )}

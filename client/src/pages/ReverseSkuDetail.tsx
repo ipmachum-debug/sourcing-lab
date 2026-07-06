@@ -7,7 +7,7 @@ import Sparkline from "@/components/Sparkline";
 import { ArrowLeft, Calculator, TrendingUp, Package2, BrainCircuit } from "lucide-react";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
-const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
+const cny = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 interface Stats { p25: number; p50: number; p75: number; min: number; max: number; count: number }
 interface Detail {

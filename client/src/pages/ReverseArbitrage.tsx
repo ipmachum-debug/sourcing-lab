@@ -4,7 +4,7 @@ import { Scale, TriangleAlert } from "lucide-react";
 
 // 역직구 아비트리지 순익 계산 — 국내매입 → POIZON 판매 기준.
 const DEFAULT_FEE = 9;      // POIZON 셀러 수수료(%) 대략
-const DEFAULT_RATE = 1;     // POIZON(한국) 원화 기준 → 환산 없음
+const DEFAULT_RATE = 1350;  // POIZON 판매 시장=중국(득물) → 시세 $, 환율(원/$)로 환산
 
 function calc(i: {
   buyKRW: number; poizonCNY: number; rate: number; feePct: number;
@@ -24,8 +24,8 @@ const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
 
 export default function ReverseArbitrage() {
   const [buyKRW, setBuyKRW] = useState(45000);
-  const [poizonCNY, setPoizonCNY] = useState(72000);
-  const [rate] = useState(DEFAULT_RATE);
+  const [poizonCNY, setPoizonCNY] = useState(345);
+  const [rate, setRate] = useState(DEFAULT_RATE);
   const [feePct, setFeePct] = useState(DEFAULT_FEE);
   const [intlShip, setIntlShip] = useState(3000);
   const [rejectPct, setRejectPct] = useState(8);
@@ -54,7 +54,8 @@ export default function ReverseArbitrage() {
           {/* 입력 */}
           <div className="glass rounded-2xl p-5 grid sm:grid-cols-2 gap-4">
             <Num label="국내 매입가 (원)" value={buyKRW} onChange={setBuyKRW} />
-            <Num label="POIZON 안정 판매가 (원)" value={poizonCNY} onChange={setPoizonCNY} />
+            <Num label="POIZON 안정 판매가 ($)" value={poizonCNY} onChange={setPoizonCNY} />
+            <Num label="환율 (원/$)" value={rate} onChange={setRate} />
             <Num label="배송비 (원)" value={intlShip} onChange={setIntlShip} />
             <Slide label="POIZON 수수료" value={feePct} onChange={setFeePct} min={3} max={20} step={0.5} suffix="%" />
             <Slide label="검수 탈락률" value={rejectPct} onChange={setRejectPct} min={0} max={40} step={1} suffix="%" />

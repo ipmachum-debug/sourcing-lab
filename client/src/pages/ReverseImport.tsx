@@ -44,7 +44,7 @@ interface Row {
 }
 
 function num(s: string): number {
-  const m = String(s || "").replace(/[,\s₩원¥]/g, "").match(/([0-9]+)/);
+  const m = String(s || "").replace(/[,\s₩원¥$]/g, "").match(/([0-9]+)/);
   return m ? parseInt(m[1], 10) : 0;
 }
 
@@ -79,10 +79,10 @@ function parseTable(text: string): { rows: Row[]; errors: number } {
 }
 
 const TEMPLATE =
-  "브랜드,상품명,사이즈,국내매입가,국내소스,POIZON시세(원),30일거래량\n" +
-  "크록스,크록스 클래식 클로그 블랙,260,34900,ABC마트,50400,45\n" +
-  "크록스,크록스 클래식 클로그 화이트,265,32900,크록스,47100,38\n" +
-  "나이키,나이키 에어포스1 07 화이트,270,89000,나이키,135000,60\n";
+  "브랜드,상품명,사이즈,국내매입가,국내소스,POIZON시세($),30일거래량\n" +
+  "크록스,크록스 클래식 클로그 블랙,260,34900,ABC마트,40,45\n" +
+  "크록스,크록스 클래식 클로그 화이트,265,32900,크록스,38,38\n" +
+  "나이키,나이키 에어포스1 07 화이트,270,89000,나이키,105,60\n";
 
 export default function ReverseImport() {
   const [raw, setRaw] = useState("");
@@ -157,7 +157,7 @@ export default function ReverseImport() {
             <textarea
               value={raw}
               onChange={e => setRaw(e.target.value)}
-              placeholder={"브랜드  상품명  사이즈  국내매입가  국내소스  POIZON시세  30일거래량\n크록스  크록스 클래식 클로그 블랙  260  34900  ABC마트  380  45"}
+              placeholder={"브랜드  상품명  사이즈  국내매입가  국내소스  POIZON시세($)  30일거래량\n크록스  크록스 클래식 클로그 블랙  260  34900  ABC마트  40  45"}
               className="w-full h-40 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60 font-mono resize-y"
             />
             <div className="flex items-center justify-between mt-3">
@@ -203,7 +203,7 @@ export default function ReverseImport() {
                         <td className="text-center px-3 py-2 text-slate-300">{r.size || "-"}</td>
                         <td className="text-right px-3 py-2 text-slate-300">{r.domesticPrice ? won(r.domesticPrice) : "-"}</td>
                         <td className="text-center px-3 py-2 text-slate-400 text-xs">{r.source}</td>
-                        <td className="text-right px-3 py-2 text-slate-300">{r.poizonCny ? `${r.poizonCny.toLocaleString()}원` : "-"}</td>
+                        <td className="text-right px-3 py-2 text-slate-300">{r.poizonCny ? `$${r.poizonCny.toLocaleString("en-US")}` : "-"}</td>
                         <td className="text-right px-3 py-2 text-slate-400">{r.soldCount30d || "-"}</td>
                       </tr>
                     ))}

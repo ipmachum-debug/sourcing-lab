@@ -50,20 +50,20 @@ describe("stableSellPrice", () => {
 
 describe("computeProfit", () => {
   it("subtracts the full cost stack and computes margin ÷ buy price", () => {
-    // 매입 34,900 / 안정가 380위안 @190 = 72,200원 매출
-    const p = computeProfit(34900, 380, DEFAULT_COST);
-    expect(p.revenueKrw).toBe(72200);
-    // 수수료 9% + 환전 1.5% + 검수 3% = 13.5% of 72200 + 배송 5000 + 포장 1000
-    expect(p.feeKrw).toBe(Math.round(72200 * 0.09));
+    // 매입 34,900원 / 안정가 $60 @1350 = 81,000원 매출 (중국시장 달러 기준)
+    const p = computeProfit(34900, 60, DEFAULT_COST);
+    expect(p.revenueKrw).toBe(81000);
+    // 수수료 9% + 환전 1.5% + 검수 3% = 13.5% of 81000 + 배송 5000 + 포장 1000
+    expect(p.feeKrw).toBe(Math.round(81000 * 0.09));
     expect(p.deductKrw).toBe(
       p.feeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
     );
-    expect(p.netProfitKrw).toBe(72200 - 34900 - p.deductKrw);
+    expect(p.netProfitKrw).toBe(81000 - 34900 - p.deductKrw);
     expect(p.marginPct).toBeCloseTo((p.netProfitKrw / 34900) * 100, 1);
   });
 
   it("guards divide-by-zero on 0 buy price", () => {
-    expect(computeProfit(0, 380).marginPct).toBe(0);
+    expect(computeProfit(0, 60).marginPct).toBe(0);
   });
 });
 
@@ -92,7 +92,8 @@ describe("stabilityGrade + recommendQty", () => {
 
 describe("evaluateDeal", () => {
   it("produces a full verdict for the 크록스 특가 example", () => {
-    const v = evaluateDeal(34900, recent([380, 385, 390, 382, 388, 384]), NOW, DEFAULT_COST, 45)!;
+    // 안정가 ~$60 (중국시장 달러), 국내 매입 34,900원
+    const v = evaluateDeal(34900, recent([60, 61, 62, 60, 61, 60]), NOW, DEFAULT_COST, 45)!;
     expect(v.profit.marginPct).toBeGreaterThan(30);
     expect(["A", "B"]).toContain(v.grade);
     expect(v.recommendQty).toBeGreaterThan(0);
@@ -100,6 +101,6 @@ describe("evaluateDeal", () => {
   });
 
   it("returns null without a buy price", () => {
-    expect(evaluateDeal(0, recent([380]), NOW)).toBeNull();
+    expect(evaluateDeal(0, recent([60]), NOW)).toBeNull();
   });
 });
