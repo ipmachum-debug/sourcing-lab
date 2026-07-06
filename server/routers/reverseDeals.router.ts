@@ -15,6 +15,7 @@ import {
   type CostParams,
   type PriceSample,
 } from "../lib/reverseProfit";
+import { detectBrand } from "../lib/brandDetect";
 
 const DOMESTIC_SOURCES = [
   "musinsa",
@@ -157,11 +158,12 @@ export const reverseDealsRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const normKey = normKeyOf(input.brand, input.productName);
+      const brand = input.brand || detectBrand(input.productName);
+      const normKey = normKeyOf(brand, input.productName);
       await db.insert(poizonSaleObservations).values({
         normKey,
         size: input.size ?? null,
-        brand: input.brand ?? null,
+        brand: brand ?? null,
         productName: input.productName,
         priceCny: input.priceCny,
         soldCount30d: input.soldCount30d,
@@ -172,7 +174,7 @@ export const reverseDealsRouter = router({
         .insert(poizonPricePool)
         .values({
           normKey,
-          brand: input.brand ?? null,
+          brand: brand ?? null,
           productName: input.productName,
           priceCny: input.priceCny,
           source: input.source,
