@@ -14,6 +14,16 @@ function normKeyOf(brand: string | undefined | null, name: string): string {
     .slice(0, 250);
 }
 
+// 대분류 카테고리만 인정(페이지 title 등 garbage 제외)
+const CANON_CATS = ["운동화", "신발", "의류", "가방", "액세서리", "장난감", "뷰티"];
+function normalizeCat(c: string | null): string | null {
+  const s = (c || "").trim();
+  if (!s) return null;
+  if (CANON_CATS.includes(s)) return s;
+  if (/뷰티|퍼스널\s*케어/.test(s)) return "뷰티";
+  return null;
+}
+
 export const poizonTrendingRouter = router({
   // ===== 정찰 수집 (랭킹/신상 페이지 → 배치 적립) =====
   submit: protectedProcedure
@@ -115,16 +125,7 @@ export const poizonTrendingRouter = router({
         .orderBy(poizonTrending.observedAt)
         .limit(8000);
 
-      // 대분류 카테고리만 인정(페이지 title 등 garbage 제외)
-      const CANON = ["운동화", "신발", "의류", "가방", "액세서리", "장난감", "뷰티"];
-      const normalizeCat = (c: string | null): string | null => {
-        const s = (c || "").trim();
-        if (!s) return null;
-        if (CANON.includes(s)) return s;
-        if (/뷰티|퍼스널\s*케어/.test(s)) return "뷰티";
-        return null; // 그 외(title·검색어 등)는 탭에 넣지 않음(전체에만 노출)
-      };
-
+      const CANON = CANON_CATS;
       // 카테고리 목록(전체 기준, 상품수 순) — 탭 렌더용
       const catCount = new Map<string, Set<string>>();
       for (const r of allRows) {
@@ -216,5 +217,88 @@ export const poizonTrendingRouter = router({
         totalObserved: byKey.size,
         categories,
       };
+    }),
+
+  // ===== 카테고리별 급상승 알림 =====
+  // 시세 급등·판매 급증·신규 급부상을 카테고리별로 감지. 데이터 쌓일수록 자동 활성.
+  surgeAlerts: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(60).default(24) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const limit = input?.limit ?? 24;
+      const rows = await db
+        .select()
+        .from(poizonTrending)
+        .where(gte(poizonTrending.observedAt, sql`DATE_SUB(NOW(), INTERVAL 14 DAY)`))
+        .orderBy(poizonTrending.observedAt)
+        .limit(8000);
+      const now = Date.now();
+      const DAY = 86400000;
+      const at = (r: (typeof rows)[number]) =>
+        r.observedAt ? new Date(r.observedAt).getTime() : now;
+
+      const byKey = new Map<string, typeof rows>();
+      for (const r of rows) {
+        const arr = byKey.get(r.normKey) ?? [];
+        arr.push(r);
+        byKey.set(r.normKey, arr);
+      }
+
+      // 카테고리별 판매량 중앙값(신규 급부상 판정 기준)
+      const catSold = new Map<string, number[]>();
+      for (const [, arr] of byKey) {
+        const last = arr[arr.length - 1];
+        const cat = normalizeCat(last.category);
+        if (!cat) continue;
+        const s = catSold.get(cat) ?? [];
+        s.push(last.soldCount ?? 0);
+        catSold.set(cat, s);
+      }
+      const catMedian = new Map<string, number>();
+      for (const [cat, s] of catSold) {
+        const sorted = s.slice().sort((a, b) => a - b);
+        catMedian.set(cat, sorted[Math.floor(sorted.length / 2)] ?? 0);
+      }
+
+      type Alert = {
+        normKey: string; productName: string; brand: string | null; category: string;
+        type: "price_surge" | "sold_surge" | "new_hot";
+        deltaPct: number; latestCny: number; soldCount: number;
+        severity: "high" | "med" | "info"; message: string;
+      };
+      const alerts: Alert[] = [];
+      for (const [key, arr] of byKey) {
+        const last = arr[arr.length - 1];
+        const first = arr[0];
+        const cat = normalizeCat(last.category);
+        if (!cat) continue;
+        const latestCny = last.priceCny ?? 0;
+        const soldNow = last.soldCount ?? 0;
+        const base = { normKey: key, productName: last.productName, brand: last.brand, category: cat, latestCny, soldCount: soldNow };
+
+        // 1) 시세 급등 (2회+ 관측, 가격 상승)
+        const prevCny = first.priceCny ?? 0;
+        if (arr.length >= 2 && prevCny > 0 && latestCny > 0) {
+          const d = Math.round(((latestCny - prevCny) / prevCny) * 1000) / 10;
+          if (d >= 10)
+            alerts.push({ ...base, type: "price_surge", deltaPct: d, severity: d >= 20 ? "high" : "med", message: `시세 +${d}% (${latestCny.toLocaleString()}원)` });
+        }
+        // 2) 판매 급증 (2회+ 관측, 거래량 급증)
+        const soldPrev = first.soldCount ?? 0;
+        if (arr.length >= 2 && soldPrev > 0 && soldNow >= soldPrev * 1.5 && soldNow - soldPrev >= 1000) {
+          const d = Math.round(((soldNow - soldPrev) / soldPrev) * 1000) / 10;
+          alerts.push({ ...base, type: "sold_surge", deltaPct: d, severity: "med", message: `판매 급증 +${d}% (${soldNow.toLocaleString()})` });
+        }
+        // 3) 신규 급부상 (3일 내 첫 관측 + 카테고리 중앙값의 2배 이상 판매)
+        const med = catMedian.get(cat) ?? 0;
+        if (now - at(first) <= 3 * DAY && med > 0 && soldNow >= med * 2 && soldNow >= 3000) {
+          alerts.push({ ...base, type: "new_hot", deltaPct: 0, severity: "info", message: `신규 급부상 · 판매 ${soldNow.toLocaleString()}` });
+        }
+      }
+
+      const rank = { high: 0, med: 1, info: 2 } as const;
+      alerts.sort((a, b) => rank[a.severity] - rank[b.severity] || b.soldCount - a.soldCount);
+      return { alerts: alerts.slice(0, limit), total: alerts.length };
     }),
 });

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation, Link } from "wouter";
@@ -26,6 +27,61 @@ const SEV_DOT: Record<string, string> = { high: "bg-red-400", med: "bg-amber-400
 interface AlertRow {
   skuId: number; productName: string; brand: string | null;
   type: string; deltaPct: number; latestCny: number; severity: string; message: string;
+}
+
+interface SurgeAlert {
+  normKey: string; productName: string; brand: string | null; category: string;
+  type: "price_surge" | "sold_surge" | "new_hot"; deltaPct: number; latestCny: number; soldCount: number;
+  severity: string; message: string;
+}
+const SURGE_TAG: Record<string, { label: string; cls: string }> = {
+  price_surge: { label: "시세급등", cls: "bg-orange-500/20 text-orange-300" },
+  sold_surge: { label: "판매급증", cls: "bg-cyan-500/20 text-cyan-300" },
+  new_hot: { label: "신규급부상", cls: "bg-fuchsia-500/20 text-fuchsia-300" },
+};
+
+function MarketSurge() {
+  const [cat, setCat] = useState<string>("전체");
+  const q = trpc.poizonTrending.surgeAlerts.useQuery(undefined, { refetchOnWindowFocus: false });
+  const d = q.data as { alerts: SurgeAlert[]; total: number } | undefined;
+  if (!d || d.alerts.length === 0) return null;
+  const cats = ["전체", ...Array.from(new Set(d.alerts.map(a => a.category)))];
+  const shown = cat === "전체" ? d.alerts : d.alerts.filter(a => a.category === cat);
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Flame className="h-4 w-4 text-orange-300" />
+        <h2 className="text-sm font-semibold text-slate-100 tracking-wide">시장 급상승</h2>
+        <span className="text-[11px] text-slate-500">POIZON 시세·판매 급변 {d.total}건</span>
+        <Link href="/reverse/market" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
+          시장 정찰 <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+      {cats.length > 2 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {cats.map(c => (
+            <button key={c} onClick={() => setCat(c)}
+              className={`text-[11px] px-2.5 py-1 rounded-lg border ${cat === c ? "bg-orange-500/20 text-orange-200 border-orange-400/40" : "border-white/10 text-slate-400"}`}>{c}</button>
+          ))}
+        </div>
+      )}
+      <div className="grid sm:grid-cols-2 gap-2.5">
+        {shown.slice(0, 8).map((a, i) => {
+          const t = SURGE_TAG[a.type];
+          return (
+            <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-3 flex items-start gap-2.5">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${t.cls}`}>{t.label}</span>
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-100 text-sm truncate">{a.productName}</p>
+                <p className="text-[12px] text-slate-300">{a.message}</p>
+                <p className="text-[10px] text-slate-500">{a.brand || ""}{a.brand ? " · " : ""}{a.category}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function WatchlistAlerts() {
@@ -97,6 +153,9 @@ export default function Reverse() {
 
           {/* 워치리스트 알림 (앱 메인 표시) */}
           <WatchlistAlerts />
+
+          {/* 시장 급상승 알림 */}
+          <MarketSurge />
 
           {/* 3단계 */}
           <section>
