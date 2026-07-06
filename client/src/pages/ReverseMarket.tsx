@@ -1,3 +1,4 @@
+import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -16,8 +17,9 @@ interface SurgeRow {
 }
 
 export default function ReverseMarket() {
-  const q = trpc.poizonTrending.board.useQuery({ limit: 60 });
-  const d = q.data as { today: TrendRow[]; newArrivals: TrendRow[]; surging: SurgeRow[]; totalObserved: number } | undefined;
+  const [cat, setCat] = useState("전체");
+  const q = trpc.poizonTrending.board.useQuery({ limit: 60, category: cat === "전체" ? undefined : cat });
+  const d = q.data as { today: TrendRow[]; newArrivals: TrendRow[]; surging: SurgeRow[]; totalObserved: number; categories: { name: string; count: number }[] } | undefined;
 
   const watchMut = trpc.reversePurchase.skuCreate.useMutation({
     onSuccess: () => toast.success("워치리스트에 추가"),
@@ -42,6 +44,22 @@ export default function ReverseMarket() {
             </p>
             <p className="text-[11px] text-slate-500 mt-1.5">관측 상품 {d?.totalObserved ?? 0}개 · 패시브 수집(본 페이지만)</p>
           </div>
+
+          {/* 카테고리 탭 */}
+          {d && d.categories.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {["전체", ...d.categories.map(c => c.name)].map(name => {
+                const active = cat === name;
+                const cnt = name === "전체" ? d.totalObserved : d.categories.find(c => c.name === name)?.count;
+                return (
+                  <button key={name} onClick={() => setCat(name)}
+                    className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${active ? "bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/50" : "border-white/10 text-slate-400 hover:text-slate-200"}`}>
+                    {name} <span className="text-[10px] opacity-70">{cnt}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {empty && (
             <div className="glass rounded-2xl p-8 text-center">
