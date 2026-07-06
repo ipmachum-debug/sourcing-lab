@@ -119,6 +119,7 @@ type MenuItem = {
   section: "main" | "advanced";
   group?: string;
   channel?: ChannelId; // 없으면 coupang(기존)로 간주
+  hidden?: boolean; // 사이드바에서만 숨김(라우트는 유지) — 레거시/중복 정리용
 };
 
 // ★ UX 개편(R1): 초보자용 메인 4개 + 나머지는 "고급"으로 접기.
@@ -132,24 +133,25 @@ const menuItems: MenuItem[] = [
   { icon: Package, label: "내 소싱", path: "/my-sourcing", emoji: "📌", section: "main" },
   { icon: TrendingUp, label: "판매 관리", path: "/dashboard", emoji: "📊", section: "main" },
 
-  // ===== 역직구 채널 (국내매입 → 해외판매) — 3그룹: 의사결정 / 도구 / 운영 =====
+  // ===== 역직구 채널 — 엔진 우선(입력→인사이트→큐→현장) / 운영. 레거시는 숨김 =====
   { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse", group: "home" },
-  // 의사결정
-  { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "decide" },
-  { icon: ListChecks, label: "소싱 큐", path: "/reverse/queue", emoji: "🧭", section: "main", channel: "reverse", group: "decide" },
-  { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "decide" },
-  { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "decide" },
-  { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse", group: "decide" },
-  // 도구
-  { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "tools" },
-  { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse", group: "tools" },
-  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse", group: "tools" },
-  // 운영
-  { icon: Store, label: "판매자 엑셀", path: "/reverse/seller", emoji: "🏬", section: "main", channel: "reverse", group: "ops" },
-  { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops" },
+  // 엔진 (핵심 흐름)
+  { icon: Store, label: "판매자 엑셀", path: "/reverse/seller", emoji: "🏬", section: "main", channel: "reverse", group: "engine" },
+  { icon: BarChart3, label: "소싱 인사이트", path: "/reverse/insights", emoji: "📊", section: "main", channel: "reverse", group: "engine" },
+  { icon: ListChecks, label: "소싱 큐", path: "/reverse/queue", emoji: "🧭", section: "main", channel: "reverse", group: "engine" },
+  { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "engine" },
+  // 운영 (매입 후)
   { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse", group: "ops" },
   { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse", group: "ops" },
   { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse", group: "ops" },
+  { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "ops" },
+  // 숨김(레거시·중복) — 라우트/딥링크는 유지, 사이드바에서만 감춤
+  { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "ops", hidden: true },
+  { icon: Radar, label: "시장 정찰", path: "/reverse/market", emoji: "📡", section: "main", channel: "reverse", group: "ops", hidden: true },
+  { icon: Scale, label: "아비트리지 계산", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "ops", hidden: true },
+  { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse", group: "ops", hidden: true },
+  { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse", group: "ops", hidden: true },
+  { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops", hidden: true },
 
   // ===== 고급 (더보기) =====
   // 소싱 상세
@@ -185,7 +187,8 @@ const menuItems: MenuItem[] = [
 ];
 
 const channelOf = (i: MenuItem): ChannelId => i.channel ?? "coupang";
-const mainItemsFor = (ch: ChannelId) => menuItems.filter(i => i.section === "main" && channelOf(i) === ch);
+const mainItemsFor = (ch: ChannelId) =>
+  menuItems.filter(i => i.section === "main" && channelOf(i) === ch && !i.hidden);
 const advancedGroups = ["소싱 상세", "시장 분석", "판매 관리 상세", "마케팅", "도구"];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
