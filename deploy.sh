@@ -41,6 +41,14 @@ if [ -f drizzle/0011_hybrid_data_collection.sql ]; then
   echo "  Applying 0011_hybrid_data_collection.sql..."
   mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0011_hybrid_data_collection.sql 2>&1 || echo "  (already applied or skipped)"
 fi
+if [ -f drizzle/0034_poizon_obs_spu.sql ]; then
+  echo "  Applying 0034_poizon_obs_spu.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0034_poizon_obs_spu.sql 2>&1 || echo "  (already applied or skipped)"
+fi
+if [ -f drizzle/0035_barcode_catalog.sql ]; then
+  echo "  Applying 0035_barcode_catalog.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0035_barcode_catalog.sql 2>&1 || echo "  (already applied or skipped)"
+fi
 
 # 4. Build
 echo "[4/5] Building..."
