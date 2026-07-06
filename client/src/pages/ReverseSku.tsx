@@ -24,7 +24,8 @@ interface Sku {
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 
 function spreadOf(s: Sku) {
-  const poizonKRW = s.poizonCny || 0; // POIZON 원화 그대로
+  // POIZON 시세는 중국시장 $ → 환율(원/$)로 매출 환산
+  const poizonKRW = Math.round((s.poizonCny || 0) * (s.rate || 1350));
   const net = Math.round(poizonKRW * (1 - (s.feePct || 9) / 100) - (s.domesticPrice || 0));
   const marginRate = poizonKRW > 0 ? (net / poizonKRW) * 100 : 0;
   return { poizonKRW, net, marginRate };
@@ -48,14 +49,14 @@ export default function ReverseSku() {
   const removeMut = trpc.reversePurchase.skuRemove.useMutation({ onSuccess: inv });
   const bulkMut = trpc.reversePurchase.skuBulkCreate.useMutation({ onSuccess: r => { toast.success(`${r.count}건 업로드`); inv(); }, onError: e => toast.error(e.message) });
 
-  const [f, setF] = useState({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "190", feePct: "9" });
+  const [f, setF] = useState({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "1350", feePct: "9" });
   const lookupPool = async () => {
     if (!f.productName.trim()) return toast.error("상품명을 먼저 입력하세요");
     const res = (await utils.reversePurchase.poizonLookup.fetch({ query: f.productName })) as any[];
     if (res && res.length) {
       const hit = res[0];
       setF(p => ({ ...p, poizonCny: String(hit.priceCny || 0), brand: p.brand || (hit.brand ?? "") }));
-      toast.success(`공유 풀 시세 ${(hit.priceCny || 0).toLocaleString()}원 (관측 ${hit.observeCount || 1}회)`);
+      toast.success(`공유 풀 시세 $${(hit.priceCny || 0).toLocaleString("en-US")} (관측 ${hit.observeCount || 1}회)`);
     } else {
       toast.info("공유 풀에 아직 없어요. 직접 넣으면 다른 유저와 공유됩니다.");
     }
@@ -65,9 +66,9 @@ export default function ReverseSku() {
     createMut.mutate({
       brand: f.brand || undefined, productName: f.productName,
       domesticPrice: Number(f.domesticPrice) || 0, poizonCny: Number(f.poizonCny) || 0,
-      rate: Number(f.rate) || 190, feePct: Number(f.feePct) || 9,
+      rate: Number(f.rate) || 1350, feePct: Number(f.feePct) || 9,
     });
-    setF({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "190", feePct: "9" });
+    setF({ brand: "", productName: "", domesticPrice: "", poizonCny: "", rate: "1350", feePct: "9" });
   };
 
   const ranked = useMemo(() =>
@@ -92,8 +93,8 @@ export default function ReverseSku() {
               importSpecs={SKU_SPECS}
               requiredKey="productName"
               importing={bulkMut.isPending}
-              templateHeaders={["브랜드", "상품명", "국내매입가", "POIZON시세(원)", "환율", "수수료"]}
-              templateExample={[["크록스", "크록스 클래식 클로그 블랙", 34900, 380, 190, 9]]}
+              templateHeaders={["브랜드", "상품명", "국내매입가", "POIZON시세($)", "환율(원/$)", "수수료"]}
+              templateExample={[["크록스", "크록스 클래식 클로그 블랙", 34900, 45, 1350, 9]]}
               onImport={rows =>
                 bulkMut.mutate({
                   rows: rows.map(r => ({
@@ -107,10 +108,10 @@ export default function ReverseSku() {
                 })
               }
               onExport={() => ({
-                headers: ["브랜드", "상품명", "국내가", "POIZON(원)", "환율", "매출(원)", "순익(원)", "마진율(%)"],
+                headers: ["브랜드", "상품명", "국내가", "POIZON($)", "환율(원/$)", "매출(원)", "순익(원)", "마진율(%)"],
                 rows: ranked.map(r => [
                   r.s.brand || "", r.s.productName, r.s.domesticPrice || 0, r.s.poizonCny || 0,
-                  r.s.rate || 190, r.poizonKRW, r.net, r.marginRate.toFixed(1),
+                  r.s.rate || 1350, r.poizonKRW, r.net, r.marginRate.toFixed(1),
                 ]),
               })}
             />
@@ -122,7 +123,7 @@ export default function ReverseSku() {
               <In placeholder="브랜드" value={f.brand} onChange={v => setF({ ...f, brand: v })} />
               <In placeholder="상품명 *" value={f.productName} onChange={v => setF({ ...f, productName: v })} span2 />
               <In placeholder="국내가(원)" value={f.domesticPrice} onChange={v => setF({ ...f, domesticPrice: v })} type="number" />
-              <In placeholder="POIZON(원)" value={f.poizonCny} onChange={v => setF({ ...f, poizonCny: v })} type="number" />
+              <In placeholder="POIZON($)" value={f.poizonCny} onChange={v => setF({ ...f, poizonCny: v })} type="number" />
               <In placeholder="환율" value={f.rate} onChange={v => setF({ ...f, rate: v })} type="number" />
             </div>
             <div className="flex justify-end gap-2 mt-2">

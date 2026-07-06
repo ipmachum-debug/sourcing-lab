@@ -95,7 +95,7 @@ export default function ReverseMyProducts() {
                 externalId: r.externalId || undefined, myPriceKrw: r.myPriceKrw || 0, targetStock: r.targetStock || 0,
               })) })}
               onExport={() => ({
-                headers: ["상품명", "브랜드", "플랫폼", "내판매가", "목표재고", "재고", "POIZON(원)", "경쟁사최저", "활성"],
+                headers: ["상품명", "브랜드", "플랫폼", "내판매가", "목표재고", "재고", "POIZON($)", "경쟁사최저", "활성"],
                 rows: prods.map(p => {
                   const it = itemOf(p.id);
                   return [p.productName, p.brand || "", PLATFORM_LABEL[p.platform || "coupang"], p.myPriceKrw || 0,
@@ -184,7 +184,7 @@ export default function ReverseMyProducts() {
                   <tr>
                     <th className="text-left font-medium px-3 py-2.5">상품 / 브랜드</th>
                     <th className="text-right font-medium px-3 py-2.5">내판매가</th>
-                    <th className="text-center font-medium px-3 py-2.5" colSpan={3}>오늘 기록 (재고 · POIZON원 · 경쟁사최저)</th>
+                    <th className="text-center font-medium px-3 py-2.5" colSpan={3}>오늘 기록 (재고 · POIZON$ · 경쟁사최저)</th>
                     <th className="text-right font-medium px-3 py-2.5">매출/판매</th>
                     <th className="text-center font-medium px-3 py-2.5">POIZON 7일</th>
                     <th className="text-center font-medium px-3 py-2.5">활성</th>
@@ -205,7 +205,7 @@ export default function ReverseMyProducts() {
                         </td>
                         <td className="text-right px-3 py-2 text-slate-300">{won(p.myPriceKrw || 0)}</td>
                         <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.stock ?? "재고")} value={s.stock} onChange={v => set("stock", v)} /></td>
-                        <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.poizonPriceCny ?? "원")} value={s.cny} onChange={v => set("cny", v)} /></td>
+                        <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.poizonPriceCny ?? "$")} value={s.cny} onChange={v => set("cny", v)} /></td>
                         <td className="px-1 py-2">
                           <div className="flex items-center gap-1">
                             <Mini placeholder={String(it?.latest?.competitorLowKrw ?? "경쟁")} value={s.comp} onChange={v => set("comp", v)} />
@@ -281,7 +281,7 @@ function SkuCard({ it }: { it: DashItem }) {
       <div className="grid grid-cols-3 gap-2 mt-3">
         <Metric label="매출" values={s.map(p => p.revenue)} value={latest ? won(latest.revenueKrw) : "-"} />
         <Metric label="재고" values={s.map(p => p.stock)} value={latest ? `${latest.stock}개` : "-"} />
-        <Metric label="시세" values={s.map(p => p.cny)} value={latest?.poizonPriceCny ? `${latest.poizonPriceCny.toLocaleString()}원` : "-"} />
+        <Metric label="시세($)" values={s.map(p => p.cny)} value={latest?.poizonPriceCny ? `$${latest.poizonPriceCny.toLocaleString("en-US")}` : "-"} />
       </div>
 
       <p className={`text-[11px] mt-3 ${hasData ? "text-slate-400" : "text-slate-600"}`}>{summary}</p>

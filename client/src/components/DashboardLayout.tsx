@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar, ScanLine,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar, ScanLine, Store,
 } from "lucide-react";
 import { CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -144,6 +144,7 @@ const menuItems: MenuItem[] = [
   { icon: Dices, label: "베팅 사이징", path: "/reverse/betting", emoji: "🎲", section: "main", channel: "reverse", group: "tools" },
   { icon: Camera, label: "오늘의 SKU", path: "/reverse/sku", emoji: "📸", section: "main", channel: "reverse", group: "tools" },
   // 운영
+  { icon: Store, label: "판매자 엑셀", path: "/reverse/seller", emoji: "🏬", section: "main", channel: "reverse", group: "ops" },
   { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops" },
   { icon: Package, label: "매입 관리", path: "/reverse/purchases", emoji: "📦", section: "main", channel: "reverse", group: "ops" },
   { icon: Ship, label: "수출 관리", path: "/reverse/exports", emoji: "🌏", section: "main", channel: "reverse", group: "ops" },

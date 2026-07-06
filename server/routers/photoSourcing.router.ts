@@ -107,7 +107,7 @@ export const photoSourcingRouter = router({
       z.object({
         // data URL(base64) 이미지. 클라이언트에서 축소·압축해서 전송.
         images: z.array(z.string().min(20).max(8_000_000)).min(1).max(12),
-        rate: z.number().int().min(1).max(1000).default(190),
+        rate: z.number().int().min(1).max(3000).default(1350), // 원/$ (POIZON 시세=중국시장 $)
       })
     )
     .mutation(async ({ ctx, input }) => {

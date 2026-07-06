@@ -222,7 +222,7 @@ export const reversePurchaseRouter = router({
         category: z.string().max(80).optional(),
         domesticPrice: z.number().int().min(0).default(0),
         poizonCny: z.number().int().min(0).default(0),
-        rate: z.number().int().min(1).default(190),
+        rate: z.number().int().min(1).max(3000).default(1350),
         feePct: z.number().int().min(0).max(30).default(9),
         note: z.string().max(300).optional(),
       })
@@ -267,7 +267,7 @@ export const reversePurchaseRouter = router({
               category: z.string().max(80).optional(),
               domesticPrice: z.number().int().min(0).default(0),
               poizonCny: z.number().int().min(0).default(0),
-              rate: z.number().int().min(1).default(190),
+              rate: z.number().int().min(1).max(3000).default(1350),
               feePct: z.number().int().min(0).max(30).default(9),
               note: z.string().max(300).optional(),
             })

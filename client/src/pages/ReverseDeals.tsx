@@ -5,21 +5,23 @@ import { Flame, Settings2, Star, TrendingUp, Info, Calculator } from "lucide-rea
 import ImportExportBar from "@/components/ImportExportBar";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
+const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 // 서버 reverseProfit 엔진과 동일한 기본 코스트 (즉석 계산기 미러)
-// POIZON(한국)이 원화라 환산 불필요: rate=1, 환전손실=0
+// POIZON 판매 기준 시장=중국(득물) → 시세는 $. 정산은 원. rate=원/$, 환전손실 1.5%.
 const DEFAULT_COST = {
-  rate: 1,
+  rate: 1350,
   poizonFeePct: 9,
   chinaShipKrw: 5000,
-  fxLossPct: 0,
+  fxLossPct: 1.5,
   packingKrw: 1000,
   inspectRiskPct: 3,
 };
 type Cost = typeof DEFAULT_COST;
 
-function calcProfit(domesticBuyKrw: number, stableCny: number, c: Cost) {
-  const revenueKrw = Math.round(stableCny * c.rate);
+// stableUsd = POIZON 안정 판매가($, 중국시장) → 매출(원) = $ × 환율
+function calcProfit(domesticBuyKrw: number, stableUsd: number, c: Cost) {
+  const revenueKrw = Math.round(stableUsd * c.rate);
   const feeKrw = Math.round((revenueKrw * c.poizonFeePct) / 100);
   const fxLossKrw = Math.round((revenueKrw * c.fxLossPct) / 100);
   const inspectRiskKrw = Math.round((revenueKrw * c.inspectRiskPct) / 100);
@@ -91,9 +93,9 @@ export default function ReverseDeals() {
             <ImportExportBar
               filename="오늘사야할상품_발주서"
               onExport={() => ({
-                headers: ["브랜드", "상품", "국내특가", "안정판매가(원)", "예상순이익", "마진율(%)", "안정성", "추천수량"],
+                headers: ["브랜드", "상품", "국내특가", "안정판매가($)", "매출환산(원)", "예상순이익", "마진율(%)", "안정성", "추천수량"],
                 rows: deals.map(d => [
-                  d.brand || "", d.productName, d.domesticBuyKrw, d.revenueKrw,
+                  d.brand || "", d.productName, d.domesticBuyKrw, d.stableCny, d.revenueKrw,
                   d.netProfitKrw, d.marginPct.toFixed(1), d.grade, d.recommendQty,
                 ]),
               })}
@@ -112,9 +114,9 @@ export default function ReverseDeals() {
                 <input type="number" value={calc.buy} onChange={e => setCalc({ ...calc, buy: e.target.value })}
                   placeholder="34900" className="calc-in" />
               </Field>
-              <Field label="POIZON 안정 판매가 (원)">
+              <Field label="POIZON 안정 판매가 ($)">
                 <input type="number" value={calc.stable} onChange={e => setCalc({ ...calc, stable: e.target.value })}
-                  placeholder="380" className="calc-in" />
+                  placeholder="345" className="calc-in" />
               </Field>
               {calcRes && (
                 <div className="text-right">
@@ -153,7 +155,9 @@ export default function ReverseDeals() {
             </div>
             {showSettings && (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
+                <CostIn label="환율(원/$)" v={cost.rate} on={v => setCost({ ...cost, rate: v })} step={10} />
                 <CostIn label="수수료(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={0.5} />
+                <CostIn label="환전손실(%)" v={cost.fxLossPct} on={v => setCost({ ...cost, fxLossPct: v })} step={0.5} />
                 <CostIn label="배송비(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
                 <CostIn label="포장비(원)" v={cost.packingKrw} on={v => setCost({ ...cost, packingKrw: v })} step={500} />
                 <CostIn label="검수리스크(%)" v={cost.inspectRiskPct} on={v => setCost({ ...cost, inspectRiskPct: v })} step={0.5} />
@@ -209,7 +213,8 @@ function DealCard({ d, rank }: { d: Deal; rank: number }) {
 
       <div className="mt-3 space-y-1.5 text-sm">
         <Row label="국내 특가" value={won(d.domesticBuyKrw)} />
-        <Row label="POIZON 안정 판매가" value={<>{won(d.revenueKrw)}</>} />
+        <Row label="POIZON 안정가($)" value={<span className="text-fuchsia-200">{usd(d.stableCny)}</span>} />
+        <Row label="매출 환산(원)" value={<span className="text-slate-300">{won(d.revenueKrw)}</span>} />
         <Row label="예상 수수료·배송비" value={<span className="text-slate-400">−{won(d.deductKrw)}</span>} />
         <div className="border-t border-white/10 my-1.5" />
         <Row label="예상 순이익" value={<b className={d.netProfitKrw >= 0 ? "text-emerald-300" : "text-red-400"}>{won(d.netProfitKrw)}</b>} big />

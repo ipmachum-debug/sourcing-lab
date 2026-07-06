@@ -4,6 +4,7 @@ import {
   domesticPricePool,
   poizonSaleObservations,
   poizonPricePool,
+  poizonTrending,
   reverseSkuWatch,
 } from "../../drizzle/schema";
 import { and, desc, eq, gte, like, sql } from "drizzle-orm";
@@ -54,7 +55,7 @@ function effectiveBuyKrw(r: {
 }
 
 const costInput = z.object({
-  rate: z.number().int().min(1).max(1000).optional(),
+  rate: z.number().int().min(1).max(3000).optional(),
   poizonFeePct: z.number().min(0).max(30).optional(),
   chinaShipKrw: z.number().int().min(0).max(100000).optional(),
   fxLossPct: z.number().min(0).max(20).optional(),
@@ -295,7 +296,7 @@ export const reverseDealsRouter = router({
         sku: {
           id: sku.id, brand: sku.brand, productName: sku.productName,
           domesticPrice: sku.domesticPrice ?? 0, poizonCny: sku.poizonCny ?? 0,
-          rate: sku.rate ?? 190, feePct: sku.feePct ?? 9,
+          rate: sku.rate ?? 1350, feePct: sku.feePct ?? 9,
         },
         series,
         stats30,
@@ -488,6 +489,137 @@ export const reverseDealsRouter = router({
         }
       }
       return { ok: true, rows: input.rows.length, domestic, poizon };
+    }),
+
+  // ===== POIZON 판매자센터 엑셀(전체 내보내기) 업로더 =====
+  // SPU_ID 기준 정확 매칭 + 공식 데이터: 30일 평균 거래가($), 중국 총 판매량, 카테고리(대분류).
+  //   중국 시장(득물) 시세는 달러($) → priceCny 필드에 USD 값을 저장(필드명 유지).
+  //   한 번의 업로드로 관측(안정가 산출) + 공유 시세 풀 + 정찰 보드(카테고리)까지 시딩.
+  sellerImport: protectedProcedure
+    .input(
+      z.object({
+        rows: z
+          .array(
+            z.object({
+              spuId: z.string().max(60).optional(),
+              productName: z.string().min(1).max(300),
+              brand: z.string().max(100).optional(),
+              category: z.string().max(40).optional(), // 대분류
+              size: z.string().max(40).optional(),
+              priceUsd: z.number().min(0).max(1000000).default(0), // 30일 평균 거래가($)
+              soldCount: z.number().int().min(0).max(100000000).default(0), // 중국 총 판매량
+            })
+          )
+          .min(1)
+          .max(2000),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 1) 관측(SKU 단위) — 시세 있는 행만 안정가 표본으로 적립
+      const obsRows = [];
+      // 2) SPU 단위 집계(공유 풀 upsert + 정찰 보드 시딩용)
+      type Spu = {
+        normKey: string; spuId: string | null; brand: string | null;
+        name: string; category: string | null; prices: number[]; soldMax: number;
+      };
+      const spuMap = new Map<string, Spu>();
+
+      for (const r of input.rows) {
+        const brand = r.brand || detectBrand(r.productName) || null;
+        const normKey = normKeyOf(brand, r.productName);
+        const priceUsd = Math.round(r.priceUsd);
+        if (priceUsd > 0) {
+          obsRows.push({
+            normKey,
+            spuId: r.spuId ?? null,
+            size: r.size ?? null,
+            brand,
+            productName: r.productName,
+            priceCny: priceUsd, // ★ USD 값(중국시장 달러) — 필드명 유지
+            soldCount30d: r.soldCount,
+            source: "seller" as const,
+          });
+        }
+        const g = spuMap.get(normKey) ?? {
+          normKey, spuId: r.spuId ?? null, brand, name: r.productName,
+          category: r.category?.trim() || null, prices: [], soldMax: 0,
+        };
+        if (priceUsd > 0) g.prices.push(priceUsd);
+        g.soldMax = Math.max(g.soldMax, r.soldCount);
+        spuMap.set(normKey, g);
+      }
+
+      // 관측 배치 삽입 (500개씩)
+      let observations = 0;
+      for (let i = 0; i < obsRows.length; i += 500) {
+        const chunk = obsRows.slice(i, i + 500);
+        if (chunk.length === 0) continue;
+        await db.insert(poizonSaleObservations).values(chunk).catch(() => {});
+        observations += chunk.length;
+      }
+
+      // SPU 단위: 공유 시세 풀 upsert + 정찰 보드(카테고리) 시딩
+      const median = (arr: number[]) => {
+        if (arr.length === 0) return 0;
+        const s = arr.slice().sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+      const trendingRows = [];
+      let pool = 0;
+      for (const g of spuMap.values()) {
+        const price = median(g.prices);
+        if (price > 0) {
+          await db
+            .insert(poizonPricePool)
+            .values({
+              normKey: g.normKey,
+              brand: g.brand,
+              productName: g.name,
+              priceCny: price,
+              source: "seller",
+              observeCount: 1,
+              contributorCount: 1,
+            })
+            .onDuplicateKeyUpdate({
+              set: {
+                priceCny: price,
+                observeCount: sql`${poizonPricePool.observeCount} + 1`,
+                lastObservedAt: sql`NOW()`,
+              },
+            })
+            .catch(() => {});
+          pool++;
+        }
+        trendingRows.push({
+          normKey: g.normKey,
+          productName: g.name,
+          brand: g.brand,
+          rankPos: 0,
+          category: g.category,
+          isNew: false,
+          trendingScore: 0,
+          priceCny: price,
+          soldCount: g.soldMax,
+          source: "seller",
+        });
+      }
+      // 정찰 보드 시딩 (500개씩) — 카테고리 탭·급상승 데이터 소스
+      for (let i = 0; i < trendingRows.length; i += 500) {
+        const chunk = trendingRows.slice(i, i + 500);
+        if (chunk.length === 0) continue;
+        await db.insert(poizonTrending).values(chunk).catch(() => {});
+      }
+
+      return {
+        ok: true,
+        rows: input.rows.length,
+        observations,
+        spus: spuMap.size,
+        pool,
+      };
     }),
 
   // ===== 오늘 사야 할 상품 TOP N (매입 판단) =====

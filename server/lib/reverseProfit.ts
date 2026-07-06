@@ -14,9 +14,9 @@
 //   판매 안정성 등급(A/B/C/D)과 추천 매입 수량은 마진율·거래량·변동폭으로 결정.
 // ============================================================
 
-/** 풀 코스트 파라미터 (원/위안, %는 백분율). 유저·상품별로 조정 가능. */
+/** 풀 코스트 파라미터 (원/달러, %는 백분율). 유저·상품별로 조정 가능. */
 export interface CostParams {
-  rate: number; // 환율 (원/위안)
+  rate: number; // 환율 (원/달러, KRW per USD)
   poizonFeePct: number; // POIZON 수수료 (%)
   chinaShipKrw: number; // 중국행 배송비 (건당, 원)
   fxLossPct: number; // 환전 손실 (%)
@@ -24,13 +24,13 @@ export interface CostParams {
   inspectRiskPct: number; // 반품/검수 리스크 비용 (매출 대비 %)
 }
 
-// ★ POIZON(한국) 시세·정산이 원화 → 환산 불필요. rate=1, 환전손실=0.
-//   (dewu 위안 기준으로 쓰려면 rate=환율, fxLossPct>0 로 조정)
+// ★ POIZON 판매 기준 시장 = 중국(득물) → 시세는 달러($). 정산은 원화.
+//   revenue(원) = 시세($) × rate(원/달러). 기본 환율 1350, 환전손실 1.5%.
 export const DEFAULT_COST: CostParams = {
-  rate: 1,
+  rate: 1350,
   poizonFeePct: 9,
   chinaShipKrw: 5000,
-  fxLossPct: 0,
+  fxLossPct: 1.5,
   packingKrw: 1000,
   inspectRiskPct: 3,
 };

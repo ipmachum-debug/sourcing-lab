@@ -1814,8 +1814,8 @@ export const reverseSkuWatch = mysqlTable("reverse_sku_watch", {
   sku: varchar("sku", { length: 120 }),
   category: varchar("category", { length: 80 }),
   domesticPrice: int("domestic_price").default(0),   // 국내 매입가(원)
-  poizonCny: int("poizon_cny").default(0),            // POIZON 시세(위안)
-  rate: int("rate").default(190),                     // 환율(원/위안)
+  poizonCny: int("poizon_cny").default(0),            // POIZON 시세(중국시장 $, 필드명 유지)
+  rate: int("rate").default(1350),                    // 환율(원/$, KRW per USD)
   feePct: int("fee_pct").default(9),                  // POIZON 수수료(%)
   note: varchar("note", { length: 300 }),
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
@@ -1893,12 +1893,13 @@ export const poizonSaleObservations = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     normKey: varchar("norm_key", { length: 255 }).notNull(), // 상품 매칭키(브랜드+상품)
+    spuId: varchar("spu_id", { length: 60 }), // POIZON SPU_ID(있으면 정확 매칭키)
     size: varchar("size", { length: 40 }), // 사이즈(있으면) — 사이즈별 회전율
     brand: varchar("brand", { length: 100 }),
     productName: varchar("product_name", { length: 300 }).notNull(),
-    priceCny: int("price_cny").notNull(), // 체결/호가 시세(위안)
-    soldCount30d: int("sold_count_30d").default(0), // 페이지에 노출된 30일 판매량(있으면)
-    source: varchar("source", { length: 30 }).default("extension"), // manual/extension
+    priceCny: int("price_cny").notNull(), // POIZON 시세 (중국시장 USD, 필드명 유지)
+    soldCount30d: int("sold_count_30d").default(0), // 최근 30일 판매량
+    source: varchar("source", { length: 30 }).default("extension"), // extension/seller/manual
     observedAt: timestamp("observed_at", tsOpts).defaultNow().notNull(),
   },
   t => ({

@@ -145,6 +145,8 @@ export const salesReportRouter = router({
       const currency = recs[0].currency || "KRW";
       // 원가 환산: 매입가는 KRW. 판매통화가 CNY면 /rate, KRW면 그대로.
       const costToSale = (krw: number) => (currency === "KRW" ? krw : Math.round(krw / rate));
+      // POIZON 관측 시세는 중국시장 달러($) → 원화 판매가와 비교하려면 원으로 환산.
+      const FX_KRW_PER_USD = 1350;
 
       // 매입 데이터 — norm_key별 평균 매입가(KRW) + 회전일(매입→판매)
       const purchases = await db
@@ -226,7 +228,9 @@ export const salesReportRouter = router({
       const bySku = [...skuMap.entries()]
         .map(([normKey, e]) => {
           const myAvg = e.prices.length ? Math.round(e.prices.reduce((a, b) => a + b, 0) / e.prices.length) : 0;
-          const marketP50 = median(marketMap.get(normKey) ?? []);
+          const marketUsd = median(marketMap.get(normKey) ?? []);
+          // $ → 원 환산 후 원화 실판매가와 비교
+          const marketP50 = marketUsd > 0 ? Math.round(marketUsd * FX_KRW_PER_USD) : 0;
           const hasMarket = marketP50 > 0 && currency === "KRW";
           if (hasMarket) matched++;
           const vsMarketPct =
