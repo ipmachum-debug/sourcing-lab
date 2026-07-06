@@ -97,7 +97,10 @@ export const poizonTrendingRouter = router({
   board: protectedProcedure
     .input(
       z
-        .object({ limit: z.number().int().min(5).max(200).default(60) })
+        .object({
+          limit: z.number().int().min(5).max(200).default(60),
+          category: z.string().max(60).optional(),
+        })
         .optional()
     )
     .query(async ({ input }) => {
@@ -105,12 +108,33 @@ export const poizonTrendingRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const limit = input?.limit ?? 60;
       // 최근 14일 정찰 표본 (급상승 계산용)
-      const rows = await db
+      const allRows = await db
         .select()
         .from(poizonTrending)
         .where(gte(poizonTrending.observedAt, sql`DATE_SUB(NOW(), INTERVAL 14 DAY)`))
         .orderBy(poizonTrending.observedAt)
-        .limit(6000);
+        .limit(8000);
+
+      // 카테고리 목록(전체 기준, 상품수 순) — 탭 렌더용
+      const catCount = new Map<string, Set<string>>();
+      for (const r of allRows) {
+        const c = (r.category || "").trim();
+        if (!c) continue;
+        const set = catCount.get(c) ?? new Set<string>();
+        set.add(r.normKey);
+        catCount.set(c, set);
+      }
+      const categories = [...catCount.entries()]
+        .map(([name, set]) => ({ name, count: set.size }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 14);
+
+      // 선택 카테고리로 범위 좁힘
+      const catFilter =
+        input?.category && input.category !== "전체" ? input.category : null;
+      const rows = catFilter
+        ? allRows.filter(r => (r.category || "").trim() === catFilter)
+        : allRows;
 
       const now = Date.now();
       const at = (r: (typeof rows)[number]) =>
@@ -182,6 +206,7 @@ export const poizonTrendingRouter = router({
         newArrivals,
         surging: surging.slice(0, limit),
         totalObserved: byKey.size,
+        categories,
       };
     }),
 });
