@@ -5,6 +5,7 @@ import { gte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { rateLimit } from "../lib/rateLimit";
+import { detectBrand } from "../lib/brandDetect";
 
 function normKeyOf(brand: string | undefined | null, name: string): string {
   return `${brand ?? ""} ${name}`
@@ -47,10 +48,12 @@ export const poizonTrendingRouter = router({
           message: `요청이 너무 많습니다. ${rl.retryAfterSec}초 후 다시 시도하세요.`,
         });
 
-      const rows = input.items.map(it => ({
-        normKey: normKeyOf(it.brand, it.productName),
+      const rows = input.items.map(it => {
+        const brand = it.brand || detectBrand(it.productName);
+        return {
+        normKey: normKeyOf(brand, it.productName),
         productName: it.productName,
-        brand: it.brand ?? null,
+        brand: brand ?? null,
         rankPos: it.rankPos,
         category: input.category ?? null,
         isNew: it.isNew,
@@ -59,7 +62,8 @@ export const poizonTrendingRouter = router({
         soldCount: it.soldCount,
         imageUrl: it.imageUrl ?? null,
         source: "extension",
-      }));
+        };
+      });
       await db.insert(poizonTrending).values(rows);
 
       // 시세가 보이면 공유 시세 풀도 갱신 (같은 상품 자동 연계)

@@ -1,20 +1,26 @@
 // ============================================================
-// content-poizon-ranking.js — POIZON(kr.poizon.com) 랭킹/신상 페이지 패시브 정찰 리더 (v8.11.1)
+// content-poizon-ranking.js — POIZON(kr.poizon.com) 랭킹/신상/리스트 패시브 정찰 리더 (v8.11.2)
 // ============================================================
-// 원칙: 유저가 "직접 연" 랭킹/신상 페이지에 이미 로드된 상품만 읽어 공유 풀에 적립.
-//   페이지를 프로그램이 순회하지 않음(능동 크롤 X) → 밴 리스크 최소.
-// ★ kr.poizon.com은 원(₩) + "거래 N만/천" 형식 + 한글 상품명. (dewu 위안 아님)
-// ⚠️ DOM은 변동이 잦고 안티-devtools가 있어 클래스명 대신 innerText 방어적 파싱.
+// 원칙: 유저가 "직접 연/스크롤한" 리스트에 로드된 상품만 읽어 공유 풀에 적립.
+//   능동 크롤·자동 네비게이션 없음 → 밴 리스크 최소.
+// ★ kr.poizon: 원(₩) + "거래 N만/천" 또는 "406K sold" + 한글/영문 상품명.
+// v8.11.2: SPA 카테고리 이동·스크롤 무한로드 재수집(델타) — 홈 1회에서 멈추던 문제 해결.
+//   - lastSig 대신 sentKeys(본 페이지 내 이미 보낸 카드) 델타 방식
+//   - location.href 폴링(1.5s) + MutationObserver + 스크롤 감지로 재발화
+//   - SPA 지연 렌더 대응 로드 후 3·6·11초 재시도
+// ⚠️ 안티-devtools 있어 클래스명 대신 innerText 방어 파싱.
 (function () {
   "use strict";
-  let lastSig = "";
 
-  // "60,700" → 60700
+  let sentKeys = new Set(); // 이 페이지에서 이미 보낸 카드 키
+  let rankCounter = 0; // 노출 순서(스크롤 델타 누적)
+  let lastUrl = location.href;
+
   function wonToNum(s) {
     const m = String(s || "").replace(/[,\s]/g, "").match(/([0-9]+)/);
     return m ? parseInt(m[1], 10) : 0;
   }
-  // 거래량: "거래 1.4만"→14000, "거래 993"→993, "거래 1천"→1000, "406K sold"→406000, "1M sold"→1000000
+  // "거래 1.4만"→14000, "993"→993, "406K sold"→406000, "1M sold"→1000000
   function parseVolume(txt) {
     const s = String(txt || "");
     const ko = s.match(/거래\s*([0-9]+(?:\.[0-9]+)?)\s*(만|천)?/);
@@ -29,7 +35,6 @@
     }
     return 0;
   }
-  // 텍스트에서 원(₩) 가격들 추출 (할인가/정상가 순서로 등장)
   function parseWonPrices(txt) {
     const out = [];
     const re = /([0-9][0-9,]{2,})\s*원/g;
@@ -41,14 +46,22 @@
     return out;
   }
 
-  function pageContext() {
-    const body = (document.body && document.body.innerText) || "";
-    // 홈·카테고리·검색 등 리스트형 페이지 모두 대상(카드 5개 미만이면 어차피 스킵).
-    const isNew = /new|上新|신상/i.test(location.href) || /신상|NEW/.test(body.slice(0, 400));
-    return { isRanking: true, isNew, category: (document.title || "").trim().slice(0, 80) };
+  // 카테고리: URL 슬러그 → 한글, 없으면 활성 탭, 없으면 title 앞부분
+  function pickCategory() {
+    const m = location.pathname.match(/\/category\/([a-z0-9-]+)/i);
+    if (m) {
+      const map = { sneakers: "운동화", shoes: "신발", clothing: "의류", clothes: "의류", bag: "가방", bags: "가방", accessories: "액세서리", toys: "장난감", beauty: "뷰티" };
+      return map[m[1].toLowerCase()] || m[1];
+    }
+    const q = new URLSearchParams(location.search).get("keyword") || new URLSearchParams(location.search).get("q");
+    if (q) return "검색:" + q.slice(0, 30);
+    const t = (document.title || "").split("|")[0].replace(/POIZON[^가-힣A-Za-z]*/i, "").trim();
+    return (t || "POIZON").slice(0, 40);
+  }
+  function isNewPage() {
+    return /new|上新|신상/i.test(location.href) || /신상/.test((document.body && document.body.innerText || "").slice(0, 300));
   }
 
-  // 카드 후보 수집 (원 가격 + 상품명 텍스트를 가진 반복 구조)
   function collectCards() {
     const out = [];
     const seen = new Set();
@@ -59,54 +72,98 @@
       const txt = (el.innerText || "").trim();
       if (!txt || txt.length < 4 || txt.length > 400) continue;
       const prices = parseWonPrices(txt);
-      if (!prices.length) continue; // 원 가격 신호 없으면 상품카드 아님
-      const salePrice = prices[0]; // 첫 값 = 표시가(할인가)
-      // 상품명: 가격/거래 라인 제외한 가장 긴 라인
+      if (!prices.length) continue;
+      const salePrice = prices[0];
       const lines = txt.split(/\n+/).map(s => s.trim()).filter(Boolean);
       const name = lines
-        .filter(l => !/원|거래|리뷰|판매/.test(l) || l.replace(/[0-9,원\s]/g, "").length > 3)
         .filter(l => !/^\s*[0-9,]+\s*원/.test(l))
+        .filter(l => l.replace(/[0-9,.\s원거래만천sold%할인]/gi, "").length >= 2)
         .sort((a, b) => b.length - a.length)[0];
-      if (!name || name.replace(/[0-9,.\s원]/g, "").length < 2) continue;
+      if (!name) continue;
       const key = name.slice(0, 60) + "|" + salePrice;
       if (seen.has(key)) continue;
       seen.add(key);
       const img = el.querySelector && el.querySelector("img");
       out.push({
         productName: name.slice(0, 300),
-        priceCny: salePrice, // (필드명 유지, 값은 원화)
+        priceCny: salePrice, // 필드명 유지, 값은 원화
         soldCount: parseVolume(txt),
         imageUrl: img && img.src ? img.src.slice(0, 1000) : undefined,
+        _key: key,
       });
-      if (out.length >= 100) break;
+      if (out.length >= 300) break;
     }
     return out;
   }
 
-  function parseAndSend() {
+  // 새로 나타난 카드만 델타로 전송
+  function scanAndSend() {
     try {
-      const ctx = pageContext();
-      if (!ctx.isRanking && !ctx.isNew) return;
       const cards = collectCards();
-      if (cards.length < 5) return; // 리스트 신호 부족 → 단일상품 리더가 처리
-      const sig = ctx.category + "|" + cards.length + "|" + cards[0].productName;
-      if (sig === lastSig) return;
-      lastSig = sig;
-      const items = cards.map((c, i) => ({
-        ...c,
-        rankPos: i + 1,
-        isNew: ctx.isNew,
-        trendingScore: ctx.isRanking ? Math.max(0, 100 - i) : 0,
-      }));
+      const fresh = cards.filter(c => !sentKeys.has(c._key));
+      if (fresh.length < 3) return; // 유의미한 신규가 없으면 스킵(단일상품 오탐 방지)
+      if (sentKeys.size > 1200) return; // 페이지당 상한(폭주 방지)
+      const category = pickCategory();
+      const isNew = isNewPage();
+      const items = fresh.map(c => {
+        sentKeys.add(c._key);
+        rankCounter += 1;
+        return {
+          productName: c.productName,
+          priceCny: c.priceCny,
+          soldCount: c.soldCount,
+          imageUrl: c.imageUrl,
+          rankPos: rankCounter,
+          isNew,
+          trendingScore: Math.max(0, 120 - rankCounter),
+        };
+      });
       chrome.runtime
-        .sendMessage({ type: "SUBMIT_POIZON_TRENDING", data: { category: ctx.category, items } })
+        .sendMessage({ type: "SUBMIT_POIZON_TRENDING", data: { category, items } })
         .catch(() => {});
     } catch (_) {}
   }
 
-  let timer = null;
-  function schedule() { clearTimeout(timer); timer = setTimeout(parseAndSend, 3000); }
-  schedule();
-  let lastUrl = location.href;
-  setInterval(() => { if (location.href !== lastUrl) { lastUrl = location.href; schedule(); } }, 2500);
+  // 디바운스
+  let dTimer = null;
+  function debouncedScan(delay) {
+    clearTimeout(dTimer);
+    dTimer = setTimeout(scanAndSend, delay || 1200);
+  }
+
+  function onUrlChange() {
+    lastUrl = location.href;
+    sentKeys = new Set();
+    rankCounter = 0;
+    // SPA 지연 렌더 대응: 여러 번 재시도
+    setTimeout(scanAndSend, 3000);
+    setTimeout(scanAndSend, 6000);
+    setTimeout(scanAndSend, 11000);
+  }
+
+  // 초기 진입
+  onUrlChange();
+
+  // URL 변경 폴링(SPA pushState도 location.href에 반영됨)
+  setInterval(() => {
+    if (location.href !== lastUrl) onUrlChange();
+  }, 1500);
+
+  // 무한 로드/카테고리 DOM 교체 감지
+  try {
+    const mo = new MutationObserver(() => debouncedScan(1200));
+    mo.observe(document.body, { childList: true, subtree: true });
+  } catch (_) {}
+
+  // 스크롤 시 재수집(throttle 3s)
+  let scrollLock = false;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (scrollLock) return;
+      scrollLock = true;
+      setTimeout(() => { scrollLock = false; scanAndSend(); }, 3000);
+    },
+    { passive: true }
+  );
 })();

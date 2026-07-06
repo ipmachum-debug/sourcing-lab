@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.11.1";
+const EXTENSION_LATEST_VERSION = "8.11.2";
 const EXTENSION_CHANGELOG = [
-  "POIZON(kr.poizon.com) 원화(₩)·거래량(만/천·K/M sold) 리더로 교체 — 실제 시세 수집",
-  "홈·카테고리·검색·랭킹·신상 리스트 모두 패시브 수집(본 페이지만)",
-  "역직구 전면 원화 기준 — 순이익=POIZON원화−국내매입가−배송−수수료−포장−검수",
+  "정찰 재수집 — 카테고리 SPA 이동·스크롤 무한로드에서 새 상품 계속 수집(델타)",
+  "브랜드 자동 인식 — 상품명에서 나이키·아디다스·크록스 등 브랜드 채움",
+  "카테고리 정리 — 페이지 title 대신 실제 카테고리(운동화/신발/의류…)로 저장",
 ];
 import { getDb } from "../../db";
 import {
