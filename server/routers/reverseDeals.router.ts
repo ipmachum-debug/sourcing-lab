@@ -16,6 +16,7 @@ import {
   type PriceSample,
 } from "../lib/reverseProfit";
 import { detectBrand } from "../lib/brandDetect";
+import { bestMatch, makeCandidate } from "../lib/matchProduct";
 
 const DOMESTIC_SOURCES = [
   "musinsa",
@@ -533,6 +534,19 @@ export const reverseDealsRouter = router({
         byKey.set(o.normKey, e);
       }
 
+      // 1-b) 유사 매칭용 POIZON 시세 후보 (공유 시세 풀 최신가 — 이름이 조금 달라도 연결)
+      const poolRows = await db
+        .select({
+          brand: poizonPricePool.brand,
+          productName: poizonPricePool.productName,
+          priceCny: poizonPricePool.priceCny,
+        })
+        .from(poizonPricePool)
+        .limit(4000);
+      const fuzzyCands = poolRows
+        .filter(p => (p.priceCny ?? 0) > 0)
+        .map(p => makeCandidate(p.productName, p.brand, { priceCny: p.priceCny ?? 0 }));
+
       // 2) 후보: 유저 워치리스트(국내가+POIZON 수동) + 국내 공유 풀(자동 발굴)
       type Cand = {
         normKey: string;
@@ -594,8 +608,18 @@ export const reverseDealsRouter = router({
         const hit = byKey.get(c.normKey);
         let samples: PriceSample[] = hit ? hit.samples : [];
         let soldHint = hit ? hit.soldMax : 0;
+        let matchType: "exact" | "watchlist" | "fuzzy" = hit ? "exact" : "watchlist";
         if (samples.length === 0 && c.fallbackCny > 0) {
-          samples = [{ priceCny: c.fallbackCny, at: now }]; // 관측 없으면 수동 시세 1표본
+          samples = [{ priceCny: c.fallbackCny, at: now }]; // 워치리스트 수동 시세
+          matchType = "watchlist";
+        }
+        if (samples.length === 0) {
+          // 유사 매칭: 국내 상품명으로 POIZON 시세 풀에서 근접 상품 찾기
+          const fm = bestMatch(c.name, c.brand || null, fuzzyCands, 3);
+          if (fm) {
+            samples = [{ priceCny: fm.ref.priceCny, at: now }];
+            matchType = "fuzzy";
+          }
         }
         if (samples.length === 0) continue;
         const v = evaluateDeal(
@@ -625,6 +649,7 @@ export const reverseDealsRouter = router({
           recommendQty: v.recommendQty,
           stars: v.stars,
           hasObservations: !!hit,
+          matchType,
         });
       }
 
