@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { ScanLine, Camera, Sparkles, Star, Calculator, X, Loader2 } from "lucide-react";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
-const cny = (n: number) => `¥${Math.round(n || 0).toLocaleString()}`;
+const cny = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 
 const VERDICT: Record<string, { label: string; cls: string; dot: string }> = {
   buy: { label: "추천", cls: "ring-emerald-400/40", dot: "bg-emerald-400" },

@@ -38,29 +38,42 @@
     return m ? m[0] : "";
   }
 
-  // 30일 판매량 추출 (defensive: "已售/月销/최근 판매 N" 패턴)
+  // 30일 판매량/거래량 추출 ("거래 N만/천" 또는 판매/리뷰 수)
   function pickSold30d() {
     const txt = (document.body && document.body.innerText) || "";
-    const m = txt.match(/(?:已售|月销|최근\s*판매|sold)\D{0,6}([0-9][0-9,]{0,6})/i);
-    return m ? toNum(m[1]) : 0;
+    const m = txt.match(/거래\s*([0-9]+(?:\.[0-9]+)?)\s*(만|천)?/);
+    if (m) {
+      const n = parseFloat(m[1]);
+      const unit = m[2] === "만" ? 10000 : m[2] === "천" ? 1000 : 1;
+      return Math.round(n * unit);
+    }
+    const en = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*([KMkm])?\s*sold/i);
+    if (en) {
+      const u = /k/i.test(en[2] || "") ? 1000 : /m/i.test(en[2] || "") ? 1000000 : 1;
+      return Math.round(parseFloat(en[1]) * u);
+    }
+    const r = txt.match(/(?:판매|리뷰|已售)\D{0,6}([0-9][0-9,]{0,6})/);
+    return r ? toNum(r[1]) : 0;
   }
 
-  // 위안(¥) 시세 추출 (defensive: 명시 가격요소 → ¥ 텍스트 스캔)
+  // 원(₩) 시세 추출 — kr.poizon: "구매 104,430원" 또는 표시가. (필드명은 priceCny 유지, 값은 원화)
   function pickPriceCny() {
-    // 1) 가격으로 보이는 요소 우선
-    const cand = document.querySelector('[class*="price" i]');
-    if (cand && /[¥￥]|[0-9]/.test(cand.textContent || "")) {
-      const v = toNum(cand.textContent);
-      if (v >= 10 && v < 1000000) return v;
-    }
-    // 2) 본문에서 ¥ 패턴 (최저가로 보이는 첫 값)
     const txt = (document.body && document.body.innerText) || "";
-    const m = txt.match(/[¥￥]\s*([0-9][0-9,]{1,7})/);
-    if (m) {
-      const v = toNum(m[1]);
-      if (v >= 10 && v < 1000000) return v;
+    // 1) "구매 N원" (현재 구매가) 우선
+    const buy = txt.match(/구매\s*([0-9][0-9,]{2,})\s*원/);
+    if (buy) { const v = toNum(buy[1]); if (v >= 1000 && v < 100000000) return v; }
+    // 2) 가격으로 보이는 요소
+    const cand = document.querySelector('[class*="price" i]');
+    if (cand) {
+      const m = (cand.textContent || "").match(/([0-9][0-9,]{2,})\s*원/);
+      if (m) { const v = toNum(m[1]); if (v >= 1000 && v < 100000000) return v; }
     }
-    return 0;
+    // 3) 본문 원(₩) 값 중 최저 (사이즈 그리드·배송가 중 대표 "부터" 가격)
+    const all = [];
+    const re = /([0-9][0-9,]{2,})\s*원/g;
+    let mm;
+    while ((mm = re.exec(txt))) { const v = toNum(mm[1]); if (v >= 1000 && v < 100000000) all.push(v); }
+    return all.length ? Math.min(...all) : 0;
   }
 
   function parseAndSend() {

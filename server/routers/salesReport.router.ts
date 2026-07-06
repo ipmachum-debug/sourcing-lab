@@ -25,7 +25,7 @@ export const salesReportRouter = router({
     .input(
       z.object({
         channel: z.enum(["poizon", "shopee", "other"]).default("poizon"),
-        currency: z.string().max(8).default("CNY"),
+        currency: z.string().max(8).default("KRW"),
         rows: z
           .array(
             z.object({
@@ -76,7 +76,7 @@ export const salesReportRouter = router({
             size: r.size ?? null,
             qty: r.qty || 1,
             salePrice: r.salePrice || 0,
-            currency: input.currency || "CNY",
+            currency: input.currency || "KRW",
             settleAmount: r.settleAmount || 0,
             externalOrderId: r.externalOrderId ?? null,
           };
@@ -139,10 +139,10 @@ export const salesReportRouter = router({
       if (recs.length === 0)
         return {
           trend: [], bySku: [], totals: { orders: 0, qty: 0, revenue: 0 },
-          matched: 0, currency: "CNY", channels: [], monthly: [], avgTurnoverDays: null,
+          matched: 0, currency: "KRW", channels: [], monthly: [], avgTurnoverDays: null,
         };
 
-      const currency = recs[0].currency || "CNY";
+      const currency = recs[0].currency || "KRW";
       // 원가 환산: 매입가는 KRW. 판매통화가 CNY면 /rate, KRW면 그대로.
       const costToSale = (krw: number) => (currency === "KRW" ? krw : Math.round(krw / rate));
 
@@ -227,7 +227,7 @@ export const salesReportRouter = router({
         .map(([normKey, e]) => {
           const myAvg = e.prices.length ? Math.round(e.prices.reduce((a, b) => a + b, 0) / e.prices.length) : 0;
           const marketP50 = median(marketMap.get(normKey) ?? []);
-          const hasMarket = marketP50 > 0 && currency === "CNY";
+          const hasMarket = marketP50 > 0 && currency === "KRW";
           if (hasMarket) matched++;
           const vsMarketPct =
             hasMarket && myAvg > 0 ? Math.round(((myAvg - marketP50) / marketP50) * 1000) / 10 : null;
