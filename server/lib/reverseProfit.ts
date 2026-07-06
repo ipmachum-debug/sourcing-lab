@@ -169,8 +169,9 @@ export function stabilityGrade(s: StablePrice): StabilityGrade {
 }
 
 /**
- * 추천 매입 수량 — "마진 높아도 거래량 적으면 많이 사면 안 된다".
- *   기준: 마진율 30% 이상 + 안정성 등급 + 거래량. 미달이면 0(보류).
+ * 추천 매입 수량 (베팅 사이징 흡수) — "마진 높아도 거래량 적으면 많이 사면 안 된다".
+ *   ① 등급 상한(A/B/C) × ② 마진 보정(엣지 크면 포지션↑) 를
+ *   ③ 시장 수요의 15% 상한으로 눌러 재고 리스크를 방어한다. 미달이면 0(보류).
  */
 export function recommendQty(
   marginPct: number,
@@ -179,8 +180,11 @@ export function recommendQty(
 ): number {
   if (marginPct < 30) return 0; // 마진 기준 미달 → 매입 보류
   if (grade === "D") return 0; // 데이터 부족 → 보류
-  const cap = grade === "A" ? 30 : grade === "B" ? 15 : 5;
-  // 시장 30일 거래량의 ~15%까지만 (재고 리스크 방어)
+  const baseCap = grade === "A" ? 30 : grade === "B" ? 15 : 5;
+  // 마진 보정: 아주 높은 마진(엣지 큼)이면 상한을 키운다
+  const marginBoost = marginPct >= 60 ? 1.5 : 1;
+  const cap = Math.round(baseCap * marginBoost);
+  // 시장 30일 거래량(수요)의 ~15%까지만 (재고 리스크 방어)
   const byVolume = Math.floor(volume30 * 0.15);
   return Math.max(1, Math.min(cap, byVolume));
 }

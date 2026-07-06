@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Scale, TriangleAlert } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { Scale, TriangleAlert, Search, Check } from "lucide-react";
 
 // 역직구 아비트리지 순익 계산 — 국내매입 → POIZON 판매 기준.
 const DEFAULT_FEE = 9;      // POIZON 셀러 수수료(%) 대략
@@ -32,6 +33,18 @@ export default function ReverseArbitrage() {
   const [roundtripShip, setRoundtripShip] = useState(12000);
   const [vatRefund, setVatRefund] = useState(true);
 
+  // 카탈로그(판매자 엑셀)에서 안정가($) 불러오기
+  const [term, setTerm] = useState("");
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  const lookup = trpc.reverseDeals.catalogInsights.useQuery(
+    { search: search || undefined, limit: 8 },
+    { enabled: !!search }
+  );
+  const matches = (lookup.data?.models ?? []) as {
+    normKey: string; productName: string; brand: string; soldCount: number; avgUsd: number;
+  }[];
+
   const r = useMemo(
     () => calc({ buyKRW, poizonCNY, rate, feePct, intlShip, rejectPct, roundtripShip, vatRefund }),
     [buyKRW, poizonCNY, rate, feePct, intlShip, rejectPct, roundtripShip, vatRefund]
@@ -47,8 +60,50 @@ export default function ReverseArbitrage() {
             <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
               <Scale className="h-3.5 w-3.5" /> Arbitrage
             </span>
-            <h1 className="text-3xl font-black mt-4 neon-text">아비트리지 계산</h1>
-            <p className="text-slate-300/80 mt-2">국내 매입 → POIZON 판매, <b className="text-white">검수 리스크·부가세환급까지</b> 반영한 진짜 순익</p>
+            <h1 className="text-3xl font-black mt-4 neon-text">정밀 수익 계산기</h1>
+            <p className="text-slate-300/80 mt-2">국내 매입 → POIZON 판매, <b className="text-white">검수 탈락·부가세 환급까지</b> 반영한 진짜 순익. 카탈로그에서 안정가($)를 바로 불러오세요.</p>
+          </div>
+
+          {/* 카탈로그에서 안정가 불러오기 */}
+          <div className="glass rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                <input
+                  value={term}
+                  onChange={e => setTerm(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && setSearch(term.trim())}
+                  placeholder="판매자 카탈로그에서 상품 검색 (예: 크록스)"
+                  className="w-full rounded-lg border border-white/15 bg-white/5 pl-9 pr-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60"
+                />
+              </div>
+              <button onClick={() => setSearch(term.trim())} className="neon-btn rounded-lg px-4 py-2.5 text-sm font-semibold">검색</button>
+            </div>
+            {search && matches.length > 0 && (
+              <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
+                {matches.map(m => (
+                  <button
+                    key={m.normKey}
+                    onClick={() => { setPoizonCNY(m.avgUsd); setPicked(m.productName); }}
+                    className="w-full flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8"
+                  >
+                    <span className="min-w-0">
+                      <span className="text-slate-100 truncate block">{m.productName}</span>
+                      <span className="text-[11px] text-slate-500">{m.brand || "-"} · 판매량 {m.soldCount.toLocaleString()}</span>
+                    </span>
+                    <span className="text-fuchsia-200 font-semibold shrink-0">${m.avgUsd.toLocaleString("en-US")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {search && !lookup.isLoading && matches.length === 0 && (
+              <p className="text-[12px] text-slate-500 mt-2">일치하는 상품이 없어요. 판매자 엑셀을 먼저 올리면 여기서 검색돼요.</p>
+            )}
+            {picked && (
+              <p className="text-[12px] text-emerald-300 mt-2 flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5" /> <b>{picked}</b> 안정가(${poizonCNY}) 적용됨
+              </p>
+            )}
           </div>
 
           {/* 입력 */}

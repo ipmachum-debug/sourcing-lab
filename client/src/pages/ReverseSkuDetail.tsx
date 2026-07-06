@@ -52,7 +52,7 @@ export default function ReverseSkuDetail() {
   const soldSeries = windowPts.map(p => p.sold).filter(n => n > 0);
 
   if (q.isLoading) return <DashboardLayout><div className="cyber-stage p-10 text-center text-slate-500">불러오는 중…</div></DashboardLayout>;
-  if (!d) return <DashboardLayout><div className="cyber-stage p-10 text-center text-slate-500">SKU를 찾을 수 없어요. <Link href="/reverse/sku" className="text-fuchsia-300 underline">워치리스트로</Link></div></DashboardLayout>;
+  if (!d) return <DashboardLayout><div className="cyber-stage p-10 text-center text-slate-500">SKU를 찾을 수 없어요. <Link href="/reverse/queue" className="text-fuchsia-300 underline">소싱 큐로</Link></div></DashboardLayout>;
 
   const cur = d.current;
   const posLabel =
@@ -64,8 +64,8 @@ export default function ReverseSkuDetail() {
     <DashboardLayout>
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-4xl mx-auto space-y-6">
-          <Link href="/reverse/sku" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white">
-            <ArrowLeft className="h-4 w-4" /> 워치리스트
+          <Link href="/reverse/queue" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white">
+            <ArrowLeft className="h-4 w-4" /> 소싱 큐
           </Link>
 
           <div className="flex flex-wrap items-start justify-between gap-3">
