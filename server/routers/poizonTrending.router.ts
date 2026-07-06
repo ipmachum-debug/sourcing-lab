@@ -97,13 +97,13 @@ export const poizonTrendingRouter = router({
   board: protectedProcedure
     .input(
       z
-        .object({ limit: z.number().int().min(5).max(100).default(30) })
+        .object({ limit: z.number().int().min(5).max(200).default(60) })
         .optional()
     )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const limit = input?.limit ?? 30;
+      const limit = input?.limit ?? 60;
       // 최근 14일 정찰 표본 (급상승 계산용)
       const rows = await db
         .select()
@@ -124,17 +124,18 @@ export const poizonTrendingRouter = router({
         byKey.set(r.normKey, arr);
       }
 
-      // 오늘 랭킹: 최근 2일 관측 중 normKey별 최상위(최저 rank_pos) — rank 오름차순
+      // 오늘 랭킹: 최근 3일 관측 중 normKey별 대표(판매량 최대) — 판매량(거래) 내림차순.
+      //   rankPos는 페이지 내 위치라 전역 순위가 안 됨 → 실제 판매량으로 랭킹.
       const DAY = 86400000;
       const todayMap = new Map<string, (typeof rows)[number]>();
       for (const r of rows) {
-        if (now - at(r) > 2 * DAY || !r.rankPos) continue;
+        if (now - at(r) > 3 * DAY) continue;
         const prev = todayMap.get(r.normKey);
-        if (!prev || (r.rankPos || 999999) < (prev.rankPos || 999999))
+        if (!prev || (r.soldCount ?? 0) > (prev.soldCount ?? 0))
           todayMap.set(r.normKey, r);
       }
       const today = [...todayMap.values()]
-        .sort((a, b) => (a.rankPos || 999999) - (b.rankPos || 999999))
+        .sort((a, b) => (b.soldCount ?? 0) - (a.soldCount ?? 0))
         .slice(0, limit);
 
       // 신상: 최근 7일 is_new, normKey별 최신

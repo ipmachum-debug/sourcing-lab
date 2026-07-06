@@ -16,7 +16,7 @@ interface SurgeRow {
 }
 
 export default function ReverseMarket() {
-  const q = trpc.poizonTrending.board.useQuery({ limit: 30 });
+  const q = trpc.poizonTrending.board.useQuery({ limit: 60 });
   const d = q.data as { today: TrendRow[]; newArrivals: TrendRow[]; surging: SurgeRow[]; totalObserved: number } | undefined;
 
   const watchMut = trpc.reversePurchase.skuCreate.useMutation({
@@ -107,9 +107,9 @@ export default function ReverseMarket() {
                       </tr>
                     </thead>
                     <tbody>
-                      {d.today.map(r => (
+                      {d.today.map((r, i) => (
                         <tr key={r.normKey} className="border-t border-white/8">
-                          <td className="px-3 py-2 font-bold text-fuchsia-300">{r.rankPos}</td>
+                          <td className="px-3 py-2 font-bold text-fuchsia-300">{i + 1}</td>
                           <td className="px-3 py-2">
                             <p className="text-slate-100 truncate max-w-[280px]">{r.productName}</p>
                             <p className="text-[11px] text-slate-500">{r.brand || "-"}</p>
