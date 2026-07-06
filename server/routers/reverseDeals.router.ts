@@ -1028,6 +1028,164 @@ export const reverseDealsRouter = router({
       };
     }),
 
+  // ===== 카탈로그 인사이트 (소싱 엔진) =====
+  // 판매자 다운로드 자료 집계: ①모델 판매량 랭킹 ②가격대별($) 수요 ③사이즈 분포.
+  //   POIZON 판매량은 SPU(상품) 단위 총계 → 모델·가격대는 정확, 사이즈는 수요가중 취급 분포.
+  catalogInsights: protectedProcedure
+    .input(
+      z.object({
+        search: z.string().max(100).optional(), // 브랜드·상품명(예: 크록스)
+        category: z.string().max(40).optional(),
+        limit: z.number().int().min(1).max(100).default(30),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const now = Date.now();
+      const q = (input.search ?? "").trim();
+
+      const obs = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+        })
+        .from(poizonSaleObservations)
+        .where(
+          q
+            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
+            : sql`1=1`
+        )
+        .limit(30000);
+
+      // 카테고리 맵(정찰/판매자 시딩)
+      const trows = await db
+        .select({
+          normKey: poizonTrending.normKey,
+          category: poizonTrending.category,
+        })
+        .from(poizonTrending)
+        .limit(20000);
+      const catByKey = new Map<string, string | null>();
+      for (const t of trows)
+        if (!catByKey.has(t.normKey)) catByKey.set(t.normKey, t.category ?? null);
+
+      const median = (arr: number[]) => {
+        if (arr.length === 0) return 0;
+        const s = arr.slice().sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+
+      // SPU(상품) 단위 묶음
+      type G = {
+        normKey: string; brand: string; name: string; category: string | null;
+        prices: number[]; soldMax: number; sizes: Set<string>;
+      };
+      const groups = new Map<string, G>();
+      const catFilter =
+        input.category && input.category !== "전체" ? input.category : null;
+      const catCount = new Map<string, Set<string>>();
+      for (const o of obs) {
+        const gk = o.spuId || o.normKey;
+        const g =
+          groups.get(gk) ??
+          ({
+            normKey: o.normKey, brand: o.brand ?? "", name: o.productName,
+            category: catOf({ category: catByKey.get(o.normKey) ?? null, productName: o.productName }),
+            prices: [], soldMax: 0, sizes: new Set<string>(),
+          } as G);
+        if (o.priceCny > 0) g.prices.push(o.priceCny);
+        g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        if (o.size) g.sizes.add(o.size);
+        groups.set(gk, g);
+      }
+
+      // 카테고리 칩 카운트(필터 전 전체 기준)
+      for (const [gk, g] of groups) {
+        if (g.category) {
+          const set = catCount.get(g.category) ?? new Set<string>();
+          set.add(gk);
+          catCount.set(g.category, set);
+        }
+      }
+
+      const list = [...groups.values()].filter(
+        g => !catFilter || g.category === catFilter
+      );
+
+      // ① 모델 판매량 랭킹
+      const models = list
+        .map(g => ({
+          normKey: g.normKey, brand: g.brand, productName: g.name,
+          category: g.category, soldCount: g.soldMax,
+          avgUsd: median(g.prices), lowUsd: g.prices.length ? Math.min(...g.prices) : 0,
+          highUsd: g.prices.length ? Math.max(...g.prices) : 0, sizeCount: g.sizes.size,
+        }))
+        .sort((a, b) => b.soldCount - a.soldCount)
+        .slice(0, input.limit);
+
+      // ② 가격대별($) 수요 — 모델 중앙가 기준 버킷
+      const BANDS: [number, number, string][] = [
+        [0, 50, "~$50"],
+        [50, 100, "$50–100"],
+        [100, 150, "$100–150"],
+        [150, 250, "$150–250"],
+        [250, 400, "$250–400"],
+        [400, Infinity, "$400+"],
+      ];
+      const bands = BANDS.map(([lo, hi, label]) => {
+        const inBand = list.filter(g => {
+          const p = median(g.prices);
+          return p >= lo && p < hi;
+        });
+        return {
+          label, lo, hi: hi === Infinity ? null : hi,
+          models: inBand.length,
+          totalSold: inBand.reduce((a, g) => a + g.soldMax, 0),
+        };
+      }).filter(b => b.models > 0);
+
+      // ③ 사이즈 분포 — 수요가중(인기 모델이 취급하는 사이즈)
+      const sizeMap = new Map<string, { models: number; demand: number; prices: number[] }>();
+      for (const g of list) {
+        const p = median(g.prices);
+        for (const sz of g.sizes) {
+          const e = sizeMap.get(sz) ?? { models: 0, demand: 0, prices: [] };
+          e.models += 1;
+          e.demand += g.soldMax;
+          if (p > 0) e.prices.push(p);
+          sizeMap.set(sz, e);
+        }
+      }
+      const sizes = [...sizeMap.entries()]
+        .map(([size, e]) => ({
+          size, models: e.models, demand: e.demand, medianUsd: median(e.prices),
+        }))
+        .sort((a, b) => b.demand - a.demand)
+        .slice(0, 24);
+
+      const categories = CANON_CATS.map(name => ({
+        name, count: catCount.get(name)?.size ?? 0,
+      })).filter(c => c.count > 0);
+
+      return {
+        models,
+        bands,
+        sizes,
+        categories,
+        summary: {
+          totalModels: list.length,
+          totalSold: list.reduce((a, g) => a + g.soldMax, 0),
+          avgUsd: median(list.map(g => median(g.prices)).filter(x => x > 0)),
+        },
+      };
+    }),
+
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
   openApiStatus: protectedProcedure.query(() => {

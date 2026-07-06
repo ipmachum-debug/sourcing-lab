@@ -10,11 +10,11 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../../_core/trpc";
 
 // ★ v8.6.2: 확장프로그램 최신 버전 상수 — 버전 업데이트 시 여기만 수정
-const EXTENSION_LATEST_VERSION = "8.11.3";
+const EXTENSION_LATEST_VERSION = "8.12.0";
 const EXTENSION_CHANGELOG = [
-  "카테고리 대분류 정리 — 페이지 title 오염 제거, 운동화/신발/의류/가방/액세서리/장난감/뷰티만",
-  "정찰 재수집 — 카테고리 SPA 이동·스크롤 무한로드에서 새 상품 계속 수집(델타)",
-  "브랜드 자동 인식 — 상품명에서 나이키·아디다스·크록스 등 브랜드 채움",
+  "국내몰 바코드(GTIN) 캡처 — POIZON SKU와 정확(exact) 매칭으로 소싱 정확도↑",
+  "소싱 큐 연동 — 국내가 수집이 카탈로그(판매자 엑셀) 상품과 바로 연결",
+  "카테고리 대분류 정리 — 운동화/신발/의류/가방/액세서리/장난감/뷰티",
 ];
 import { getDb } from "../../db";
 import {
