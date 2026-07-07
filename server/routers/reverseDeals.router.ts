@@ -658,6 +658,25 @@ export const reverseDealsRouter = router({
       };
     }),
 
+  // ===== 판매자 데이터 초기화 =====
+  // 잘못 저장된(예: 원화 오염) 판매자 카탈로그를 지우고 깨끗하게 재업로드하기 위함.
+  //   source='seller' 관측·정찰·시세 풀만 삭제(확장/수동 데이터는 보존).
+  sellerClear: protectedProcedure.mutation(async () => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const o = await db
+      .delete(poizonSaleObservations)
+      .where(eq(poizonSaleObservations.source, "seller"));
+    const t = await db
+      .delete(poizonTrending)
+      .where(eq(poizonTrending.source, "seller"));
+    const p = await db
+      .delete(poizonPricePool)
+      .where(eq(poizonPricePool.source, "seller"));
+    const cnt = (r: any) => Number(r?.[0]?.affectedRows ?? r?.affectedRows ?? 0);
+    return { ok: true, observations: cnt(o), trending: cnt(t), pool: cnt(p) };
+  }),
+
   // ===== 오늘 사야 할 상품 TOP N (매입 판단) =====
   // 국내 매입가 × POIZON 안정 판매가 → 순이익·마진율·안정성·추천수량.
   todayDeals: protectedProcedure

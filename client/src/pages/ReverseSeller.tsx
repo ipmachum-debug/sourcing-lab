@@ -2,6 +2,7 @@ import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { KRW_USD_RATE } from "@shared/const";
 import {
   Upload,
   FileSpreadsheet,
@@ -30,19 +31,57 @@ interface SellerRow {
   localSellerCount?: number;
 }
 
-// "$345" · "345.0" · "1,234" → 345 / 1234
-function parseUsd(v: unknown): number {
-  const s = String(v ?? "").replace(/[$,\s₩¥]/g, "");
-  const m = s.match(/([0-9]+(?:\.[0-9]+)?)/);
-  return m ? Math.round(parseFloat(m[1])) : 0;
+type Currency = "USD" | "KRW";
+
+// 셀에서 숫자만 추출 (통화기호·문자·콤마 제거). 음수·소수 유지.
+function rawNumber(v: unknown): number | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const neg = /^-|^\(/.test(s);
+  const digits = s.replace(/[^0-9.]/g, "");
+  if (!digits) return null;
+  const n = parseFloat(digits);
+  if (!Number.isFinite(n)) return null;
+  return neg ? -n : n;
 }
 
-// 예상 수익은 음수 가능: "-$12" · "$20" → -12 / 20
-function parseSignedUsd(v: unknown): number {
-  const raw = String(v ?? "").trim();
-  const neg = /^-|^\(.*\)$/.test(raw.replace(/[$,\s₩¥]/g, ""));
-  const n = parseUsd(v);
-  return neg ? -n : n;
+// ★ POIZON 한국 로케일 엑셀은 금액이 "KRW162,000"·"162,000원" 문자열.
+//   셀에 KRW/₩/원 마커 → KRW / $ 마커 → USD / 없으면 파일 통화(fileCur) 적용.
+//   KRW면 환율로 나눠 USD로 정규화(엔진은 중국시장 달러 기준).
+function parseMoney(
+  v: unknown,
+  fileCur: Currency,
+  rate = KRW_USD_RATE
+): number | undefined {
+  const n = rawNumber(v);
+  if (n === null) return undefined;
+  const s = String(v ?? "");
+  const isKrw = /krw|₩|원/i.test(s);
+  const isUsd = /\$/.test(s);
+  const cur: Currency = isKrw ? "KRW" : isUsd ? "USD" : fileCur;
+  return cur === "KRW" ? Math.round(n / rate) : Math.round(n);
+}
+
+// 파일 통화 감지: 금액 컬럼(거래가/입찰/수익) 원본 셀을 스캔.
+//   KRW/₩/원 마커 있으면 KRW, $ 있으면 USD, 없으면 값 크기로 판정(중앙값>3000 → KRW).
+function detectCurrency(samples: unknown[]): Currency {
+  let krwMark = 0, usdMark = 0;
+  const nums: number[] = [];
+  for (const v of samples) {
+    const s = String(v ?? "");
+    if (/krw|₩|원/i.test(s)) krwMark++;
+    else if (/\$/.test(s)) usdMark++;
+    const n = rawNumber(v);
+    if (n != null && n > 0) nums.push(Math.abs(n));
+  }
+  if (krwMark > usdMark && krwMark > 0) return "KRW";
+  if (usdMark > 0) return "USD";
+  if (nums.length) {
+    const sorted = nums.sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    return med > 3000 ? "KRW" : "USD"; // USD 시세는 보통 수백, KRW는 수만~수십만
+  }
+  return "USD";
 }
 
 // 입찰 가능 여부: 1/Y/가능 → true, 0/N/불가 → false
@@ -96,7 +135,7 @@ function colIndex(headers: string[]): Record<string, number> {
 
 async function parseWorkbook(
   buf: ArrayBuffer
-): Promise<{ rows: SellerRow[]; skipped: number }> {
+): Promise<{ rows: SellerRow[]; skipped: number; currency: Currency; converted: number }> {
   // xlsx(SheetJS ~600KB)는 업로드 시에만 지연 로드 → 초기 번들 경량화
   const XLSX = await import("xlsx");
   const wb = XLSX.read(buf, { type: "array" });
@@ -106,13 +145,27 @@ async function parseWorkbook(
     blankrows: false,
     defval: "",
   });
-  if (aoa.length < 2) return { rows: [], skipped: 0 };
+  if (aoa.length < 2) return { rows: [], skipped: 0, currency: "USD", converted: 0 };
   const headers = (aoa[0] as unknown[]).map(c => String(c ?? ""));
   const idx = colIndex(headers);
+  const body = aoa.slice(1);
+
+  // ★ 파일 통화 감지 — 금액 컬럼(거래가·입찰·수익) 원본 셀 샘플로.
+  const moneyCols = [idx.priceUsd, idx.lowestBid, idx.expectedProfit].filter(
+    (c): c is number => c != null
+  );
+  const samples: unknown[] = [];
+  for (const row of body) {
+    for (const c of moneyCols) samples.push((row as unknown[])[c]);
+    if (samples.length > 2000) break;
+  }
+  const currency = detectCurrency(samples);
+
   const rows: SellerRow[] = [];
   let skipped = 0;
-  for (let i = 1; i < aoa.length; i++) {
-    const cells = aoa[i] as unknown[];
+  let converted = 0;
+  for (let i = 0; i < body.length; i++) {
+    const cells = body[i] as unknown[];
     const name =
       idx.productName != null
         ? String(cells[idx.productName] ?? "").trim()
@@ -121,6 +174,7 @@ async function parseWorkbook(
       skipped++;
       continue;
     }
+    if (currency === "KRW") converted++;
     rows.push({
       spuId:
         idx.spuId != null
@@ -147,12 +201,15 @@ async function parseWorkbook(
         idx.size != null
           ? String(cells[idx.size] ?? "").trim().slice(0, 40) || undefined
           : undefined,
-      priceUsd: idx.priceUsd != null ? parseUsd(cells[idx.priceUsd]) : 0,
+      priceUsd:
+        idx.priceUsd != null ? parseMoney(cells[idx.priceUsd], currency) ?? 0 : 0,
       soldCount: idx.soldCount != null ? parseSold(cells[idx.soldCount]) : 0,
       expectedProfitUsd:
-        idx.expectedProfit != null ? parseSignedUsd(cells[idx.expectedProfit]) : undefined,
+        idx.expectedProfit != null
+          ? parseMoney(cells[idx.expectedProfit], currency)
+          : undefined,
       lowestBidUsd:
-        idx.lowestBid != null ? parseUsd(cells[idx.lowestBid]) : undefined,
+        idx.lowestBid != null ? parseMoney(cells[idx.lowestBid], currency) : undefined,
       bidAvailable:
         idx.bidAvailable != null ? parseBool(cells[idx.bidAvailable]) : undefined,
       bidStatus:
@@ -163,7 +220,7 @@ async function parseWorkbook(
         idx.localSeller != null ? parseSold(cells[idx.localSeller]) : undefined,
     });
   }
-  return { rows, skipped };
+  return { rows, skipped, currency, converted };
 }
 
 const CHUNK = 1000;
@@ -183,8 +240,14 @@ export default function ReverseSeller() {
   } | null>(null);
 
   const [onlyTradable, setOnlyTradable] = useState(true);
+  const [meta, setMeta] = useState<{ currency: Currency; converted: number } | null>(null);
   const importMut = trpc.reverseDeals.sellerImport.useMutation();
   const apiStatus = trpc.reverseDeals.openApiStatus.useQuery();
+  const clearMut = trpc.reverseDeals.sellerClear.useMutation({
+    onSuccess: r =>
+      toast.success(`판매자 데이터 초기화 — 관측 ${r.observations.toLocaleString()}건 삭제`),
+    onError: e => toast.error(e.message),
+  });
 
   // 살아있는 SKU: 시세·판매량·입찰가 중 하나라도 있는 것 (완전 빈 SKU만 제외)
   //   위험/블루오션 판정엔 판매량 낮은 것도 필요 → 시세+판매 둘 다 요구하지 않음
@@ -200,11 +263,14 @@ export default function ReverseSeller() {
     setFileName(f.name);
     try {
       const buf = await f.arrayBuffer();
-      const { rows: parsed, skipped: sk } = await parseWorkbook(buf);
+      const { rows: parsed, skipped: sk, currency, converted } = await parseWorkbook(buf);
       setRows(parsed);
       setSkipped(sk);
+      setMeta({ currency, converted });
       if (parsed.length === 0)
         toast.error("인식된 행이 없어요. 판매자센터 '전체 내보내기' 엑셀이 맞는지 확인하세요.");
+      else if (currency === "KRW")
+        toast.success(`${parsed.length.toLocaleString()}개 SKU 인식 · 원화 엑셀 → $ 자동 환산(÷${KRW_USD_RATE})`);
       else toast.success(`${parsed.length.toLocaleString()}개 SKU 인식`);
     } catch (e: any) {
       toast.error(`엑셀 읽기 실패: ${e?.message ?? e}`);
@@ -283,12 +349,32 @@ export default function ReverseSeller() {
                   {fileName}
                 </span>
               )}
+              <button
+                onClick={() => {
+                  if (confirm("기존에 올린 판매자 카탈로그를 모두 삭제할까요? (잘못 저장된 데이터 정리용, 확장/수동 데이터는 보존)"))
+                    clearMut.mutate();
+                }}
+                disabled={clearMut.isPending}
+                className="ml-auto text-[12px] text-slate-400 hover:text-red-300 underline disabled:opacity-40"
+              >
+                {clearMut.isPending ? "초기화 중…" : "기존 판매자 데이터 초기화"}
+              </button>
             </div>
             <p className="text-[12px] text-slate-400 flex items-start gap-1.5">
               <Info className="h-4 w-4 mt-0.5 shrink-0 text-fuchsia-300" />
               시세는 <b className="text-slate-200">중국 시장(득물) 달러($)</b> 기준입니다. 순이익은
               환율(원/$)로 환산해 <b className="text-white">소싱 큐 · 오늘 사야 할 상품</b>에 반영돼요.
             </p>
+            {meta?.currency === "KRW" && meta.converted > 0 && (
+              <p className="text-[12px] text-cyan-200 bg-cyan-500/10 rounded-lg px-3 py-2 flex items-start gap-1.5">
+                <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  <b>원화(KRW) 엑셀 감지</b> — 금액 {meta.converted.toLocaleString()}행을
+                  <b> ÷{KRW_USD_RATE}로 $ 자동 환산</b>했습니다. (POIZON 판매자센터를 한국어/원화로
+                  내보내면 금액이 KRW로 나옵니다. USD로 내보내면 그대로 사용)
+                </span>
+              </p>
+            )}
             {apiStatus.data && (
               <p className="text-[11px] text-slate-500 flex items-start gap-1.5">
                 <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${apiStatus.data.configured ? "bg-emerald-400" : "bg-slate-600"}`} />
