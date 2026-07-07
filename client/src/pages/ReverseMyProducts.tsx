@@ -2,7 +2,7 @@ import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { LineChart, Plus, Trash2, ShieldCheck, Bell, Save, Power } from "lucide-react";
+import { LineChart, Plus, Trash2, ShieldCheck, Bell, Save, Power, RefreshCw, Zap } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
@@ -46,6 +46,13 @@ export default function ReverseMyProducts() {
   const removeMut = trpc.myProducts.remove.useMutation({ onSuccess: () => { toast.success("삭제"); inv(); } });
   const bulkMut = trpc.myProducts.bulkCreate.useMutation({ onSuccess: r => { toast.success(`${r.count}건 업로드`); inv(); }, onError: e => toast.error(e.message) });
   const snapMut = trpc.myProducts.snapshotSubmit.useMutation({ onSuccess: () => { toast.success("오늘 기록 저장"); inv(); }, onError: e => toast.error(e.message) });
+  // POIZON API 자동 동기화
+  const syncStatus = trpc.myProducts.poizonSyncStatus.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+  const syncMut = trpc.myProducts.syncPoizon.useMutation({
+    onSuccess: r => { toast.success(r.message); inv(); },
+    onError: e => toast.error(e.message),
+  });
+  const apiReady = !!syncStatus.data?.ready;
 
   const [f, setF] = useState({ platform: "coupang", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
   const add = () => {
@@ -124,6 +131,39 @@ export default function ReverseMyProducts() {
               </div>
             </div>
           )}
+
+          {/* POIZON API 자동 동기화 */}
+          <div className={`glass rounded-2xl p-4 border ${apiReady ? "border-fuchsia-400/30" : "border-white/10"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Zap className={`h-4 w-4 ${apiReady ? "text-fuchsia-300" : "text-slate-500"}`} />
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">
+                    POIZON 자동 동기화
+                    {apiReady ? (
+                      <span className="ml-2 text-[11px] text-fuchsia-300">연동됨</span>
+                    ) : (
+                      <span className="ml-2 text-[11px] text-amber-300">승인 대기</span>
+                    )}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {apiReady
+                      ? "sku 칸에 POIZON skuId(숫자)를 넣은 활성 상품의 시세를 API로 한 번에 갱신합니다."
+                      : "POIZON 승인 후 /api/poizon/authorize 인증하면, 시세·경쟁가를 API로 자동 채웁니다."}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => syncMut.mutate()}
+                disabled={!apiReady || syncMut.isPending}
+                className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5 disabled:opacity-40 shrink-0"
+                title={apiReady ? "POIZON API로 시세 갱신" : "승인·인증 후 활성화"}
+              >
+                <RefreshCw className={`h-4 w-4 ${syncMut.isPending ? "animate-spin" : ""}`} />
+                {syncMut.isPending ? "동기화 중…" : "지금 동기화"}
+              </button>
+            </div>
+          </div>
 
           {/* 알림 */}
           {dash && dash.alerts.length > 0 && (
@@ -236,7 +276,7 @@ export default function ReverseMyProducts() {
               </table>
             </div>
           </div>
-          <p className="text-[11px] text-slate-500">💡 지금은 <b className="text-slate-400">수동/CSV 기록</b> · 확장 스케줄러(매일 자동)는 다음 단계로 이 표에 자동 채웁니다.</p>
+          <p className="text-[11px] text-slate-500">💡 채우는 3가지: <b className="text-slate-400">수동/CSV</b> · <b className="text-slate-400">확장 스케줄러</b> · <b className="text-fuchsia-300">POIZON API(승인 후 자동)</b>. API 연동 시 sku=POIZON skuId 상품의 시세가 위 '지금 동기화'로 채워집니다.</p>
         </div>
       </div>
     </DashboardLayout>
