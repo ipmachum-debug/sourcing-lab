@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
+import { SOURCING_KEYWORDS } from "@/lib/sourcingKeywords";
 import {
   Compass,
   Search,
@@ -18,6 +19,7 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  Sparkles,
 } from "lucide-react";
 
 const usd = (n: number | null | undefined) =>
@@ -118,6 +120,12 @@ export default function ReverseInsights() {
               </div>
             )}
           </div>
+
+          {/* 대표 모델 키워드 퀵픽 */}
+          <KeywordPicker
+            active={search}
+            onPick={q => { setTerm(q); setSearch(q); }}
+          />
 
           {/* 변화 감지 (직전 업로드 대비) */}
           {cd?.hasPrev && cd.changes.length > 0 && <ChangesPanel cd={cd} />}
@@ -229,6 +237,51 @@ export default function ReverseInsights() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function KeywordPicker({ active, onPick }: { active: string; onPick: (q: string) => void }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="glass rounded-2xl p-4">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-fuchsia-300" />
+        <h2 className="text-sm font-semibold text-slate-100">대표 모델 키워드</h2>
+        <span className="text-[11px] text-slate-500">클릭하면 카탈로그 검색</span>
+        <ChevronDown className={`h-4 w-4 text-slate-500 ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2.5">
+          {SOURCING_KEYWORDS.map(b => (
+            <div key={b.brand} className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => onPick(b.brand)}
+                className="text-[12px] font-bold text-slate-200 mr-1 hover:text-fuchsia-200 shrink-0"
+              >
+                {b.emoji} {b.brand}
+              </button>
+              {b.models.map(m => {
+                const on = active === m.q;
+                return (
+                  <button
+                    key={m.label}
+                    onClick={() => onPick(m.q)}
+                    title={`검색: ${m.q}`}
+                    className={`rounded-full px-2.5 py-1 text-[12px] transition-all ${
+                      on
+                        ? "bg-fuchsia-500/25 text-fuchsia-100 ring-1 ring-fuchsia-400/40"
+                        : "text-slate-300 bg-white/5 hover:bg-white/10"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
