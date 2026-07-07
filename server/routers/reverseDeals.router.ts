@@ -21,6 +21,7 @@ import {
 import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
+import { cleanSizeLabel, krMmOf } from "../lib/sizeMatch";
 import { isConfigured as poizonApiConfigured } from "../lib/poizonApi";
 import { getKrwUsdRate } from "../lib/fxRate";
 
@@ -991,7 +992,8 @@ export const reverseDealsRouter = router({
         if (o.priceCny > 0) g.samples.push({ priceCny: o.priceCny, at });
         g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
         if (o.barcode) g.barcodes.add(o.barcode);
-        if (o.size) g.sizes.add(o.size);
+        const qsz = cleanSizeLabel(o.size);
+        if (qsz) g.sizes.add(qsz);
         groups.set(gk, g);
       }
 
@@ -1196,12 +1198,13 @@ export const reverseDealsRouter = router({
         if (o.priceCny > 0) g.prices.push(o.priceCny);
         g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
         g.localSellerMax = Math.max(g.localSellerMax, o.localSellerCount ?? 0);
-        if (o.size) g.sizes.add(o.size);
+        const sz = cleanSizeLabel(o.size); // 색상·괄호 제거한 순수 사이즈
+        if (sz) g.sizes.add(sz);
         const st = String(o.bidStatus ?? "").trim().toLowerCase();
         // 입찰 상태 "0:미입찰 1:입찰완료" — 엑셀은 0.0/1.0 float 문자열로 들어옴
         const unbid = /미입찰|not\s*bid|nobid|no\s*bid|없음|none|^0(\.0+)?$/.test(st);
         g.recs.push({
-          size: o.size ?? null, price: o.priceCny ?? 0,
+          size: sz, price: o.priceCny ?? 0,
           profit: o.expectedProfitUsd ?? null, bid: o.lowestBidUsd ?? null,
           bidAvailable: o.bidAvailable ?? null, unbid,
         });
@@ -1230,7 +1233,11 @@ export const reverseDealsRouter = router({
         );
         const pool = reliable.length ? reliable : g.recs.filter(r => r.price > 0);
         const priced = pool.slice().sort((a, b) => a.price - b.price);
-        const rep = priced.length ? priced[Math.floor(priced.length / 2)] : null;
+        // 대표 사이즈 = 거래가 중앙값. 단, 정산(예상)이 채워진 사이즈를 우선해
+        //   '정산 대표 -' 빈칸을 막는다(정산값 없는 사이즈가 중앙에 걸리는 경우 방지).
+        const repArr = priced.filter(r => r.profit != null);
+        const repPool = repArr.length ? repArr : priced;
+        const rep = repPool.length ? repPool[Math.floor(repPool.length / 2)] : null;
         const avgUsd = rep ? rep.price : median(g.prices);
         const lowestBidUsd = rep?.bid ?? null; // 대표 사이즈 최저입찰가
         const profitUsd = rep?.profit ?? null; // 대표 사이즈 POIZON 정산(예상)=판매가−수수료
@@ -1263,7 +1270,7 @@ export const reverseDealsRouter = router({
         const bestSizes = pool
           .filter(r => r.size)
           .map(r => ({
-            size: r.size as string, profit: r.profit ?? 0, bid: r.bid ?? 0,
+            size: r.size as string, krMm: krMmOf(r.size), profit: r.profit ?? 0, bid: r.bid ?? 0,
             price: r.price ?? 0, bidAvailable: r.bidAvailable === true, unbid: r.unbid,
           }))
           .sort((a, b) => b.profit - a.profit || Number(b.unbid) - Number(a.unbid))
@@ -1340,7 +1347,7 @@ export const reverseDealsRouter = router({
       }
       const sizes = [...sizeMap.entries()]
         .map(([size, e]) => ({
-          size, models: e.models, demand: e.demand, medianUsd: median(e.prices),
+          size, krMm: krMmOf(size), models: e.models, demand: e.demand, medianUsd: median(e.prices),
         }))
         .sort((a, b) => b.demand - a.demand)
         .slice(0, 24);

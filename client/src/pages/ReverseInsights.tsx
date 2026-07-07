@@ -27,7 +27,7 @@ const usd = (n: number | null | undefined) =>
 const signedUsd = (n: number) =>
   `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
 
-interface BestSize { size: string; profit: number; bid: number; price: number; bidAvailable: boolean; unbid: boolean; }
+interface BestSize { size: string; krMm: number | null; profit: number; bid: number; price: number; bidAvailable: boolean; unbid: boolean; }
 interface Model {
   normKey: string; brand: string; productName: string; category: string | null;
   soldCount: number; avgUsd: number; lowUsd: number; highUsd: number; sizeCount: number;
@@ -37,7 +37,7 @@ interface Model {
   recommendBidUsd: number | null; bestSizes: BestSize[];
 }
 interface Band { label: string; models: number; totalSold: number; }
-interface Size { size: string; models: number; demand: number; medianUsd: number; }
+interface Size { size: string; krMm: number | null; models: number; demand: number; medianUsd: number; }
 type Counts = { all: number; hot: number; margin: number; safe: number; blue: number; risk: number; bid: number; };
 type Filter = "all" | "hot" | "margin" | "safe" | "blue" | "risk" | "bid";
 
@@ -207,7 +207,10 @@ export default function ReverseInsights() {
                       return (
                         <div key={s.size}>
                           <div className="flex items-center justify-between text-[13px] mb-1">
-                            <span className="text-slate-200 font-medium truncate">{s.size}</span>
+                            <span className="text-slate-200 font-medium truncate">
+                              {s.size}
+                              {s.krMm && <span className="text-emerald-300/70 ml-1">{s.krMm}mm</span>}
+                            </span>
                             <span className="text-slate-500 text-[11px]">{s.models}모델</span>
                           </div>
                           <div className="h-2 rounded-full bg-white/8 overflow-hidden">
@@ -340,6 +343,7 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
               {m.bestSizes.map(s => (
                 <div key={s.size} className={`rounded-lg border px-2.5 py-1.5 text-[12px] ${s.unbid ? "border-fuchsia-400/40 bg-fuchsia-500/10" : "border-white/10 bg-white/5"}`}>
                   <span className="font-semibold text-slate-100">{s.size}</span>
+                  {s.krMm && <span className="text-emerald-300/70 ml-1" title="한국 mm(KR 표기 기준)">{s.krMm}mm</span>}
                   <span className="text-slate-500 ml-2">거래가 {usd(s.price)}</span>
                   <span className="text-slate-400 ml-2">정산 {usd(s.profit)}</span>
                   <span className="text-slate-500 ml-2">입찰 {usd(s.bid)}</span>
