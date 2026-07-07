@@ -35,6 +35,15 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const STATUS_OPTS = ["purchased", "inspecting", "listed", "sold", "settled", "returned"];
 
+// 상태별 뷰 — 별도 페이지 없이 검수/재고/판매 관리를 탭으로.
+const VIEWS: { key: string; label: string; emoji: string; match: (s: string) => boolean }[] = [
+  { key: "all", label: "전체", emoji: "📋", match: () => true },
+  { key: "inspect", label: "검수", emoji: "🔍", match: s => s === "purchased" || s === "inspecting" },
+  { key: "stock", label: "재고·판매중", emoji: "📦", match: s => s === "listed" },
+  { key: "sold", label: "판매완료", emoji: "✅", match: s => s === "sold" || s === "settled" },
+  { key: "returned", label: "반품", emoji: "↩️", match: s => s === "returned" },
+];
+
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -49,6 +58,11 @@ export default function ReversePurchases() {
   const updateMut = trpc.reversePurchase.update.useMutation({ onSuccess: invalidate, onError: e => toast.error(e.message) });
   const removeMut = trpc.reversePurchase.remove.useMutation({ onSuccess: () => { toast.success("삭제됨"); invalidate(); } });
   const bulkMut = trpc.reversePurchase.bulkCreate.useMutation({ onSuccess: r => { toast.success(`${r.count}건 업로드`); invalidate(); }, onError: e => toast.error(e.message) });
+
+  // 상태별 뷰
+  const [view, setView] = useState("all");
+  const activeView = VIEWS.find(v => v.key === view) ?? VIEWS[0];
+  const shown = rows.filter(r => activeView.match(r.status));
 
   // 등록 폼
   const [f, setF] = useState({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new" });
@@ -145,6 +159,25 @@ export default function ReversePurchases() {
             </div>
           </div>
 
+          {/* 상태별 뷰 탭 */}
+          <div className="flex flex-wrap items-center gap-2">
+            {VIEWS.map(v => {
+              const n = rows.filter(r => v.match(r.status)).length;
+              return (
+                <button
+                  key={v.key}
+                  onClick={() => setView(v.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${
+                    view === v.key ? "neon-chip neon-magenta text-white" : "text-slate-400 hover:text-slate-200 bg-white/5"
+                  }`}
+                >
+                  {v.emoji} {v.label}
+                  <span className="text-[11px] opacity-70">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* 목록 */}
           <div className="glass rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
@@ -161,10 +194,12 @@ export default function ReversePurchases() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-slate-500 py-10">아직 매입 기록이 없어요. 위에서 등록해보세요.</td></tr>
+                  {shown.length === 0 && (
+                    <tr><td colSpan={7} className="text-center text-slate-500 py-10">
+                      {rows.length === 0 ? "아직 매입 기록이 없어요. 위에서 등록하거나 소싱 큐에서 '매입'을 누르세요." : "이 상태의 매입이 없어요."}
+                    </td></tr>
                   )}
-                  {rows.map(r => {
+                  {shown.map(r => {
                     const buyTotal = (r.buyPrice || 0) * (r.qty || 1);
                     const profit = (r.soldPrice || 0) - (r.buyPrice || 0);
                     const sold = r.status === "sold" || r.status === "settled";
