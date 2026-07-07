@@ -275,16 +275,20 @@ const zSpuList = z
   .object({ list: z.array(zSpu).optional(), total: z.number().optional() })
   .passthrough();
 
+// ✅ 확정 응답: data = 시장별 최저가 참조 배열.
+//   가격 단위는 최소단위(분/센트)일 수 있음 — 엔진 연동 시 ÷100 여부 검증 필요.
 const zRecommend = z
   .object({
     skuId: z.union([z.string(), z.number()]).optional(),
-    lowestPrice: z.number().optional(),
-    recommendPrice: z.number().optional(),
+    globalSkuId: z.union([z.string(), z.number()]).optional(),
+    globalMinPrice: z.number().optional(), // 글로벌(중국) 최저가
+    localMinPrice: z.number().optional(), // 현지(판매지역) 최저가
+    otherPlatformMinPrice: z.number().optional(), // 타 플랫폼 최저가
+    asiaMinPrice: z.number().optional(), // 아시아 최저가
+    usMinPrice: z.number().optional(), // 미국 최저가
   })
   .passthrough();
-const zRecommendList = z
-  .object({ list: z.array(zRecommend).optional() })
-  .passthrough();
+const zRecommendList = z.array(zRecommend);
 
 const zSubmitResult = z
   .object({
