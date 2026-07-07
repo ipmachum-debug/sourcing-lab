@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
@@ -62,6 +63,26 @@ export default function ReverseQueue() {
     | undefined;
   const rows = data?.rows ?? [];
   const counts = data?.counts;
+
+  // 국내가 즉시 입력 → 저장하면 해당 상품이 딜로 승격(방어선 계산)
+  const utils = trpc.useUtils();
+  const domMut = trpc.reverseDeals.domesticSubmit.useMutation({
+    onSuccess: () => {
+      toast.success("국내가 저장 — 매입 판단·방어선 반영됨");
+      utils.reverseDeals.sourcingQueue.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const saveDomestic = (r: Row, priceKrw: number) => {
+    if (priceKrw <= 0) return;
+    domMut.mutate({
+      source: "other",
+      brand: r.brand || undefined,
+      productName: r.productName,
+      listPrice: priceKrw,
+      salePrice: priceKrw,
+    });
+  };
 
   const doSearch = () => setSearch(term.trim());
 
@@ -217,7 +238,12 @@ export default function ReverseQueue() {
                   </thead>
                   <tbody>
                     {rows.map(r => (
-                      <QueueRow key={r.groupKey} r={r} />
+                      <QueueRow
+                        key={r.groupKey}
+                        r={r}
+                        onSaveDomestic={p => saveDomestic(r, p)}
+                        saving={domMut.isPending}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -230,7 +256,7 @@ export default function ReverseQueue() {
   );
 }
 
-function QueueRow({ r }: { r: Row }) {
+function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw: number) => void; saving: boolean }) {
   return (
     <tr className="border-t border-white/8 hover:bg-white/[0.02]">
       <td className="px-3 py-2.5">
@@ -268,7 +294,7 @@ function QueueRow({ r }: { r: Row }) {
             )}
           </span>
         ) : (
-          <span className="text-amber-400/80 text-xs">국내가 필요</span>
+          <DomesticEntry onSave={onSaveDomestic} saving={saving} />
         )}
       </td>
       <td className="text-right px-3 py-2.5">
@@ -303,6 +329,34 @@ function QueueRow({ r }: { r: Row }) {
         </div>
       </td>
     </tr>
+  );
+}
+
+function DomesticEntry({ onSave, saving }: { onSave: (krw: number) => void; saving: boolean }) {
+  const [v, setV] = useState("");
+  const submit = () => {
+    const n = Number(v) || 0;
+    if (n > 0) { onSave(n); setV(""); }
+  };
+  return (
+    <span className="inline-flex items-center gap-1 justify-end">
+      <input
+        value={v}
+        onChange={e => setV(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && submit()}
+        placeholder="국내가"
+        inputMode="numeric"
+        title="찾은 국내 매입가(원)를 입력하고 저장 → 방어선 계산"
+        className="w-20 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[12px] text-right text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60"
+      />
+      <button
+        onClick={submit}
+        disabled={saving || !v}
+        className="text-[11px] neon-chip rounded-md px-1.5 py-1 text-slate-200 disabled:opacity-40"
+      >
+        저장
+      </button>
+    </span>
   );
 }
 
