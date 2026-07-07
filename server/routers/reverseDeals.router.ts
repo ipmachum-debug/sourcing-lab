@@ -22,7 +22,7 @@ import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
 import { cleanSizeLabel, krMmOf } from "../lib/sizeMatch";
-import { isConfigured as poizonApiConfigured } from "../lib/poizonApi";
+import { isConfigured as poizonApiConfigured, readiness as poizonReadiness } from "../lib/poizonApi";
 import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
@@ -1478,11 +1478,15 @@ export const reverseDealsRouter = router({
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
   openApiStatus: protectedProcedure.query(() => {
+    const r = poizonReadiness();
     return {
       configured: poizonApiConfigured(),
-      note: poizonApiConfigured()
-        ? "POIZON Open API 자격증명 확인됨 — 자동 동기화 준비 완료. (엔드포인트: sku-basic-info/by-sku, region=US)"
-        : "Phase 2: 엔드포인트·파라미터 확인됨(sku-basic-info/by-sku · skuIds · region=US). 남은 것 = POIZON_APP_KEY/SECRET/ACCESS_TOKEN 자격증명 + 공식 Sign Tool 서명 알고리즘 검증.",
+      readiness: r, // { appKey, appSecret, accessToken, ready }
+      note: r.ready
+        ? "POIZON Open API 자격증명 확인됨 — 클라이언트 가동 준비 완료(핵심 5 + 확장). URL·서명은 문서 기준 최종 검증 필요."
+        : r.accessToken
+          ? "Access Token 확인됨. App Key/Secret 상태 점검 필요."
+          : "Default 패키지 심사 대기(已申请). 클라이언트 코드는 준비 완료 — 승인 후 Seller Authorization으로 Access Token만 발급해 POIZON_ACCESS_TOKEN에 넣으면 가동.",
     };
   }),
 
