@@ -207,6 +207,6 @@ export const POIZON_GUIDE: GuideSection[] = [
     cat: "API·기타",
     title: "오픈 API (Phase 2)",
     keywords: ["api", "오픈 api", "자동 동기화", "appkey", "sign"],
-    body: "판매자센터 좌측 메뉴에 '오픈 API'가 있으나, 이 가이드에는 메뉴 위치만 있고 실제 스펙(엔드포인트·appKey·secret·sign)은 없다.\n실제 연동 스펙은 별도 API 문서(open.poizon.com)에 있으며, 프로그램에는 poizonApi 스캐폴드로 자리를 잡아둠(자격증명 POIZON_APP_KEY/SECRET/ACCESS_TOKEN 설정 시 활성화).\n현재는 '전체 내보내기(엑셀)' → 판매자 엑셀 업로드가 현실적·정확.",
+    body: "Open Platform(open.poizon.com) API 확인됨. 카탈로그 동기화용 엔드포인트:\n· POST /commodity/intl/sku/sku-basic-info/by-sku\n· 인증 파라미터: app_key·access_token·timestamp(ms)·sign·language·timeZone\n· 바디: skuIds[] · region(필수, 'US'=중국시장 달러) · sellerStatusEnable · buyStatusEnable\n프로그램에 poizonApi 스캐폴드로 반영(fetchSkuBasicInfo). 남은 것 = 자격증명(POIZON_APP_KEY/SECRET/ACCESS_TOKEN) + 공식 Sign Tool 서명 알고리즘 검증.\nAPI 그룹: Item · Listing&Inventory · Consignment · Order · Fulfillment · Bill · Return · Merchant · Smart Listing · Bonded. SDK: Java SDK·Sign Tool.\n그때까지는 '전체 내보내기(엑셀)' → 판매자 엑셀 업로드가 현실적·정확.",
   },
 ];

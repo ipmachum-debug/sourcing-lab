@@ -57,6 +57,7 @@ function buildParams(
   body: Record<string, string | number>
 ): Record<string, string | number> {
   // timestamp는 호출부에서 주입(테스트 결정성 위해). 여기선 필수 공통 파라미터만.
+  // 공통(인증) 파라미터 — 문서 General Parameters. sign은 이 위에서 계산.
   const base: Record<string, string | number> = {
     app_key: cfg.appKey,
     access_token: cfg.accessToken,
@@ -69,6 +70,7 @@ function buildParams(
 
 export interface SellerLikeRow {
   spuId?: string;
+  skuId?: string;
   barcode?: string;
   productName: string;
   brand?: string;
@@ -78,14 +80,21 @@ export interface SellerLikeRow {
   soldCount: number;
 }
 
+// 문서 확인 엔드포인트 (Open Platform → Item → SKU basic info by SKU)
+const EP_SKU_BASIC_INFO = "/commodity/intl/sku/sku-basic-info/by-sku";
+
 /**
- * SPU 단위 SKU 기본정보 조회 → sellerImport와 동일한 형태로 정규화해서 반환.
+ * SKU 기본정보 조회 (문서: sku-basic-info/by-sku).
+ *   Business params: skuIds[] · region(필수, 예 "US"=중국시장 달러) · sellerStatusEnable · buyStatusEnable.
+ *   General params: app_key/access_token/timestamp/sign/language/timeZone.
  * 자격증명이 없으면 명확히 실패(placeholder 데이터 반환 금지).
  * @param timestampMs 호출 시각(ms) — 서명 파라미터. 호출부에서 Date.now() 주입.
+ * ⚠️ sign 알고리즘은 공식 Sign Tool/Java SDK 기준으로 최종 검증 필요.
  */
-export async function fetchSkuBasicInfoBySpu(
-  spuId: string,
-  timestampMs: number
+export async function fetchSkuBasicInfo(
+  skuIds: (string | number)[],
+  timestampMs: number,
+  region = "US"
 ): Promise<SellerLikeRow[]> {
   const cfg = readConfig();
   if (!cfg) {
@@ -93,33 +102,41 @@ export async function fetchSkuBasicInfoBySpu(
       "POIZON Open API 자격증명이 없습니다. POIZON_APP_KEY/POIZON_APP_SECRET/POIZON_ACCESS_TOKEN 를 설정하세요."
     );
   }
-  const params = buildParams(cfg, {
-    spuId,
-    timestamp: timestampMs,
-  });
-  const url = `${cfg.base}/dop/api/v1/pop/api/v1/intl-commodity/intl/sku/sku-basic-info/by-spu`;
+  // 인증 파라미터 + 서명은 쿼리스트링, 비즈니스 파라미터는 JSON 바디(문서 Request Sample 기준)
+  const auth = buildParams(cfg, { timestamp: timestampMs });
+  const qs = new URLSearchParams(
+    Object.entries(auth).map(([k, v]) => [k, String(v)])
+  ).toString();
+  const body = {
+    skuIds: skuIds.map(id => Number(id)).filter(n => Number.isFinite(n)),
+    sellerStatusEnable: true,
+    buyStatusEnable: true,
+    region,
+  };
+  const url = `${cfg.base}${EP_SKU_BASIC_INFO}?${qs}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(`POIZON API ${res.status}: ${await res.text().catch(() => "")}`);
   }
   const json: any = await res.json();
-  // ⚠️ 실제 응답 스키마는 문서/샘플로 확정 필요. 방어적으로 매핑.
-  const list: any[] = json?.data?.skuList ?? json?.data ?? [];
+  // ⚠️ 응답 스키마는 200 Response Sample로 최종 확정 필요. 방어적으로 매핑.
+  const list: any[] = json?.data?.list ?? json?.data?.skuList ?? json?.data ?? [];
   return list
     .map((it: any): SellerLikeRow | null => {
-      const productName = String(it.spuName ?? it.productName ?? "").trim();
+      const productName = String(it.spuName ?? it.productName ?? it.title ?? "").trim();
       if (!productName) return null;
       return {
-        spuId: String(it.spuId ?? spuId),
+        spuId: it.spuId != null ? String(it.spuId) : undefined,
+        skuId: it.skuId != null ? String(it.skuId) : undefined,
         barcode: it.barcode ? String(it.barcode) : undefined,
         productName: productName.slice(0, 300),
         brand: it.brandName ? String(it.brandName).slice(0, 100) : undefined,
         category: it.categoryName ? String(it.categoryName).slice(0, 40) : undefined,
-        size: it.sizeName ? String(it.sizeName).slice(0, 40) : undefined,
+        size: it.sizeDesc ? String(it.sizeDesc).slice(0, 40) : it.sizeName ? String(it.sizeName).slice(0, 40) : undefined,
         priceUsd: Number(it.avgPrice ?? it.price ?? 0) || 0,
         soldCount: Number(it.soldCount ?? it.salesVolume ?? 0) || 0,
       };
