@@ -72,7 +72,7 @@ export const POIZON_API = {
   listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
   submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
   autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
-  listingList: { path: "/dop/api/v1/pop/api/v1/listing/list-simplified", method: "POST" }, // ⚠️ 추정
+  listingList: { path: "/dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple", method: "POST" }, // ✅ 확정
   cancelListing: { path: "/dop/api/v1/pop/api/v1/listing/cancel", method: "POST" }, // ⚠️ 추정
 
   // 확장(Default 포함) — 필요 시 순차 구현
@@ -298,8 +298,34 @@ const zSubmitResult = z
   })
   .passthrough();
 
+// ✅ 확정 응답: data.list[] + lastOffsetId(다음 커서) + pageSize.
+//   ★ sellerBiddingNo = auto-follow-bidding/submit의 biddingNo (자동추종 연결 키).
+//   price는 통화 최소단위(KRW=원 그대로, USD=센트 ÷100).
+const zListingItem = z
+  .object({
+    sellerBiddingNo: z.string().optional(),
+    biddingType: z.number().optional(),
+    tradeStatus: z.number().optional(), // 1=취소, 2=성공
+    spuId: z.union([z.string(), z.number()]).optional(),
+    skuId: z.union([z.string(), z.number()]).optional(),
+    globalSpuId: z.union([z.string(), z.number()]).optional(),
+    globalSkuId: z.union([z.string(), z.number()]).optional(),
+    price: z.number().optional(),
+    currency: z.string().optional(),
+    saleType: z.number().optional(),
+    onSaleQuantity: z.number().optional(),
+    merchantSpuId: z.string().optional(),
+    merchantSkuId: z.string().optional(),
+    is_auto_bidding: z.boolean().optional(),
+    created_time: z.number().optional(),
+  })
+  .passthrough();
 const zListingList = z
-  .object({ list: z.array(z.any()).optional(), total: z.number().optional() })
+  .object({
+    list: z.array(zListingItem).optional(),
+    lastOffsetId: z.number().optional(),
+    pageSize: z.number().optional(),
+  })
   .passthrough();
 
 const zCancelResult = z
@@ -456,20 +482,50 @@ export async function submitAutoFollowBid(
   );
 }
 
-/** 5a) 내 입찰(리스팅) 목록 — 간이 버전. */
+export interface ListingListParams {
+  region?: string; // 지역 코드(예 "KR")
+  pageSize?: number;
+  /** 페이지 커서. 첫 호출 0, 다음은 직전 응답의 lastOffsetId. */
+  exclusiveStartOffsetId?: number;
+  /** 1=취소, 2=성공(기본 2). */
+  tradeStatus?: number;
+  biddingType?: number;
+  saleType?: number;
+  merchantSpuId?: string;
+  /** 사용 시 merchantSpuId 함께 필요. */
+  merchantSkuId?: string;
+  spuIds?: (string | number)[];
+  skuIds?: (string | number)[];
+  sellerBiddingNoList?: string[];
+}
+
+/**
+ * 5a) 내 입찰(리스팅) 목록 — 간이 버전.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple
+ *   커서 페이징(exclusiveStartOffsetId → 응답 lastOffsetId).
+ *   ★ 응답 item.sellerBiddingNo = 자동추종 입찰의 biddingNo.
+ */
 export async function queryListingList(
-  params: { pageNum?: number; pageSize?: number; status?: string } = {},
+  params: ListingListParams = {},
   opts: CallOpts<z.infer<typeof zListingList>> = {}
 ) {
-  return callPoizon(
-    POIZON_API.listingList,
-    {
-      pageNum: params.pageNum ?? 1,
-      pageSize: params.pageSize ?? 50,
-      ...(params.status ? { status: params.status } : {}),
-    },
-    { schema: zListingList, ...opts }
-  );
+  const body: Record<string, unknown> = {
+    language: "ko",
+    timeZone: "Asia/Seoul",
+    region: params.region ?? "KR",
+    pageSize: params.pageSize ?? 50,
+    exclusiveStartOffsetId: params.exclusiveStartOffsetId ?? 0,
+    tradeStatus: params.tradeStatus ?? 2,
+  };
+  if (params.biddingType != null) body.biddingType = params.biddingType;
+  if (params.saleType != null) body.saleType = params.saleType;
+  if (params.merchantSpuId) body.merchantSpuId = params.merchantSpuId;
+  if (params.merchantSkuId) body.merchantSkuId = params.merchantSkuId;
+  if (params.spuIds?.length) body.spuIds = params.spuIds.slice(0, 10);
+  if (params.skuIds?.length) body.skuIds = params.skuIds.slice(0, 20);
+  if (params.sellerBiddingNoList?.length)
+    body.sellerBiddingNoList = params.sellerBiddingNoList;
+  return callPoizon(POIZON_API.listingList, body, { schema: zListingList, ...opts });
 }
 
 /** 5b) 입찰(리스팅) 취소. */
@@ -679,8 +735,8 @@ export async function selfTest(
   await run("spuByArticleNumber", "Query SPU Basic Information by Article Number", () =>
     querySpuByArticleNumber(sampleArticleNumber)
   );
-  await run("listingList", "Query listing list (Simplified Version)", () =>
-    queryListingList({ pageNum: 1, pageSize: 1 })
+  await run("listingList", "Simplified Bidding List Query", () =>
+    queryListingList({ pageSize: 1 })
   );
   // id 의존/쓰기형 — 자동 실행 보류
   await run("spuByGlobalSpuId", "Query Spu Basic Information by globalSpuId", null,
