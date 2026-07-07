@@ -29,7 +29,7 @@ interface BestSize { size: string; profit: number; bid: number; price: number; b
 interface Model {
   normKey: string; brand: string; productName: string; category: string | null;
   soldCount: number; avgUsd: number; lowUsd: number; highUsd: number; sizeCount: number;
-  maxProfitUsd: number | null; lowestBidUsd: number | null; bidAvailCnt: number;
+  profitUsd: number | null; bestProfitUsd: number | null; lowestBidUsd: number | null; bidAvailCnt: number;
   unbidCnt: number; localSeller: number; riskScore: number;
   safe: boolean; blue: boolean; risk: boolean; bidRec: boolean;
   recommendBidUsd: number | null; bestSizes: BestSize[];
@@ -157,7 +157,7 @@ export default function ReverseInsights() {
                         <th className="text-left font-medium px-3 py-2.5">모델</th>
                         <th className="text-right font-medium px-3 py-2.5">판매량</th>
                         <th className="text-right font-medium px-3 py-2.5">시세($)</th>
-                        <th className="text-right font-medium px-3 py-2.5">예상수익</th>
+                        <th className="text-right font-medium px-3 py-2.5" title="POIZON 예상 정산액 = 판매가−수수료. 국내 매입가 미반영(실순익 아님).">정산(예상)</th>
                         <th className="text-right font-medium px-3 py-2.5">최저입찰</th>
                         {filter === "bid" && <th className="text-right font-medium px-3 py-2.5">추천입찰</th>}
                         <th className="text-center font-medium px-3 py-2.5">경쟁/리스크</th>
@@ -212,11 +212,18 @@ export default function ReverseInsights() {
                 </Panel>
               </div>
 
-              <p className="text-[11px] text-slate-500">
-                💡 <b className="text-slate-400">입찰 추천</b> 조건: 예상수익 ≥$20 · 중국 판매량 ≥10 · 현지 판매자 적음 · 입찰 가능 · 미입찰.
-                판매량은 SPU(상품) 단위 총계이며, 사이즈 추천은 예상수익·입찰 공백 기준입니다.
-                <Link href="/reverse/queue" className="underline text-fuchsia-300 ml-1">소싱 큐에서 국내가 매칭 →</Link>
-              </p>
+              <div className="text-[11px] text-slate-500 space-y-1">
+                <p>
+                  💡 한 줄의 시세·입찰·정산은 <b className="text-slate-400">대표 사이즈(거래가 중앙값) 한 개의 실제 값</b>입니다 —
+                  사이즈마다 값이 달라 섞으면 어긋나 보여요. 사이즈별 차이는 상품명을 눌러 펼쳐 보세요.
+                </p>
+                <p>
+                  ⚠️ <b className="text-slate-400">정산(예상)</b>은 POIZON "예상 수익" = <b className="text-slate-400">판매가 − 수수료(≈$10)</b>이고
+                  <b className="text-slate-400"> 국내 매입가는 안 뺀 값</b>입니다. <b className="text-white">실순익 = 정산 − 국내 매입가</b> →
+                  <Link href="/reverse/queue" className="underline text-fuchsia-300 ml-1">소싱 큐에서 확인 →</Link>
+                </p>
+                <p>입찰 추천 조건: 정산(예상) ≥$20 · 중국 판매량 ≥10 · 현지 판매자 적음 · 입찰 가능 · 미입찰.</p>
+              </div>
             </>
           )}
         </div>
@@ -246,7 +253,12 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
         </td>
         <td className="text-right px-3 py-2.5 font-semibold text-emerald-300">{m.soldCount.toLocaleString()}</td>
         <td className="text-right px-3 py-2.5 text-fuchsia-200">{usd(m.avgUsd)}</td>
-        <td className={`text-right px-3 py-2.5 ${(m.maxProfitUsd ?? 0) > 0 ? "text-emerald-300" : "text-slate-500"}`}>{usd(m.maxProfitUsd)}</td>
+        <td className={`text-right px-3 py-2.5 ${(m.profitUsd ?? 0) > 0 ? "text-emerald-300" : "text-slate-500"}`}>
+          {usd(m.profitUsd)}
+          {m.bestProfitUsd != null && m.bestProfitUsd > (m.profitUsd ?? 0) && (
+            <span className="block text-[10px] text-slate-600">최대 {usd(m.bestProfitUsd)}</span>
+          )}
+        </td>
         <td className="text-right px-3 py-2.5 text-slate-300">{usd(m.lowestBidUsd)}</td>
         {bid && (
           <td className="text-right px-3 py-2.5">
@@ -264,13 +276,14 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
       {open && (
         <tr className="bg-white/[0.03]">
           <td colSpan={bid ? 8 : 7} className="px-3 py-3">
-            <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1"><Ruler className="h-3 w-3" /> 사이즈 추천 (예상수익·입찰 공백 순)</p>
+            <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1"><Ruler className="h-3 w-3" /> 사이즈 추천 (정산·입찰 공백 순 · 입찰가≫거래가는 희귀/저유동)</p>
             <div className="flex flex-wrap gap-2">
               {m.bestSizes.length === 0 && <span className="text-[12px] text-slate-500">사이즈별 데이터 없음</span>}
               {m.bestSizes.map(s => (
                 <div key={s.size} className={`rounded-lg border px-2.5 py-1.5 text-[12px] ${s.unbid ? "border-fuchsia-400/40 bg-fuchsia-500/10" : "border-white/10 bg-white/5"}`}>
                   <span className="font-semibold text-slate-100">{s.size}</span>
-                  <span className="text-slate-400 ml-2">수익 {usd(s.profit)}</span>
+                  <span className="text-slate-500 ml-2">거래가 {usd(s.price)}</span>
+                  <span className="text-slate-400 ml-2">정산 {usd(s.profit)}</span>
                   <span className="text-slate-500 ml-2">입찰 {usd(s.bid)}</span>
                   {s.unbid && <span className="text-fuchsia-300 ml-2">미입찰</span>}
                   {s.bidAvailable && <span className="text-emerald-300 ml-1">가능</span>}

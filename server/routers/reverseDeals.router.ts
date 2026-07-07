@@ -1148,7 +1148,8 @@ export const reverseDealsRouter = router({
         g.localSellerMax = Math.max(g.localSellerMax, o.localSellerCount ?? 0);
         if (o.size) g.sizes.add(o.size);
         const st = String(o.bidStatus ?? "").trim().toLowerCase();
-        const unbid = /미입찰|not\s*bid|nobid|no\s*bid|없음|^0$|none/.test(st);
+        // 입찰 상태 "0:미입찰 1:입찰완료" — 엑셀은 0.0/1.0 float 문자열로 들어옴
+        const unbid = /미입찰|not\s*bid|nobid|no\s*bid|없음|none|^0(\.0+)?$/.test(st);
         g.recs.push({
           size: o.size ?? null, price: o.priceCny ?? 0,
           profit: o.expectedProfitUsd ?? null, bid: o.lowestBidUsd ?? null,
@@ -1172,11 +1173,17 @@ export const reverseDealsRouter = router({
 
       // ① 모델 엔리치먼트 — 발굴 필터·리스크 점수·입찰 추천·사이즈 추천
       const enriched = list.map(g => {
-        const avgUsd = median(g.prices);
-        const profits = g.recs.map(r => r.profit).filter((x): x is number => x != null);
-        const maxProfitUsd = profits.length ? Math.max(...profits) : null;
-        const bids = g.recs.map(r => r.bid).filter((x): x is number => x != null && x > 0);
-        const lowestBidUsd = bids.length ? Math.min(...bids) : null;
+        // ★ 대표 사이즈(거래가 중앙값 SKU)의 실제 값 — 서로 다른 사이즈 값을 한 줄에 섞지 않음.
+        //   (기존 버그: 시세=중앙값·입찰=최소·수익=최대 → 다른 3개 사이즈가 섞여 말이 안 됨)
+        const priced = g.recs
+          .filter(r => r.price > 0)
+          .sort((a, b) => a.price - b.price);
+        const rep = priced.length ? priced[Math.floor(priced.length / 2)] : null;
+        const avgUsd = rep ? rep.price : median(g.prices);
+        const lowestBidUsd = rep?.bid ?? null; // 대표 사이즈 최저입찰가
+        const profitUsd = rep?.profit ?? null; // 대표 사이즈 POIZON 정산(예상)=판매가−수수료
+        const allProfits = g.recs.map(r => r.profit).filter((x): x is number => x != null);
+        const bestProfitUsd = allProfits.length ? Math.max(...allProfits) : null;
         const bidAvailCnt = g.recs.filter(r => r.bidAvailable === true).length;
         const unbidCnt = g.recs.filter(r => r.unbid).length;
         const localSeller = g.localSellerMax;
@@ -1186,7 +1193,7 @@ export const reverseDealsRouter = router({
         let riskScore = 0;
         if (g.soldMax < 10) riskScore += 35;
         if (g.soldMax < 3) riskScore += 20;
-        if (maxProfitUsd != null && maxProfitUsd <= 0) riskScore += 20;
+        if (profitUsd != null && profitUsd <= 0) riskScore += 20;
         if (!lowComp) riskScore += 15;
         if (avgUsd > 0 && g.soldMax < 3) riskScore += 10; // 가격만 있고 사실상 무판매
         riskScore = Math.min(100, riskScore);
@@ -1195,11 +1202,11 @@ export const reverseDealsRouter = router({
         const blue = g.soldMax >= 10 && lowComp;
         const riskFlag = g.soldMax < 5 && avgUsd > 0; // 판매 거의 없는데 가격만 있음
         const bidRec =
-          (maxProfitUsd ?? 0) >= 20 && g.soldMax >= 10 && lowComp &&
+          (profitUsd ?? 0) >= 20 && g.soldMax >= 10 && lowComp &&
           bidAvailCnt > 0 && unbidCnt > 0;
-        // 추천 입찰가: 게이트 통과 시 현재 최저가와 동일(약간 낮게 매칭)
+        // 추천 입찰가: 게이트 통과 시 대표 사이즈 최저입찰가에 매칭(약간 낮게)
         const recommendBidUsd = bidRec ? lowestBidUsd : null;
-        // 사이즈 추천: 예상수익 높은 순 + 입찰 공백 우선
+        // 사이즈 추천: 정산(예상) 높은 순 + 입찰 공백 우선
         const bestSizes = g.recs
           .filter(r => r.size)
           .map(r => ({
@@ -1214,7 +1221,7 @@ export const reverseDealsRouter = router({
           lowUsd: g.prices.length ? Math.min(...g.prices) : 0,
           highUsd: g.prices.length ? Math.max(...g.prices) : 0,
           sizeCount: g.sizes.size,
-          maxProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
+          profitUsd, bestProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
           riskScore, safe, blue, risk: riskFlag, bidRec, recommendBidUsd, bestSizes,
         };
       });
@@ -1223,7 +1230,7 @@ export const reverseDealsRouter = router({
       const counts = {
         all: enriched.length,
         hot: enriched.filter(m => m.soldCount > 0).length,
-        margin: enriched.filter(m => (m.maxProfitUsd ?? 0) > 0).length,
+        margin: enriched.filter(m => (m.profitUsd ?? 0) > 0).length,
         safe: enriched.filter(m => m.safe).length,
         blue: enriched.filter(m => m.blue).length,
         risk: enriched.filter(m => m.risk).length,
@@ -1239,7 +1246,7 @@ export const reverseDealsRouter = router({
       else if (F === "bid") picked = enriched.filter(m => m.bidRec);
       picked = [...picked].sort((a, b) => {
         if (F === "margin" || F === "bid")
-          return (b.maxProfitUsd ?? -1e9) - (a.maxProfitUsd ?? -1e9);
+          return (b.profitUsd ?? -1e9) - (a.profitUsd ?? -1e9);
         if (F === "risk") return b.riskScore - a.riskScore;
         return b.soldCount - a.soldCount; // hot/all/safe/blue → 판매량
       });
