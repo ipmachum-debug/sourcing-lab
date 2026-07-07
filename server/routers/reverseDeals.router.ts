@@ -1017,6 +1017,7 @@ export const reverseDealsRouter = router({
         hasDomestic: boolean; domesticBuyKrw: number; domesticSource: string | null;
         domesticUrl: string | null; matchBy: "barcode" | "name" | null;
         netProfitKrw: number; marginPct: number; grade: string; recommendQty: number;
+        revenueKrw: number; feeKrw: number; vatRefundKrw: number;
         floorBidUsd: number; targetBidUsd: number;
         status: "hunt" | "deal" | "thin"; score: number;
       };
@@ -1048,6 +1049,7 @@ export const reverseDealsRouter = router({
         }
 
         let netProfitKrw = 0, marginPct = 0, grade = "-", recommendQty = 0;
+        let revenueKrw = 0, feeKrw = 0, vatRefundKrw = 0; // 실순익 분해(판매가·수수료·부가세환급)
         let floorBidUsd = 0, targetBidUsd = 0; // 방어선($, 손익분기) · 목표순익 확보가($)
         let status: "hunt" | "deal" | "thin";
         if (dom) {
@@ -1057,6 +1059,9 @@ export const reverseDealsRouter = router({
             marginPct = v.profit.marginPct;
             grade = v.grade;
             recommendQty = v.recommendQty;
+            revenueKrw = v.profit.revenueKrw;
+            feeKrw = v.profit.feeKrw + v.profit.extraFeeKrw;
+            vatRefundKrw = v.profit.vatRefundKrw;
           }
           floorBidUsd = bidForTargetNet(dom.buy, 0, cost, category);
           targetBidUsd = bidForTargetNet(dom.buy, 20000, cost, category);
@@ -1087,6 +1092,7 @@ export const reverseDealsRouter = router({
           hasDomestic: !!dom, domesticBuyKrw: dom?.buy ?? 0,
           domesticSource: dom?.source ?? null, domesticUrl: dom?.url ?? null,
           matchBy, netProfitKrw, marginPct, grade, recommendQty,
+          revenueKrw, feeKrw, vatRefundKrw,
           floorBidUsd, targetBidUsd, status, score,
         });
       }
