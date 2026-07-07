@@ -20,6 +20,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Sparkles,
+  Star,
+  Bot,
 } from "lucide-react";
 
 const usd = (n: number | null | undefined) =>
@@ -35,7 +37,9 @@ interface Model {
   unbidCnt: number; localSeller: number; riskScore: number;
   safe: boolean; blue: boolean; risk: boolean; bidRec: boolean;
   recommendBidUsd: number | null; bestSizes: BestSize[];
+  scores: Scores;
 }
+interface Scores { demand: number; stability: number; authenticity: number; size: number; grade: string; }
 interface Band { label: string; models: number; totalSold: number; }
 interface Size { size: string; krMm: number | null; models: number; demand: number; medianUsd: number; }
 type Counts = { all: number; hot: number; margin: number; safe: number; blue: number; risk: number; bid: number; };
@@ -301,6 +305,7 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
         <td className="px-3 py-2.5">
           <button onClick={onToggle} className="text-left w-full group">
             <p className="text-slate-100 truncate max-w-[300px] group-hover:text-fuchsia-200 flex items-center gap-1">
+              <GradeBadge grade={m.scores.grade} />
               {m.productName}
               <ChevronDown className={`h-3 w-3 text-slate-600 transition-transform ${open ? "rotate-180" : ""}`} />
             </p>
@@ -342,6 +347,17 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
       {open && (
         <tr className="bg-white/[0.03]">
           <td colSpan={bid ? 8 : 7} className="px-3 py-3">
+            {/* 위험 별점 + AI 판단 */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3 pb-3 border-b border-white/8">
+              <StarRow label="판매량" n={m.scores.demand} />
+              <StarRow label="가격안정" n={m.scores.stability} />
+              <StarRow label="가품안전" n={m.scores.authenticity} />
+              <StarRow label="사이즈" n={m.scores.size} />
+              <span className="inline-flex items-center gap-1 text-[12px] text-slate-300">
+                최종 <GradeBadge grade={m.scores.grade} />
+              </span>
+              <AiReason m={m} />
+            </div>
             <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1"><Ruler className="h-3 w-3" /> 사이즈 추천 (정산·입찰 공백 순 · 입찰가≫거래가는 희귀/저유동)</p>
             <div className="flex flex-wrap gap-2">
               {m.bestSizes.length === 0 && <span className="text-[12px] text-slate-500">사이즈별 데이터 없음</span>}
@@ -361,6 +377,93 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
         </tr>
       )}
     </>
+  );
+}
+
+function GradeBadge({ grade }: { grade: string }) {
+  const tone =
+    grade === "A+" || grade === "A"
+      ? "bg-emerald-500/20 text-emerald-200 ring-emerald-400/40"
+      : grade === "B"
+        ? "bg-cyan-500/15 text-cyan-200 ring-cyan-400/30"
+        : grade === "C"
+          ? "bg-amber-500/15 text-amber-200 ring-amber-400/30"
+          : "bg-red-500/15 text-red-300 ring-red-400/30";
+  return (
+    <span className={`shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-black ring-1 ${tone}`} title="종합 등급(판매·안정·가품·사이즈)">
+      {grade}
+    </span>
+  );
+}
+
+function StarRow({ label, n }: { label: string; n: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+      {label}
+      <span className="inline-flex">
+        {[1, 2, 3, 4, 5].map(i => (
+          <Star
+            key={i}
+            className={`h-3 w-3 ${i <= n ? "text-amber-300 fill-amber-300" : "text-slate-700"}`}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function AiReason({ m }: { m: Model }) {
+  const mut = trpc.reverseDeals.aiReason.useMutation();
+  const r = mut.data;
+  const verdictTone =
+    r?.verdict === "추천"
+      ? "text-emerald-300"
+      : r?.verdict === "주의"
+        ? "text-red-300"
+        : "text-amber-300";
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <button
+        onClick={() =>
+          mut.mutate({
+            productName: m.productName,
+            brand: m.brand || undefined,
+            category: m.category || undefined,
+            soldCount: m.soldCount,
+            avgUsd: m.avgUsd,
+            profitUsd: m.profitUsd,
+            localSeller: m.localSeller,
+            grade: m.scores.grade,
+            riskScore: m.riskScore,
+          })
+        }
+        disabled={mut.isPending}
+        className="inline-flex items-center gap-1 text-[12px] font-semibold rounded-full px-2.5 py-1 bg-fuchsia-500/15 text-fuchsia-200 hover:bg-fuchsia-500/25 disabled:opacity-50"
+      >
+        <Bot className="h-3.5 w-3.5" />
+        {mut.isPending ? "판단 중…" : "AI 판단"}
+      </button>
+      {r && (
+        <div className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 max-w-md">
+          <p className="text-[13px] font-semibold flex items-center gap-1.5">
+            <span className={verdictTone}>{r.verdict}</span>
+            <span className="text-slate-200">{r.headline}</span>
+            {r.source === "rule" && <span className="text-[10px] text-slate-600">(규칙)</span>}
+          </p>
+          {r.bullets.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {r.bullets.map((b: string, i: number) => (
+                <li key={i} className="text-[12px] text-slate-400 flex gap-1">
+                  <span className="text-fuchsia-400">·</span>
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
+          {r.qtyHint && <p className="text-[11px] text-cyan-300/80 mt-1">📦 {r.qtyHint}</p>}
+        </div>
+      )}
+    </span>
   );
 }
 

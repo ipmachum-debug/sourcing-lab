@@ -53,6 +53,10 @@ if [ -f drizzle/0036_catalog_bid_fields.sql ]; then
   echo "  Applying 0036_catalog_bid_fields.sql..."
   mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0036_catalog_bid_fields.sql 2>&1 || echo "  (already applied or skipped)"
 fi
+if [ -f drizzle/0037_poizon_oauth_token.sql ]; then
+  echo "  Applying 0037_poizon_oauth_token.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0037_poizon_oauth_token.sql 2>&1 || echo "  (already applied or skipped)"
+fi
 
 # 4. Build
 echo "[4/5] Building..."

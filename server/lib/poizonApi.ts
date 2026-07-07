@@ -63,19 +63,21 @@ export function readiness(): {
 }
 
 // ── 엔드포인트 맵 (문서 확정 시 여기만 수정) ──────────────
-// method/path 모두 추정. 파란 링크 클릭 → 상세 페이지의 실제 경로로 교체.
+// ✅ 확정 prefix: /dop/api/v1/pop/api/v1/...  (recommend-bid/batchPrice 문서로 확인)
+// ⚠️ 표시는 여전히 추정 suffix — 각 문서 링크로 확정 필요.
 export const POIZON_API = {
   // ⭐ 핵심 5 (역경매 워크플로우)
-  spuByArticleNumber: { path: "/dop/api/v1/spu/query-by-article-number", method: "POST" },
-  spuByGlobalSpuId: { path: "/dop/api/v1/spu/query-by-global-spu-id", method: "POST" },
-  listingRecommendBatch: { path: "/dop/api/v1/bidding/lowest-price-recommend/batch", method: "POST" },
-  submitAutoBid: { path: "/dop/api/v1/bidding/auto/submit", method: "POST" },
-  listingList: { path: "/dop/api/v1/bidding/listing/list", method: "POST" },
-  cancelListing: { path: "/dop/api/v1/bidding/listing/cancel", method: "POST" },
+  spuByArticleNumber: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/spu/spu-basic-info/by-article-number", method: "POST" }, // ✅ 확정
+  spuByGlobalSpuId: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/spu/spu-basic-info/by-global-spu-id", method: "POST" }, // ⚠️ 패턴 추정
+  listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
+  submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
+  autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
+  listingList: { path: "/dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple", method: "POST" }, // ✅ 확정
+  cancelListing: { path: "/dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding", method: "POST" }, // ✅ 확정
 
   // 확장(Default 포함) — 필요 시 순차 구현
   skuSpuByBarcode: { path: "/dop/api/v1/commodity/query-by-barcode", method: "POST" },
-  skuBasicInfoBySku: { path: "/commodity/intl/sku/sku-basic-info/by-sku", method: "POST" },
+  skuBasicInfoBySku: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/sku/sku-basic-info/by-sku", method: "POST" }, // ⚠️ 패턴 추정
   orderListV2: { path: "/dop/api/v1/order/list/v2", method: "POST" },
   orderConfirm: { path: "/dop/api/v1/order/confirm", method: "POST" },
   realtimeReconciliation: { path: "/dop/api/v1/bill/realtime/list", method: "POST" },
@@ -130,36 +132,52 @@ function friendlyError(status: number, code: unknown, msg: string): string {
   return m || `POIZON API 오류 (status ${status}${c ? `, code ${c}` : ""}).`;
 }
 
-// ── 서명 ────────────────────────────────────────────────
-/**
- * 공통 서명. 파라미터 key 사전순 정렬 → "k1v1k2v2..." 연결 →
- * 앞뒤 appSecret 래핑 → MD5 대문자. (공식 Sign Tool로 최종 검증 필요)
- */
-export function sign(
-  params: Record<string, string | number>,
-  appSecret: string
-): string {
+// ── 서명 (공식 Step 4 알고리즘) ─────────────────────────
+// 1) 전체 파라미터(인증+비즈니스, app_key·timestamp 포함) 중 빈 값 제외
+// 2) 키 ASCII 오름차순 정렬 → key=urlencode(value)&... 로 연결 (stringA)
+//    · 값이 배열이면 원소를 콤마로 join (객체 원소는 compact JSON)
+//    · URL 인코딩은 Java URLEncoder 호환: 공백은 '+' (encodeURIComponent의 %20→+)
+// 3) 끝에 appSecret 붙임 → MD5(32) → 대문자
+function signValue(val: unknown): string {
+  if (Array.isArray(val)) {
+    return val
+      .map(el => (el !== null && typeof el === "object" ? JSON.stringify(el) : String(el)))
+      .join(",");
+  }
+  if (val !== null && typeof val === "object") return JSON.stringify(val);
+  return String(val);
+}
+function urlEncodeJava(s: string): string {
+  // Java URLEncoder 호환: 공백 → '+', 나머지는 encodeURIComponent
+  return encodeURIComponent(s).replace(/%20/g, "+");
+}
+export function sign(params: Record<string, unknown>, appSecret: string): string {
   const keys = Object.keys(params)
-    .filter(k => k !== "sign" && params[k] !== "" && params[k] != null)
-    .sort();
-  const joined = keys.map(k => `${k}${params[k]}`).join("");
-  const raw = `${appSecret}${joined}${appSecret}`;
-  return crypto.createHash("md5").update(raw, "utf8").digest("hex").toUpperCase();
+    .filter(k => k !== "sign" && params[k] != null && params[k] !== "")
+    .sort(); // ASCII 오름차순
+  const stringA = keys
+    .map(k => `${urlEncodeJava(k)}=${urlEncodeJava(signValue(params[k]))}`)
+    .join("&");
+  const stringSignTemp = stringA + appSecret;
+  return crypto
+    .createHash("md5")
+    .update(stringSignTemp, "utf8")
+    .digest("hex")
+    .toUpperCase();
 }
 
-/** 공통(인증) 파라미터 + sign 조립. sign은 인증 파라미터 위에서 계산(비즈니스 바디 제외). */
-function buildAuthParams(
+/** 인증 공통 파라미터(app_key/access_token/timestamp/language/timeZone). sign은 별도로 전체 위에서 계산. */
+function authParamsOf(
   cfg: PoizonApiConfig,
   timestampMs: number
 ): Record<string, string | number> {
-  const base: Record<string, string | number> = {
+  return {
     app_key: cfg.appKey,
     access_token: cfg.accessToken,
     timestamp: timestampMs,
     language: "ko",
     timeZone: "Asia/Seoul",
   };
-  return { ...base, sign: sign(base, cfg.appSecret) };
 }
 
 // ── 범용 호출기 ─────────────────────────────────────────
@@ -179,22 +197,51 @@ export interface CallOpts<T> {
  *   - schema 주면 응답 data를 Zod 검증해 타입 보장.
  * 자격증명 없으면 즉시 실패(placeholder 데이터 반환 금지).
  */
+/** access_token 해석: DB 저장 토큰(자동갱신) 우선 → env 폴백. */
+async function resolveAccessTokenFor(): Promise<string> {
+  try {
+    const store = await import("./poizonTokenStore");
+    const t = await store.resolveAccessToken();
+    if (t) return t;
+  } catch {
+    // DB 미연결/스토어 오류 → env 폴백
+  }
+  return process.env.POIZON_ACCESS_TOKEN || "";
+}
+
 export async function callPoizon<T = unknown>(
   ep: { path: string; method: string },
   bizParams: Record<string, unknown>,
   opts: CallOpts<T> = {}
 ): Promise<T> {
-  const cfg = readConfig();
-  if (!cfg) {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret) {
     throw new PoizonApiError(
       "MISSING_CREDENTIALS",
-      "POIZON 자격증명 미설정 — POIZON_APP_KEY/POIZON_APP_SECRET/POIZON_ACCESS_TOKEN 필요. (App Secret·Token은 서버 .env에만)"
+      "POIZON_APP_KEY/POIZON_APP_SECRET 미설정 — 서버 .env에 설정 필요."
     );
   }
+  const accessToken = await resolveAccessTokenFor();
+  if (!accessToken) {
+    throw new PoizonApiError(
+      "MISSING_TOKEN",
+      "Access Token 없음 — Seller Authorization(/api/poizon/authorize)으로 발급하세요."
+    );
+  }
+  const cfg: PoizonApiConfig = {
+    appKey,
+    appSecret,
+    accessToken,
+    base: process.env.POIZON_API_BASE || "https://open.poizon.com",
+  };
   const timestamp = opts.timestampMs ?? Date.now();
-  const auth = buildAuthParams(cfg, timestamp);
+  const auth = authParamsOf(cfg, timestamp);
+  // ★ 서명은 인증+비즈니스 전체 파라미터 위에서 계산(공식 Step 4).
+  const signature = sign({ ...bizParams, ...auth }, cfg.appSecret);
+  // 인증 파라미터(+sign)는 쿼리스트링, 비즈니스 파라미터는 JSON 바디로 전송.
   const qs = new URLSearchParams(
-    Object.entries(auth).map(([k, v]) => [k, String(v)])
+    Object.entries({ ...auth, sign: signature }).map(([k, v]) => [k, String(v)])
   ).toString();
   const url = `${cfg.base}${ep.path}?${qs}`;
   const method = (ep.method || "POST").toUpperCase();
@@ -273,16 +320,20 @@ const zSpuList = z
   .object({ list: z.array(zSpu).optional(), total: z.number().optional() })
   .passthrough();
 
+// ✅ 확정 응답: data = 시장별 최저가 참조 배열.
+//   가격 단위는 최소단위(분/센트)일 수 있음 — 엔진 연동 시 ÷100 여부 검증 필요.
 const zRecommend = z
   .object({
     skuId: z.union([z.string(), z.number()]).optional(),
-    lowestPrice: z.number().optional(),
-    recommendPrice: z.number().optional(),
+    globalSkuId: z.union([z.string(), z.number()]).optional(),
+    globalMinPrice: z.number().optional(), // 글로벌(중국) 최저가
+    localMinPrice: z.number().optional(), // 현지(판매지역) 최저가
+    otherPlatformMinPrice: z.number().optional(), // 타 플랫폼 최저가
+    asiaMinPrice: z.number().optional(), // 아시아 최저가
+    usMinPrice: z.number().optional(), // 미국 최저가
   })
   .passthrough();
-const zRecommendList = z
-  .object({ list: z.array(zRecommend).optional() })
-  .passthrough();
+const zRecommendList = z.array(zRecommend);
 
 const zSubmitResult = z
   .object({
@@ -292,12 +343,34 @@ const zSubmitResult = z
   })
   .passthrough();
 
-const zListingList = z
-  .object({ list: z.array(z.any()).optional(), total: z.number().optional() })
+// ✅ 확정 응답: data.list[] + lastOffsetId(다음 커서) + pageSize.
+//   ★ sellerBiddingNo = auto-follow-bidding/submit의 biddingNo (자동추종 연결 키).
+//   price는 통화 최소단위(KRW=원 그대로, USD=센트 ÷100).
+const zListingItem = z
+  .object({
+    sellerBiddingNo: z.string().optional(),
+    biddingType: z.number().optional(),
+    tradeStatus: z.number().optional(), // 1=취소, 2=성공
+    spuId: z.union([z.string(), z.number()]).optional(),
+    skuId: z.union([z.string(), z.number()]).optional(),
+    globalSpuId: z.union([z.string(), z.number()]).optional(),
+    globalSkuId: z.union([z.string(), z.number()]).optional(),
+    price: z.number().optional(),
+    currency: z.string().optional(),
+    saleType: z.number().optional(),
+    onSaleQuantity: z.number().optional(),
+    merchantSpuId: z.string().optional(),
+    merchantSkuId: z.string().optional(),
+    is_auto_bidding: z.boolean().optional(),
+    created_time: z.number().optional(),
+  })
   .passthrough();
-
-const zCancelResult = z
-  .object({ success: z.boolean().optional() })
+const zListingList = z
+  .object({
+    list: z.array(zListingItem).optional(),
+    lastOffsetId: z.number().optional(),
+    pageSize: z.number().optional(),
+  })
   .passthrough();
 
 // ── 핵심 5 (승인 즉시 사용) ─────────────────────────────
@@ -328,17 +401,55 @@ export async function querySpuByGlobalSpuId(
   );
 }
 
-/** 3) 최저가 기반 입찰 추천(배치) — 방어선/목표가 판단의 POIZON 측 기준값. */
+/** 최저가 추천 요청 파라미터 (문서 batchPrice 샘플 기준). */
+export interface RecommendParams {
+  /** DW skuId 배열(최대 20). skuIds/globalSkuIdList 중 하나 필수. skuIds 권장. */
+  globalSkuIdList?: (string | number)[];
+  region?: string; // "US"
+  currency?: string; // "USD"
+  countryCode?: string; // "US"
+  biddingType?: number; // 샘플 20
+  saleType?: number; // 샘플 7
+  uid?: number; // 판매자 uid(미지정 시 env POIZON_UID)
+}
+
+/**
+ * 3) 최저가 기반 입찰 추천(배치) — 방어선/목표가 판단의 POIZON 측 기준값.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/recommend-bid/batchPrice
+ *   바디: skuIds[](또는 globalSkuIdList) · region · currency · countryCode · biddingType · saleType · uid.
+ *   ⚠️ biddingType/saleType 의미·응답 스키마는 문서로 최종 확정.
+ */
 export async function queryListingRecommendations(
   skuIds: (string | number)[],
-  region = "US",
+  params: RecommendParams = {},
   opts: CallOpts<z.infer<typeof zRecommendList>> = {}
 ) {
-  return callPoizon(
-    POIZON_API.listingRecommendBatch,
-    { skuIds, region },
-    { schema: zRecommendList, ...opts }
-  );
+  const skus = (skuIds ?? []).slice(0, 20).map(Number).filter(Number.isFinite);
+  const globals = (params.globalSkuIdList ?? []).slice(0, 20).map(Number).filter(Number.isFinite);
+  if (skus.length === 0 && globals.length === 0)
+    throw new PoizonApiError(
+      "EMPTY",
+      "skuIds 또는 globalSkuIdList 중 하나는 필요합니다(최대 20개, skuIds 권장)."
+    );
+  const uid =
+    params.uid ??
+    (process.env.POIZON_UID ? Number(process.env.POIZON_UID) : undefined);
+  const body: Record<string, unknown> = {
+    language: "ko",
+    timeZone: "Asia/Seoul",
+    region: params.region ?? "US",
+    currency: params.currency ?? "USD",
+    countryCode: params.countryCode ?? "US",
+    biddingType: params.biddingType ?? 20,
+    saleType: params.saleType ?? 7,
+  };
+  if (skus.length) body.skuIds = skus;
+  if (globals.length) body.globalSkuIdList = globals;
+  if (uid != null && Number.isFinite(uid)) body.uid = uid;
+  return callPoizon(POIZON_API.listingRecommendBatch, body, {
+    schema: zRecommendList,
+    ...opts,
+  });
 }
 
 export interface AutoBidItem {
@@ -363,96 +474,200 @@ export async function submitAutoBidding(
   );
 }
 
-/** 5a) 내 입찰(리스팅) 목록 — 간이 버전. */
+// followType: 7=중국 최저가 추종, 8=중국 최저가보다 항상 한 단계 낮게(방어선까지만).
+export type FollowType = 6 | 7 | 8 | number;
+
+export interface AutoFollowBidParams {
+  /** 입찰 번호(내 리스팅). Query listing list에서 획득. */
+  biddingNo: string;
+  /** 추종 하한가 = 방어선. 이 아래로는 자동 추종하지 않음(우리 엔진 floorBid). */
+  lowestPrice: number;
+  /** 7=중국 최저가 추종 · 8=한 단계 아래. 기본 8(방어적). */
+  followType?: FollowType;
+  /** true=자동추종 시작 · false=자동추종 취소. */
+  autoSwitch?: boolean;
+  /** 발송지: US·CN·HK·TW·MO·JP·KR·FR·IT·GB·ES·DE. */
+  countryCode?: string;
+  /** 리스팅 통화: CNY·USD·HKD·JPY·SGD·EUR·KRW. */
+  currency?: string;
+}
+
+const zBoolResult = z.boolean();
+
+/**
+ * 4b) 자동 추종 입찰 제출 — ★역경매 자동화 핵심.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/auto-follow-bidding/submit
+ *   followType 8 + lowestPrice(방어선)로 "최저가 추격 금지, 방어선까지만" 구현.
+ *   autoSwitch=false로 호출하면 해당 자동추종 취소.
+ *   응답 data=boolean(성공 여부).
+ */
+export async function submitAutoFollowBid(
+  params: AutoFollowBidParams,
+  opts: CallOpts<boolean> = {}
+) {
+  if (!params.biddingNo)
+    throw new PoizonApiError("EMPTY", "biddingNo(입찰 번호)가 필요합니다.");
+  if (!(params.lowestPrice > 0))
+    throw new PoizonApiError("EMPTY", "lowestPrice(방어선)는 0보다 커야 합니다.");
+  return callPoizon(
+    POIZON_API.autoFollowBidSubmit,
+    {
+      biddingNo: params.biddingNo,
+      lowestPrice: Math.round(params.lowestPrice),
+      followType: params.followType ?? 8,
+      autoSwitch: params.autoSwitch ?? true,
+      countryCode: params.countryCode ?? "US",
+      currency: params.currency ?? "USD",
+    },
+    { schema: zBoolResult, ...opts }
+  );
+}
+
+export interface ListingListParams {
+  region?: string; // 지역 코드(예 "KR")
+  pageSize?: number;
+  /** 페이지 커서. 첫 호출 0, 다음은 직전 응답의 lastOffsetId. */
+  exclusiveStartOffsetId?: number;
+  /** 1=취소, 2=성공(기본 2). */
+  tradeStatus?: number;
+  biddingType?: number;
+  saleType?: number;
+  merchantSpuId?: string;
+  /** 사용 시 merchantSpuId 함께 필요. */
+  merchantSkuId?: string;
+  spuIds?: (string | number)[];
+  skuIds?: (string | number)[];
+  sellerBiddingNoList?: string[];
+}
+
+/**
+ * 5a) 내 입찰(리스팅) 목록 — 간이 버전.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple
+ *   커서 페이징(exclusiveStartOffsetId → 응답 lastOffsetId).
+ *   ★ 응답 item.sellerBiddingNo = 자동추종 입찰의 biddingNo.
+ */
 export async function queryListingList(
-  params: { pageNum?: number; pageSize?: number; status?: string } = {},
+  params: ListingListParams = {},
   opts: CallOpts<z.infer<typeof zListingList>> = {}
 ) {
-  return callPoizon(
-    POIZON_API.listingList,
-    {
-      pageNum: params.pageNum ?? 1,
-      pageSize: params.pageSize ?? 50,
-      ...(params.status ? { status: params.status } : {}),
-    },
-    { schema: zListingList, ...opts }
-  );
+  const body: Record<string, unknown> = {
+    language: "ko",
+    timeZone: "Asia/Seoul",
+    region: params.region ?? "KR",
+    pageSize: params.pageSize ?? 50,
+    exclusiveStartOffsetId: params.exclusiveStartOffsetId ?? 0,
+    tradeStatus: params.tradeStatus ?? 2,
+  };
+  if (params.biddingType != null) body.biddingType = params.biddingType;
+  if (params.saleType != null) body.saleType = params.saleType;
+  if (params.merchantSpuId) body.merchantSpuId = params.merchantSpuId;
+  if (params.merchantSkuId) body.merchantSkuId = params.merchantSkuId;
+  if (params.spuIds?.length) body.spuIds = params.spuIds.slice(0, 10);
+  if (params.skuIds?.length) body.skuIds = params.skuIds.slice(0, 20);
+  if (params.sellerBiddingNoList?.length)
+    body.sellerBiddingNoList = params.sellerBiddingNoList;
+  return callPoizon(POIZON_API.listingList, body, { schema: zListingList, ...opts });
 }
 
-/** 5b) 입찰(리스팅) 취소. */
+/**
+ * 5b) 입찰(리스팅) 취소 — 단일 sellerBiddingNo.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding
+ *   바디 { sellerBiddingNo } · 응답 data=boolean.
+ */
 export async function cancelListing(
-  listingNos: (string | number)[],
-  opts: CallOpts<z.infer<typeof zCancelResult>> = {}
+  sellerBiddingNo: string,
+  opts: CallOpts<boolean> = {}
 ) {
-  if (listingNos.length === 0)
-    throw new PoizonApiError("EMPTY", "취소할 리스팅이 없습니다.");
+  if (!sellerBiddingNo)
+    throw new PoizonApiError("EMPTY", "취소할 sellerBiddingNo가 필요합니다.");
   return callPoizon(
     POIZON_API.cancelListing,
-    { listingNos },
-    { schema: zCancelResult, ...opts }
+    { sellerBiddingNo },
+    { schema: zBoolResult, ...opts }
   );
 }
 
-// ── Seller Authorization (Access Token 발급) 스캐폴드 ────
-// 승인 후 OAuth 흐름: 인증 URL로 판매자 동의 → callback(code) → 토큰 교환.
-//   Callback: https://lumiriz.kr/api/poizon/callback (라우트 별도 배선 필요)
-//   ⚠️ authorize/token 엔드포인트·파라미터는 문서 확정 후 채움.
+// ── Seller Authorization (OAuth2 authorization_code) ────
+// ✅확정 흐름(ERP/ISV, authorization_code grant):
+//   1) 인증 페이지 /authorize 로 판매자 로그인·동의 → redirect_uri?code=...&state=...
+//   2) POST /api/v1/h5/passport/v1/oauth2/token (JSON) → access_token/refresh_token
+//   3) POST /api/v1/h5/passport/v1/oauth2/refresh_token 로 갱신
+//   ※ 토큰 교환/갱신은 sign 불필요 — client_id(appKey)+client_secret(appSecret) 직접.
+//   Callback: https://lumiriz.kr/api/poizon/callback (라우트 배선 필요)
 export const POIZON_OAUTH = {
-  authorize: "/dop/oauth/authorize", // 추정
-  token: "/dop/oauth/token", // 추정
-  redirectUri: "https://lumiriz.kr/api/poizon/callback",
+  authorize: "/authorize", // ✅ 확인 (호스트 루트)
+  token: "/api/v1/h5/passport/v1/oauth2/token", // ✅ 확인
+  refreshToken: "/api/v1/h5/passport/v1/oauth2/refresh_token", // ✅ 확인
 };
 
-/** 판매자 인증 동의 URL 생성(리다이렉트용). */
+/**
+ * OAuth redirect_uri — 앱 콘솔의 Redirect URL과 정확히 일치해야 함.
+ *   기본값: https://lumiriz.kr/api/poizon/callback (우리 콜백 라우트)
+ *   콘솔이 다른 값만 허용하면 env POIZON_REDIRECT_URI로 덮어쓰기(코드 수정 불필요).
+ */
+export function redirectUri(): string {
+  return process.env.POIZON_REDIRECT_URI || "https://lumiriz.kr/api/poizon/callback";
+}
+
+/** 판매자 인증 동의 URL 생성(리다이렉트용). scope=all 고정, redirect_uri는 encodeURIComponent. */
 export function buildAuthorizeUrl(state = ""): string | null {
   const appKey = process.env.POIZON_APP_KEY;
   if (!appKey) return null;
   const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
-  const qs = new URLSearchParams({
-    app_key: appKey,
-    redirect_uri: POIZON_OAUTH.redirectUri,
-    response_type: "code",
-    ...(state ? { state } : {}),
-  }).toString();
-  return `${base}${POIZON_OAUTH.authorize}?${qs}`;
+  const parts = [
+    `response_type=code`,
+    `client_id=${encodeURIComponent(appKey)}`,
+    `redirect_uri=${encodeURIComponent(redirectUri())}`,
+    `scope=all`,
+    ...(state ? [`state=${encodeURIComponent(state)}`] : []),
+  ];
+  return `${base}${POIZON_OAUTH.authorize}?${parts.join("&")}`;
 }
 
-/**
- * OAuth code → Access Token 교환(스캐폴드).
- * 반환 토큰은 서버가 .env/보안저장소에 반영해야 함(여기서 저장하지 않음).
- * ⚠️ token 엔드포인트/파라미터/응답은 문서 확정 후 수정.
- */
-export async function exchangeCodeForToken(
-  code: string,
-  timestampMs = Date.now()
-): Promise<{ accessToken: string; expiresAt: number | null; raw: unknown }> {
-  const appKey = process.env.POIZON_APP_KEY;
-  const appSecret = process.env.POIZON_APP_SECRET;
-  if (!appKey || !appSecret)
+export interface OAuthTokens {
+  accessToken: string;
+  accessTokenExpiresAt: number | null; // epoch ms
+  refreshToken: string | null;
+  refreshTokenExpiresAt: number | null;
+  openId: string | null;
+  raw: unknown;
+}
+
+// 토큰 응답(교환·갱신 공통) 파싱.
+function parseTokenResponse(json: any, now: number): OAuthTokens {
+  const d = json?.data ?? {};
+  const at = d.access_token;
+  if (!at) {
     throw new PoizonApiError(
-      "MISSING_CREDENTIALS",
-      "토큰 교환에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+      json?.code ?? "TOKEN_FAIL",
+      friendlyError(200, json?.code, String(json?.msg ?? "토큰 응답에 access_token 없음")),
+      json
     );
-  const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
-  const params: Record<string, string | number> = {
-    app_key: appKey,
-    code,
-    grant_type: "authorization_code",
-    redirect_uri: POIZON_OAUTH.redirectUri,
-    timestamp: timestampMs,
+  }
+  const atExp = Number(d.access_token_expires_in ?? 0);
+  const rtExp = Number(d.refresh_token_expires_in ?? 0);
+  return {
+    accessToken: String(at),
+    accessTokenExpiresAt: atExp > 0 ? now + atExp * 1000 : null,
+    refreshToken: d.refresh_token ? String(d.refresh_token) : null,
+    refreshTokenExpiresAt: rtExp > 0 ? now + rtExp * 1000 : null,
+    openId: d.open_id ? String(d.open_id) : null,
+    raw: json,
   };
-  const signed = { ...params, sign: sign(params, appSecret) };
-  const qs = new URLSearchParams(
-    Object.entries(signed).map(([k, v]) => [k, String(v)])
-  ).toString();
+}
+
+async function postJson(path: string, body: Record<string, unknown>, now: number) {
+  const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
   let res: Response;
   try {
-    res = await fetch(`${base}${POIZON_OAUTH.token}?${qs}`, {
+    res = await fetch(`${base}${path}`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
   } catch (e: any) {
-    throw new PoizonApiError("NETWORK", `토큰 교환 연결 실패: ${e?.message ?? e}`);
+    throw new PoizonApiError("NETWORK", `토큰 요청 연결 실패: ${e?.message ?? e}`);
   }
   const text = await res.text().catch(() => "");
   let json: any = null;
@@ -461,20 +676,63 @@ export async function exchangeCodeForToken(
   } catch {
     /* noop */
   }
-  const token = json?.data?.accessToken ?? json?.access_token ?? json?.data?.access_token;
-  if (!res.ok || !token) {
+  const code = json?.code ?? res.status;
+  const ok = res.ok && (code === 200 || code === "200" || code == null);
+  if (!ok) {
     throw new PoizonApiError(
-      json?.code ?? res.status,
-      friendlyError(res.status, json?.code, String(json?.msg ?? text ?? "토큰 교환 실패")),
+      code,
+      friendlyError(res.status, code, String(json?.msg ?? text ?? "토큰 요청 실패")),
       json ?? text
     );
   }
-  const expiresIn = Number(json?.data?.expiresIn ?? json?.expires_in ?? 0);
-  return {
-    accessToken: String(token),
-    expiresAt: expiresIn > 0 ? timestampMs + expiresIn * 1000 : null,
-    raw: json,
-  };
+  return parseTokenResponse(json, now);
+}
+
+/**
+ * OAuth authorization_code → Access/Refresh Token 교환.
+ *   POST /api/v1/h5/passport/v1/oauth2/token
+ *   바디 { client_id, client_secret, authorization_code } (JSON, sign 불필요).
+ * 반환 토큰은 서버가 .env/보안저장소에 반영해야 함(여기서 저장하지 않음).
+ */
+export async function exchangeCodeForToken(
+  code: string,
+  now: number = Date.now()
+): Promise<OAuthTokens> {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret)
+    throw new PoizonApiError(
+      "MISSING_CREDENTIALS",
+      "토큰 교환에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+    );
+  return postJson(
+    POIZON_OAUTH.token,
+    { client_id: appKey, client_secret: appSecret, authorization_code: code },
+    now
+  );
+}
+
+/**
+ * Refresh Token으로 Access Token 갱신(유효기간 내).
+ *   POST /api/v1/h5/passport/v1/oauth2/refresh_token
+ *   바디 { client_id, client_secret, refresh_token }.
+ */
+export async function refreshAccessToken(
+  refreshToken: string,
+  now: number = Date.now()
+): Promise<OAuthTokens> {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret)
+    throw new PoizonApiError(
+      "MISSING_CREDENTIALS",
+      "토큰 갱신에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+    );
+  return postJson(
+    POIZON_OAUTH.refreshToken,
+    { client_id: appKey, client_secret: appSecret, refresh_token: refreshToken },
+    now
+  );
 }
 
 // ── 카탈로그 동기화용(기존) — SKU 기본정보 → 판매자 엑셀 행 형태 ──
@@ -539,4 +797,65 @@ export async function fetchSkuBasicInfo(
       };
     })
     .filter((r): r is SellerLikeRow => r !== null);
+}
+
+// ── 자가진단 (승인/토큰 후 各 인터페이스 "测试未通过"→통과 구동) ──
+// POIZON은 인터페이스별 성공 테스트 호출 1회를 요구한다. 자격증명이 채워지면
+// 이 함수로 읽기형 핵심 인터페이스를 실제 호출해 연결·서명·권한을 검증한다.
+//   쓰기형(입찰 제출/취소)은 파괴적이라 자동 실행하지 않고 '수동 확인' 표기.
+export interface SelfTestResult {
+  key: string;
+  interfaceName: string;
+  ok: boolean;
+  skipped: boolean;
+  message: string;
+}
+
+export async function selfTest(
+  sampleArticleNumber = "FJ4170-004"
+): Promise<{ ready: boolean; results: SelfTestResult[] }> {
+  const r = readiness();
+  const results: SelfTestResult[] = [];
+
+  const run = async (
+    key: string,
+    interfaceName: string,
+    fn: (() => Promise<unknown>) | null,
+    skipMsg?: string
+  ) => {
+    if (!r.ready) {
+      results.push({ key, interfaceName, ok: false, skipped: true, message: "자격증명 미설정 — 승인·토큰 후 실행" });
+      return;
+    }
+    if (!fn) {
+      results.push({ key, interfaceName, ok: false, skipped: true, message: skipMsg ?? "수동 확인 필요" });
+      return;
+    }
+    try {
+      await fn();
+      results.push({ key, interfaceName, ok: true, skipped: false, message: "OK — 연결·서명·권한 정상" });
+    } catch (e: any) {
+      const msg = e instanceof PoizonApiError ? e.message : String(e?.message ?? e);
+      results.push({ key, interfaceName, ok: false, skipped: false, message: msg });
+    }
+  };
+
+  // 읽기형(안전) — 실제 호출로 검증
+  await run("spuByArticleNumber", "Query SPU Basic Information by Article Number", () =>
+    querySpuByArticleNumber(sampleArticleNumber)
+  );
+  await run("listingList", "Simplified Bidding List Query", () =>
+    queryListingList({ pageSize: 1 })
+  );
+  // id 의존/쓰기형 — 자동 실행 보류
+  await run("spuByGlobalSpuId", "Query Spu Basic Information by globalSpuId", null,
+    "globalSpuId 필요 — 1번(Article Number) 결과의 id로 이어서 테스트");
+  await run("listingRecommendBatch", "(Get Lowest Price) Listing Recommendations - Batch", null,
+    "skuId 필요 — SPU 조회 결과로 테스트");
+  await run("submitAutoBid", "Submit Automatic Bidding", null,
+    "쓰기(입찰) — 실제 소량 페이로드로 통제된 상황에서 별도 확인");
+  await run("cancelListing", "Cancel Listing", null,
+    "쓰기(취소) — 실제 리스팅으로 별도 확인");
+
+  return { ready: r.ready, results };
 }

@@ -2056,3 +2056,27 @@ export const salesRecords = mysqlTable(
 
 export type SalesRecord = typeof salesRecords.$inferSelect;
 export type InsertSalesRecord = typeof salesRecords.$inferInsert;
+
+// ==================== POIZON OAuth 토큰 저장 ====================
+// Seller Authorization(authorization_code) 결과 저장. provider당 1행(단일 셀러 가정).
+//   access_token으로 API 호출, refresh_token으로 만료 전 자동 갱신.
+export const poizonOauthToken = mysqlTable(
+  "poizon_oauth_token",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    provider: varchar("provider", { length: 20 }).default("poizon").notNull(),
+    openId: varchar("open_id", { length: 64 }),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    accessExpiresAt: timestamp("access_expires_at", tsOpts), // 만료 시각(KST)
+    refreshExpiresAt: timestamp("refresh_expires_at", tsOpts),
+    scope: varchar("scope", { length: 60 }),
+    updatedAt: timestamp("updated_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    providerIdx: uniqueIndex("uq_poizon_oauth_provider").on(t.provider),
+  })
+);
+
+export type PoizonOauthToken = typeof poizonOauthToken.$inferSelect;
+export type InsertPoizonOauthToken = typeof poizonOauthToken.$inferInsert;

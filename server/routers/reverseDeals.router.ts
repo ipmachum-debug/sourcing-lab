@@ -22,7 +22,13 @@ import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
 import { cleanSizeLabel, krMmOf } from "../lib/sizeMatch";
-import { isConfigured as poizonApiConfigured, readiness as poizonReadiness } from "../lib/poizonApi";
+import {
+  isConfigured as poizonApiConfigured,
+  readiness as poizonReadiness,
+  selfTest as poizonSelfTest,
+} from "../lib/poizonApi";
+import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
+import { invokeLLM } from "../_core/llm";
 import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
@@ -1275,6 +1281,31 @@ export const reverseDealsRouter = router({
           }))
           .sort((a, b) => b.profit - a.profit || Number(b.unbid) - Number(a.unbid))
           .slice(0, 5);
+
+        // ── 위험 별점(0~5) + 종합 등급 ─────────────────────
+        //   판매량·가격안정·가품위험·사이즈위험을 별점화 → A+~D. (데이터 기반 근사)
+        const minP = g.prices.length ? Math.min(...g.prices) : avgUsd;
+        const maxP = g.prices.length ? Math.max(...g.prices) : avgUsd;
+        const demandStars =
+          g.soldMax >= 1000 ? 5 : g.soldMax >= 300 ? 4 : g.soldMax >= 100 ? 3 : g.soldMax >= 30 ? 2 : g.soldMax >= 5 ? 1 : 0;
+        const spread = avgUsd > 0 ? (maxP - minP) / avgUsd : 1;
+        const stabilityStars =
+          spread <= 0.15 ? 5 : spread <= 0.3 ? 4 : spread <= 0.5 ? 3 : spread <= 0.8 ? 2 : 1;
+        // 가품위험: 최저가가 대표가 대비 과도히 낮으면 의심(별점↓). 완만하면 안전(별점↑).
+        const dip = avgUsd > 0 ? (avgUsd - minP) / avgUsd : 0;
+        const authStars = dip <= 0.2 ? 5 : dip <= 0.35 ? 4 : dip <= 0.5 ? 3 : dip <= 0.7 ? 2 : 1;
+        // 사이즈위험: 유동(신뢰) 사이즈가 많을수록 안전.
+        const liqSizes = reliable.length;
+        const sizeStars =
+          liqSizes >= 8 ? 5 : liqSizes >= 5 ? 4 : liqSizes >= 3 ? 3 : liqSizes >= 2 ? 2 : 1;
+        const avgStars = (demandStars * 1.2 + stabilityStars + authStars + sizeStars) / 4.2;
+        const grade =
+          avgStars >= 4.6 ? "A+" : avgStars >= 4.0 ? "A" : avgStars >= 3.2 ? "B" : avgStars >= 2.4 ? "C" : "D";
+        const scores = {
+          demand: demandStars, stability: stabilityStars,
+          authenticity: authStars, size: sizeStars, grade,
+        };
+
         return {
           normKey: g.normKey, brand: g.brand, productName: g.name, category: g.category,
           soldCount: g.soldMax, avgUsd,
@@ -1282,7 +1313,7 @@ export const reverseDealsRouter = router({
           highUsd: g.prices.length ? Math.max(...g.prices) : 0,
           sizeCount: g.sizes.size,
           profitUsd, minProfitUsd, bestProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
-          riskScore, safe, blue, risk: riskFlag, bidRec, recommendBidUsd, bestSizes,
+          riskScore, safe, blue, risk: riskFlag, bidRec, recommendBidUsd, bestSizes, scores,
         };
       });
 
@@ -1477,18 +1508,124 @@ export const reverseDealsRouter = router({
 
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
-  openApiStatus: protectedProcedure.query(() => {
+  openApiStatus: protectedProcedure.query(async () => {
     const r = poizonReadiness();
+    const stored = await poizonStoredInfo().catch(() => null);
+    // 실사용 가능 = appKey/secret 있고 + (env 토큰 || DB 저장 토큰)
+    const hasToken = r.accessToken || !!stored?.hasToken;
+    const ready = r.appKey && r.appSecret && hasToken;
     return {
       configured: poizonApiConfigured(),
-      readiness: r, // { appKey, appSecret, accessToken, ready }
-      note: r.ready
-        ? "POIZON Open API 자격증명 확인됨 — 클라이언트 가동 준비 완료(핵심 5 + 확장). URL·서명은 문서 기준 최종 검증 필요."
-        : r.accessToken
-          ? "Access Token 확인됨. App Key/Secret 상태 점검 필요."
-          : "Default 패키지 심사 대기(已申请). 클라이언트 코드는 준비 완료 — 승인 후 Seller Authorization으로 Access Token만 발급해 POIZON_ACCESS_TOKEN에 넣으면 가동.",
+      readiness: { ...r, hasStoredToken: !!stored?.hasToken, ready },
+      storedToken: stored, // { hasToken, openId, accessExpiresAt, accessExpired, ... }
+      note: ready
+        ? "POIZON Open API 가동 준비 완료 — 서명 검증 통과, 토큰 확보. 자가진단으로 각 인터페이스 확인 가능."
+        : r.appKey && r.appSecret
+          ? "App Key/Secret 확인됨. Access Token 필요 — /api/poizon/authorize 로 Seller Authorization 진행."
+          : "Default 패키지 심사 대기(已申请). 승인 후 Seller Authorization으로 원클릭 토큰 발급 → 즉시 가동.",
     };
   }),
+
+  // ===== POIZON API 자가진단 =====
+  // 승인·토큰 후 실행 → 각 인터페이스 연결·서명·권한 검증(测试未通过→통과 구동).
+  //   자격증명 없으면 모두 skipped로 안전 반환(외부 호출 없음).
+  poizonSelfTest: protectedProcedure
+    .input(z.object({ sampleArticleNumber: z.string().max(64).optional() }).optional())
+    .mutation(async ({ input }) => {
+      return poizonSelfTest(input?.sampleArticleNumber || undefined);
+    }),
+
+  // ===== AI 추천 이유 (on-demand) =====
+  // 상품 지표를 근거로 "왜 사야/사지 말아야 하는지 + 몇 개" 한 줄 판단을 생성.
+  //   숫자는 클라이언트가 계산한 발굴 지표를 그대로 전달(환각 방지: 주어진 값만 사용).
+  aiReason: protectedProcedure
+    .input(
+      z.object({
+        productName: z.string().max(300),
+        brand: z.string().max(100).optional(),
+        category: z.string().max(40).optional(),
+        soldCount: z.number(),
+        avgUsd: z.number(),
+        profitUsd: z.number().nullable().optional(),
+        marginPct: z.number().nullable().optional(),
+        localSeller: z.number().optional(),
+        grade: z.string().max(3).optional(),
+        riskScore: z.number().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const comp =
+        input.localSeller == null
+          ? "미상"
+          : input.localSeller === 0
+            ? "현지 경쟁자 없음"
+            : `현지 판매자 ${input.localSeller}`;
+      const facts = [
+        `상품: ${input.brand ? input.brand + " " : ""}${input.productName}`,
+        input.category ? `카테고리: ${input.category}` : "",
+        `30일 판매량: ${input.soldCount.toLocaleString()}`,
+        `POIZON 시세: $${Math.round(input.avgUsd)}`,
+        input.profitUsd != null ? `예상 정산: $${Math.round(input.profitUsd)}` : "",
+        input.marginPct != null ? `국내 매입 기준 마진: ${input.marginPct.toFixed(0)}%` : "국내 매입가 미확보",
+        `경쟁: ${comp}`,
+        input.grade ? `종합 등급: ${input.grade}` : "",
+        input.riskScore != null ? `위험 점수(높을수록 위험): ${input.riskScore}` : "",
+      ].filter(Boolean).join("\n");
+
+      const prompt = `당신은 POIZON 역직구(국내 매입 → POIZON 판매) 소싱 코치입니다.
+아래 상품 지표만 근거로, 판매자가 지금 이 상품을 매입할지 판단해 주세요.
+주어진 숫자 밖의 사실을 지어내지 마세요. 한국어로 간결하게.
+
+지표:
+${facts}
+
+다음 JSON만 출력:
+{
+  "verdict": "추천" | "주의" | "관망",
+  "headline": "한 줄 결론(20자 내외)",
+  "bullets": ["근거 2~3개, 각 20자 내외(숫자 포함)"],
+  "qtyHint": "매입 수량 힌트(예: '소량 5~10개부터' 또는 '' )"
+}`;
+
+      const fallback = () => {
+        const good = input.soldCount >= 100 && (input.marginPct == null || input.marginPct >= 25);
+        const bad = input.soldCount < 10 || (input.marginPct != null && input.marginPct < 10);
+        const verdict = bad ? "주의" : good ? "추천" : "관망";
+        const bullets = [
+          `30일 판매 ${input.soldCount.toLocaleString()}`,
+          input.marginPct != null ? `마진 ${input.marginPct.toFixed(0)}%` : `시세 $${Math.round(input.avgUsd)}`,
+          input.localSeller === 0 ? "현지 경쟁 없음" : comp,
+        ];
+        return {
+          verdict,
+          headline: verdict === "추천" ? "수요·마진 양호" : verdict === "주의" ? "수요/마진 부족" : "지표 애매",
+          bullets,
+          qtyHint: verdict === "추천" ? "소량부터 시작" : "",
+          source: "rule" as const,
+        };
+      };
+
+      try {
+        const res = await invokeLLM({
+          messages: [
+            { role: "system", content: "역직구 소싱 코치. 반드시 유효한 JSON만 응답." },
+            { role: "user", content: prompt },
+          ],
+        });
+        const raw = res.choices?.[0]?.message?.content;
+        const text = (typeof raw === "string" ? raw : "").replace(/```json\n?|```/g, "").trim();
+        const p = JSON.parse(text);
+        return {
+          verdict: String(p.verdict ?? "관망").slice(0, 4),
+          headline: String(p.headline ?? "").slice(0, 60),
+          bullets: Array.isArray(p.bullets) ? p.bullets.slice(0, 4).map((b: any) => String(b).slice(0, 60)) : [],
+          qtyHint: String(p.qtyHint ?? "").slice(0, 60),
+          source: "ai" as const,
+        };
+      } catch {
+        return fallback();
+      }
+    }),
 
   // ===== 브랜드 대시보드 (ERP 진입점) =====
   // 카탈로그를 브랜드 단위로 롤업: 총상품(SPU)·총판매량·대표 시세·평균 정산·추천/주의 수.
