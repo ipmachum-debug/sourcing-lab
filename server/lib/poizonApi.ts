@@ -540,3 +540,64 @@ export async function fetchSkuBasicInfo(
     })
     .filter((r): r is SellerLikeRow => r !== null);
 }
+
+// ── 자가진단 (승인/토큰 후 各 인터페이스 "测试未通过"→통과 구동) ──
+// POIZON은 인터페이스별 성공 테스트 호출 1회를 요구한다. 자격증명이 채워지면
+// 이 함수로 읽기형 핵심 인터페이스를 실제 호출해 연결·서명·권한을 검증한다.
+//   쓰기형(입찰 제출/취소)은 파괴적이라 자동 실행하지 않고 '수동 확인' 표기.
+export interface SelfTestResult {
+  key: string;
+  interfaceName: string;
+  ok: boolean;
+  skipped: boolean;
+  message: string;
+}
+
+export async function selfTest(
+  sampleArticleNumber = "FJ4170-004"
+): Promise<{ ready: boolean; results: SelfTestResult[] }> {
+  const r = readiness();
+  const results: SelfTestResult[] = [];
+
+  const run = async (
+    key: string,
+    interfaceName: string,
+    fn: (() => Promise<unknown>) | null,
+    skipMsg?: string
+  ) => {
+    if (!r.ready) {
+      results.push({ key, interfaceName, ok: false, skipped: true, message: "자격증명 미설정 — 승인·토큰 후 실행" });
+      return;
+    }
+    if (!fn) {
+      results.push({ key, interfaceName, ok: false, skipped: true, message: skipMsg ?? "수동 확인 필요" });
+      return;
+    }
+    try {
+      await fn();
+      results.push({ key, interfaceName, ok: true, skipped: false, message: "OK — 연결·서명·권한 정상" });
+    } catch (e: any) {
+      const msg = e instanceof PoizonApiError ? e.message : String(e?.message ?? e);
+      results.push({ key, interfaceName, ok: false, skipped: false, message: msg });
+    }
+  };
+
+  // 읽기형(안전) — 실제 호출로 검증
+  await run("spuByArticleNumber", "Query SPU Basic Information by Article Number", () =>
+    querySpuByArticleNumber(sampleArticleNumber)
+  );
+  await run("listingList", "Query listing list (Simplified Version)", () =>
+    queryListingList({ pageNum: 1, pageSize: 1 })
+  );
+  // id 의존/쓰기형 — 자동 실행 보류
+  await run("spuByGlobalSpuId", "Query Spu Basic Information by globalSpuId", null,
+    "globalSpuId 필요 — 1번(Article Number) 결과의 id로 이어서 테스트");
+  await run("listingRecommendBatch", "(Get Lowest Price) Listing Recommendations - Batch", null,
+    "skuId 필요 — SPU 조회 결과로 테스트");
+  await run("submitAutoBid", "Submit Automatic Bidding", null,
+    "쓰기(입찰) — 실제 소량 페이로드로 통제된 상황에서 별도 확인");
+  await run("cancelListing", "Cancel Listing", null,
+    "쓰기(취소) — 실제 리스팅으로 별도 확인");
+
+  return { ready: r.ready, results };
+}

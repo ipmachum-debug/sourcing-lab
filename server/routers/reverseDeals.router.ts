@@ -22,7 +22,11 @@ import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
 import { cleanSizeLabel, krMmOf } from "../lib/sizeMatch";
-import { isConfigured as poizonApiConfigured, readiness as poizonReadiness } from "../lib/poizonApi";
+import {
+  isConfigured as poizonApiConfigured,
+  readiness as poizonReadiness,
+  selfTest as poizonSelfTest,
+} from "../lib/poizonApi";
 import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
@@ -1489,6 +1493,15 @@ export const reverseDealsRouter = router({
           : "Default 패키지 심사 대기(已申请). 클라이언트 코드는 준비 완료 — 승인 후 Seller Authorization으로 Access Token만 발급해 POIZON_ACCESS_TOKEN에 넣으면 가동.",
     };
   }),
+
+  // ===== POIZON API 자가진단 =====
+  // 승인·토큰 후 실행 → 각 인터페이스 연결·서명·권한 검증(测试未通过→통과 구동).
+  //   자격증명 없으면 모두 skipped로 안전 반환(외부 호출 없음).
+  poizonSelfTest: protectedProcedure
+    .input(z.object({ sampleArticleNumber: z.string().max(64).optional() }).optional())
+    .mutation(async ({ input }) => {
+      return poizonSelfTest(input?.sampleArticleNumber || undefined);
+    }),
 
   // ===== 브랜드 대시보드 (ERP 진입점) =====
   // 카탈로그를 브랜드 단위로 롤업: 총상품(SPU)·총판매량·대표 시세·평균 정산·추천/주의 수.
