@@ -197,18 +197,44 @@ export interface CallOpts<T> {
  *   - schema 주면 응답 data를 Zod 검증해 타입 보장.
  * 자격증명 없으면 즉시 실패(placeholder 데이터 반환 금지).
  */
+/** access_token 해석: DB 저장 토큰(자동갱신) 우선 → env 폴백. */
+async function resolveAccessTokenFor(): Promise<string> {
+  try {
+    const store = await import("./poizonTokenStore");
+    const t = await store.resolveAccessToken();
+    if (t) return t;
+  } catch {
+    // DB 미연결/스토어 오류 → env 폴백
+  }
+  return process.env.POIZON_ACCESS_TOKEN || "";
+}
+
 export async function callPoizon<T = unknown>(
   ep: { path: string; method: string },
   bizParams: Record<string, unknown>,
   opts: CallOpts<T> = {}
 ): Promise<T> {
-  const cfg = readConfig();
-  if (!cfg) {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret) {
     throw new PoizonApiError(
       "MISSING_CREDENTIALS",
-      "POIZON 자격증명 미설정 — POIZON_APP_KEY/POIZON_APP_SECRET/POIZON_ACCESS_TOKEN 필요. (App Secret·Token은 서버 .env에만)"
+      "POIZON_APP_KEY/POIZON_APP_SECRET 미설정 — 서버 .env에 설정 필요."
     );
   }
+  const accessToken = await resolveAccessTokenFor();
+  if (!accessToken) {
+    throw new PoizonApiError(
+      "MISSING_TOKEN",
+      "Access Token 없음 — Seller Authorization(/api/poizon/authorize)으로 발급하세요."
+    );
+  }
+  const cfg: PoizonApiConfig = {
+    appKey,
+    appSecret,
+    accessToken,
+    base: process.env.POIZON_API_BASE || "https://open.poizon.com",
+  };
   const timestamp = opts.timestampMs ?? Date.now();
   const auth = authParamsOf(cfg, timestamp);
   // ★ 서명은 인증+비즈니스 전체 파라미터 위에서 계산(공식 Step 4).

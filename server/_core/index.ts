@@ -265,6 +265,48 @@ async function startServer() {
     });
   });
 
+  // ===== POIZON Seller Authorization (OAuth2) =====
+  // 1) /api/poizon/authorize → POIZON 인증 페이지로 리다이렉트
+  app.get("/api/poizon/authorize", async (req, res) => {
+    const { buildAuthorizeUrl } = await import("../lib/poizonApi");
+    const url = buildAuthorizeUrl(String(req.query.state || ""));
+    if (!url) {
+      res.status(400).send("POIZON_APP_KEY 미설정 — 서버 .env를 확인하세요.");
+      return;
+    }
+    res.redirect(url);
+  });
+  // 2) /api/poizon/callback?code=... → 토큰 교환 후 DB 저장
+  app.get("/api/poizon/callback", async (req, res) => {
+    const code = String(req.query.code || "");
+    if (!code) {
+      res.status(400).send("인증 코드(code)가 없습니다.");
+      return;
+    }
+    try {
+      const { exchangeCodeForToken } = await import("../lib/poizonApi");
+      const { saveTokens } = await import("../lib/poizonTokenStore");
+      const tokens = await exchangeCodeForToken(code);
+      await saveTokens(tokens);
+      res.send(
+        `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;display:flex;min-height:90vh;align-items:center;justify-content:center;text-align:center">
+         <div><h2 style="color:#4ade80">✅ POIZON 인증 완료</h2>
+         <p>Access Token이 저장되었습니다. 이제 자동 입찰·조회 API를 사용할 수 있습니다.</p>
+         <p style="color:#94a3b8;font-size:13px">만료: 약 1년 · 자동 갱신됨${tokens.openId ? ` · openId ${tokens.openId}` : ""}</p>
+         <a href="/reverse" style="color:#a78bfa">← 역직구 홈으로</a></div></body>`
+      );
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      res
+        .status(502)
+        .send(
+          `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:40px">
+           <h2 style="color:#f87171">❌ 토큰 교환 실패</h2><p>${msg}</p>
+           <a href="/api/poizon/authorize" style="color:#a78bfa">다시 시도</a></body>`
+        );
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",

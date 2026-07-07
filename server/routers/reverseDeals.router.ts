@@ -27,6 +27,7 @@ import {
   readiness as poizonReadiness,
   selfTest as poizonSelfTest,
 } from "../lib/poizonApi";
+import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
 import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
@@ -1481,16 +1482,21 @@ export const reverseDealsRouter = router({
 
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
-  openApiStatus: protectedProcedure.query(() => {
+  openApiStatus: protectedProcedure.query(async () => {
     const r = poizonReadiness();
+    const stored = await poizonStoredInfo().catch(() => null);
+    // 실사용 가능 = appKey/secret 있고 + (env 토큰 || DB 저장 토큰)
+    const hasToken = r.accessToken || !!stored?.hasToken;
+    const ready = r.appKey && r.appSecret && hasToken;
     return {
       configured: poizonApiConfigured(),
-      readiness: r, // { appKey, appSecret, accessToken, ready }
-      note: r.ready
-        ? "POIZON Open API 자격증명 확인됨 — 클라이언트 가동 준비 완료(핵심 5 + 확장). URL·서명은 문서 기준 최종 검증 필요."
-        : r.accessToken
-          ? "Access Token 확인됨. App Key/Secret 상태 점검 필요."
-          : "Default 패키지 심사 대기(已申请). 클라이언트 코드는 준비 완료 — 승인 후 Seller Authorization으로 Access Token만 발급해 POIZON_ACCESS_TOKEN에 넣으면 가동.",
+      readiness: { ...r, hasStoredToken: !!stored?.hasToken, ready },
+      storedToken: stored, // { hasToken, openId, accessExpiresAt, accessExpired, ... }
+      note: ready
+        ? "POIZON Open API 가동 준비 완료 — 서명 검증 통과, 토큰 확보. 자가진단으로 각 인터페이스 확인 가능."
+        : r.appKey && r.appSecret
+          ? "App Key/Secret 확인됨. Access Token 필요 — /api/poizon/authorize 로 Seller Authorization 진행."
+          : "Default 패키지 심사 대기(已申请). 승인 후 Seller Authorization으로 원클릭 토큰 발급 → 즉시 가동.",
     };
   }),
 
