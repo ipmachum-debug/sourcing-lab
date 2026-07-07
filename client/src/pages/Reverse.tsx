@@ -120,6 +120,49 @@ function WatchlistAlerts() {
   );
 }
 
+// 종합 관제 대시보드 — 소싱(브랜드·카탈로그·추천) + 운영(매입·순익·회전) 한눈에.
+function CommandDeck() {
+  const brand = trpc.reverseDeals.brandDashboard.useQuery({ limit: 1 }, { refetchOnWindowFocus: false });
+  const stats = trpc.reversePurchase.stats.useQuery(undefined, { refetchOnWindowFocus: false });
+  const bt = brand.data?.totals as { brands: number; spuCount: number; totalSold: number; recCount: number } | undefined;
+  const st = stats.data as
+    | { total: number; buyAmount: number; soldCount: number; netProfit: number; avgTurnDays: number | null }
+    | undefined;
+  const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
+  const num = (n: number) => Math.round(n || 0).toLocaleString("ko-KR");
+  const tiles: { emoji: string; label: string; value: string; href: string; tone?: string }[] = [
+    { emoji: "🏷", label: "브랜드", value: bt ? num(bt.brands) : "…", href: "/reverse/brands" },
+    { emoji: "📦", label: "카탈로그 상품", value: bt ? num(bt.spuCount) : "…", href: "/reverse/insights" },
+    { emoji: "⭐", label: "입찰 추천", value: bt ? num(bt.recCount) : "…", href: "/reverse/queue", tone: "hunt" },
+    { emoji: "🛒", label: "매입 건수", value: st ? num(st.total) : "…", href: "/reverse/purchases" },
+    { emoji: "💵", label: "누적 순익", value: st ? won(st.netProfit) : "…", href: "/reverse/purchases", tone: "deal" },
+    { emoji: "🔄", label: "평균 회전일", value: st?.avgTurnDays != null ? `${st.avgTurnDays}일` : "-", href: "/reverse/purchases" },
+  ];
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <BarChart3 className="h-4 w-4 text-fuchsia-300" />
+        <h2 className="text-sm font-semibold text-slate-100 tracking-wide">오늘의 관제</h2>
+        <span className="text-[11px] text-slate-500">소싱 → 매입 → 판매 한눈에</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {tiles.map(t => (
+          <Link
+            key={t.label}
+            href={t.href}
+            className="glass rounded-xl p-3 hover:ring-1 hover:ring-fuchsia-400/30 transition-all"
+          >
+            <p className="text-[11px] text-slate-400">{t.emoji} {t.label}</p>
+            <p className={`text-xl font-black mt-1 ${t.tone === "deal" ? "text-emerald-300" : t.tone === "hunt" ? "text-fuchsia-200" : "text-white"}`}>
+              {t.value}
+            </p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const STEPS = [
   { n: 1, title: "카탈로그 확보", desc: "판매자 엑셀로 뭐가·얼마에 팔리나 시딩" },
   { n: 2, title: "국내가 발굴", desc: "소싱 큐에서 국내 싸게 살 곳 찾기" },
@@ -150,6 +193,9 @@ export default function Reverse() {
               <Sparkles className="h-3.5 w-3.5" /> 새 채널 · 도구 순차 오픈 중
             </span>
           </div>
+
+          {/* 종합 관제 대시보드 */}
+          <CommandDeck />
 
           {/* 워치리스트 알림 (앱 메인 표시) */}
           <WatchlistAlerts />
