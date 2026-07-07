@@ -53,13 +53,27 @@ describe("computeProfit", () => {
     // 매입 34,900원 / 안정가 $60 @1350 = 81,000원 매출 (중국시장 달러 기준)
     const p = computeProfit(34900, 60, DEFAULT_COST);
     expect(p.revenueKrw).toBe(81000);
-    // 수수료 6%(판매 5%+결제 1%) + 환전 1.5% + 검수 3% + 배송 5000 + 포장 1000
-    expect(p.feeKrw).toBe(Math.round(81000 * 0.06));
+    // 10% = 8,100 < 최소 15,000 → 최소 수수료 적용(저가 타격)
+    expect(p.feeKrw).toBe(15000);
+    expect(p.feeFloorHit).toBe(true);
+    expect(p.lowPrice).toBe(true); // 판매가 15만원 이하
+    // 부가세 환급 = 매입가 ÷ 11
+    expect(p.vatRefundKrw).toBe(Math.round(34900 / 11));
     expect(p.deductKrw).toBe(
       p.feeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
     );
-    expect(p.netProfitKrw).toBe(81000 - 34900 - p.deductKrw);
+    // 순이익 = 판매가 − 매입가 − 차감 + 부가세환급
+    expect(p.netProfitKrw).toBe(81000 - 34900 - p.deductKrw + p.vatRefundKrw);
     expect(p.marginPct).toBeCloseTo((p.netProfitKrw / 34900) * 100, 1);
+  });
+
+  it("applies category fee tier — 가방/액세서리 14% / 최소 18,000", () => {
+    // 판매가 40만원(=$296@1350): 신발 10%=40,000 vs 가방 14%=56,000→45,000 상한
+    const shoe = computeProfit(200000, 296, DEFAULT_COST, "신발");
+    const bag = computeProfit(200000, 296, DEFAULT_COST, "가방");
+    expect(shoe.feeKrw).toBe(Math.min(45000, Math.round(shoe.revenueKrw * 0.1)));
+    expect(bag.feeKrw).toBe(Math.min(45000, Math.round(bag.revenueKrw * 0.14)));
+    expect(bag.feeKrw).toBeGreaterThan(shoe.feeKrw);
   });
 
   it("guards divide-by-zero on 0 buy price", () => {

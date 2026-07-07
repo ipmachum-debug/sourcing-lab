@@ -248,6 +248,7 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
               {m.blue && <span className="text-cyan-400/80 ml-1">블루오션</span>}
               {m.safe && <span className="text-emerald-400/80 ml-1">안전</span>}
               {m.bidRec && <span className="text-fuchsia-300 ml-1">입찰추천</span>}
+              {m.avgUsd > 0 && m.avgUsd <= 111 && <span className="text-amber-400/80 ml-1" title="판매가 약 15만원 이하 — 최소 수수료 타격">저가주의</span>}
             </p>
           </button>
         </td>

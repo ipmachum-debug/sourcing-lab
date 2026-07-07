@@ -8,27 +8,33 @@ const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 // 서버 reverseProfit 엔진과 동일한 기본 코스트 (즉석 계산기 미러)
-// POIZON 판매 기준 시장=중국(득물) → 시세는 $. 정산은 원. rate=원/$, 환전손실 1.5%.
+// 수수료 = 판매가 × 10%, 단 최소 15,000 / 최대 45,000. 부가세 환급 = 매입가 ÷ 11.
 const DEFAULT_COST = {
   rate: 1350,
-  poizonFeePct: 6, // 판매 5% + 결제 1%
+  poizonFeePct: 10,
+  feeMinKrw: 15000,
+  feeMaxKrw: 45000,
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,
   inspectRiskPct: 3,
+  vatRefund: true,
 };
 type Cost = typeof DEFAULT_COST;
 
 // stableUsd = POIZON 안정 판매가($, 중국시장) → 매출(원) = $ × 환율
 function calcProfit(domesticBuyKrw: number, stableUsd: number, c: Cost) {
   const revenueKrw = Math.round(stableUsd * c.rate);
-  const feeKrw = Math.round((revenueKrw * c.poizonFeePct) / 100);
+  const rawFee = Math.round((revenueKrw * c.poizonFeePct) / 100);
+  const feeKrw = Math.min(c.feeMaxKrw, Math.max(c.feeMinKrw, rawFee));
+  const feeFloorHit = rawFee < c.feeMinKrw;
   const fxLossKrw = Math.round((revenueKrw * c.fxLossPct) / 100);
   const inspectRiskKrw = Math.round((revenueKrw * c.inspectRiskPct) / 100);
+  const vatRefundKrw = c.vatRefund ? Math.round(domesticBuyKrw / 11) : 0;
   const deductKrw = feeKrw + c.chinaShipKrw + fxLossKrw + c.packingKrw + inspectRiskKrw;
-  const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw;
+  const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw + vatRefundKrw;
   const marginPct = domesticBuyKrw > 0 ? Math.round((netProfitKrw / domesticBuyKrw) * 1000) / 10 : 0;
-  return { revenueKrw, deductKrw, netProfitKrw, marginPct };
+  return { revenueKrw, feeKrw, feeFloorHit, vatRefundKrw, deductKrw, netProfitKrw, marginPct, lowPrice: revenueKrw <= 150000 };
 }
 
 const GRADE_STYLE: Record<string, string> = {
@@ -46,7 +52,8 @@ const SOURCE_LABEL: Record<string, string> = {
 interface Deal {
   normKey: string; brand: string; productName: string; source: string; imageUrl: string | null;
   domesticBuyKrw: number; stableCny: number; avg30Cny: number; volume30: number; volatilityPct: number;
-  revenueKrw: number; deductKrw: number; netProfitKrw: number; marginPct: number;
+  revenueKrw: number; feeKrw: number; vatRefundKrw: number; deductKrw: number; netProfitKrw: number; marginPct: number;
+  lowPrice: boolean; feeFloorHit: boolean;
   grade: "A" | "B" | "C" | "D"; recommendQty: number; stars: number; hasObservations: boolean;
   matchType?: "exact" | "watchlist" | "fuzzy";
 }
@@ -131,9 +138,18 @@ export default function ReverseDeals() {
               )}
             </div>
             {calcRes && (
-              <p className="text-[11px] text-slate-500 mt-2">
-                매출 {won(calcRes.revenueKrw)} − 매입 {won(Number(calc.buy))} − 수수료·배송·포장·검수 {won(calcRes.deductKrw)} = <b className="text-slate-300">{won(calcRes.netProfitKrw)}</b>
-              </p>
+              <div className="text-[11px] text-slate-500 mt-2 space-y-1">
+                <p>
+                  매출 {won(calcRes.revenueKrw)} − 매입 {won(Number(calc.buy))} − 수수료·배송·검수 {won(calcRes.deductKrw)}
+                  {" "}+ 부가세환급 <b className="text-emerald-300/90">{won(calcRes.vatRefundKrw)}</b> = <b className="text-slate-300">{won(calcRes.netProfitKrw)}</b>
+                </p>
+                {calcRes.lowPrice && (
+                  <p className="text-amber-300 flex items-center gap-1">
+                    <Info className="h-3.5 w-3.5" /> 판매가 15만원 이하 — 최소 수수료 {won(cost.feeMinKrw)}
+                    {calcRes.feeFloorHit ? " 적용(마진 불리)" : " 근접"}. 저가 상품은 보수적으로.
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -154,14 +170,20 @@ export default function ReverseDeals() {
               </label>
             </div>
             {showSettings && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
-                <CostIn label="환율(원/$)" v={cost.rate} on={v => setCost({ ...cost, rate: v })} step={10} />
-                <CostIn label="수수료(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={0.5} />
-                <CostIn label="환전손실(%)" v={cost.fxLossPct} on={v => setCost({ ...cost, fxLossPct: v })} step={0.5} />
-                <CostIn label="배송비(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
-                <CostIn label="포장비(원)" v={cost.packingKrw} on={v => setCost({ ...cost, packingKrw: v })} step={500} />
-                <CostIn label="검수리스크(%)" v={cost.inspectRiskPct} on={v => setCost({ ...cost, inspectRiskPct: v })} step={0.5} />
-              </div>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
+                  <CostIn label="환율(원/$)" v={cost.rate} on={v => setCost({ ...cost, rate: v })} step={10} />
+                  <CostIn label="수수료율(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={1} />
+                  <CostIn label="최소수수료(원)" v={cost.feeMinKrw} on={v => setCost({ ...cost, feeMinKrw: v })} step={1000} />
+                  <CostIn label="최대수수료(원)" v={cost.feeMaxKrw} on={v => setCost({ ...cost, feeMaxKrw: v })} step={1000} />
+                  <CostIn label="배송비(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
+                  <CostIn label="검수리스크(%)" v={cost.inspectRiskPct} on={v => setCost({ ...cost, inspectRiskPct: v })} step={0.5} />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer mt-2">
+                  <input type="checkbox" checked={cost.vatRefund} onChange={e => setCost({ ...cost, vatRefund: e.target.checked })} className="accent-fuchsia-500" />
+                  부가세 환급 반영 (매입가 ÷ 11, 수출 영세율)
+                </label>
+              </>
             )}
           </div>
 
@@ -211,11 +233,20 @@ function DealCard({ d, rank }: { d: Deal; rank: number }) {
         <span className="text-[10px] text-slate-500 ml-1">{SOURCE_LABEL[d.source] ?? d.source}</span>
       </div>
 
+      {d.lowPrice && (
+        <div className="mt-2 flex items-center gap-1 text-[11px] text-amber-300 bg-amber-400/10 rounded-lg px-2 py-1">
+          <Info className="h-3.5 w-3.5 shrink-0" /> 판매가 15만원 이하 · {d.feeFloorHit ? "최소 수수료 적용" : "최소 수수료 근접"} — 보수적 판단
+        </div>
+      )}
+
       <div className="mt-3 space-y-1.5 text-sm">
         <Row label="국내 특가" value={won(d.domesticBuyKrw)} />
         <Row label="POIZON 안정가($)" value={<span className="text-fuchsia-200">{usd(d.stableCny)}</span>} />
         <Row label="매출 환산(원)" value={<span className="text-slate-300">{won(d.revenueKrw)}</span>} />
-        <Row label="예상 수수료·배송비" value={<span className="text-slate-400">−{won(d.deductKrw)}</span>} />
+        <Row label="수수료·배송·검수" value={<span className="text-slate-400">−{won(d.deductKrw)}</span>} />
+        {d.vatRefundKrw > 0 && (
+          <Row label="부가세 환급" value={<span className="text-emerald-300/90">+{won(d.vatRefundKrw)}</span>} />
+        )}
         <div className="border-t border-white/10 my-1.5" />
         <Row label="예상 순이익" value={<b className={d.netProfitKrw >= 0 ? "text-emerald-300" : "text-red-400"}>{won(d.netProfitKrw)}</b>} big />
         <Row label="마진율" value={<b className={d.marginPct >= 30 ? "text-emerald-300" : "text-amber-300"}>{d.marginPct.toFixed(1)}%</b>} />
