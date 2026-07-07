@@ -41,6 +41,7 @@ import ReverseDeals from "./pages/ReverseDeals";
 import ReverseImport from "./pages/ReverseImport";
 import ReverseSeller from "./pages/ReverseSeller";
 import ReverseQueue from "./pages/ReverseQueue";
+import ReverseBrands from "./pages/ReverseBrands";
 import ReverseInsights from "./pages/ReverseInsights";
 import ReverseGuide from "./pages/ReverseGuide";
 import ReverseMyProducts from "./pages/ReverseMyProducts";
@@ -74,6 +75,7 @@ function Router() {
       <Route path="/reverse/import" component={ReverseImport} />
       <Route path="/reverse/seller" component={ReverseSeller} />
       <Route path="/reverse/queue" component={ReverseQueue} />
+      <Route path="/reverse/brands" component={ReverseBrands} />
       <Route path="/reverse/insights" component={ReverseInsights} />
       <Route path="/reverse/guide" component={ReverseGuide} />
       <Route path="/reverse/my-products" component={ReverseMyProducts} />

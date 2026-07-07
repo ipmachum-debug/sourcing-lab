@@ -1485,4 +1485,117 @@ export const reverseDealsRouter = router({
         : "Phase 2: 엔드포인트·파라미터 확인됨(sku-basic-info/by-sku · skuIds · region=US). 남은 것 = POIZON_APP_KEY/SECRET/ACCESS_TOKEN 자격증명 + 공식 Sign Tool 서명 알고리즘 검증.",
     };
   }),
+
+  // ===== 브랜드 대시보드 (ERP 진입점) =====
+  // 카탈로그를 브랜드 단위로 롤업: 총상품(SPU)·총판매량·대표 시세·평균 정산·추천/주의 수.
+  //   상품 발굴이 '모델' 단위라면, 여기는 그 위 '브랜드' 단위 관제탑.
+  brandDashboard: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(80) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const limit = input?.limit ?? 80;
+
+      const obsAll = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          skuId: poizonSaleObservations.skuId,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+          expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+          bidAvailable: poizonSaleObservations.bidAvailable,
+          localSellerCount: poizonSaleObservations.localSellerCount,
+        })
+        .from(poizonSaleObservations)
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(60000);
+
+      // SKU 최신 스냅샷만
+      const seen = new Set<string>();
+      type O = (typeof obsAll)[number];
+      const obs: O[] = [];
+      for (const o of obsAll) {
+        const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        obs.push(o);
+      }
+
+      const median = (arr: number[]) => {
+        if (!arr.length) return 0;
+        const s = arr.slice().sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+
+      // SPU(상품) 묶음
+      type G = {
+        brand: string; prices: number[]; soldMax: number;
+        localMax: number; profits: number[]; bidAvail: number;
+      };
+      const groups = new Map<string, G>();
+      for (const o of obs) {
+        const gk = o.spuId || o.normKey;
+        const brand = (o.brand || detectBrand(o.productName) || "기타").trim() || "기타";
+        const g =
+          groups.get(gk) ??
+          ({ brand, prices: [], soldMax: 0, localMax: 0, profits: [], bidAvail: 0 } as G);
+        if (o.priceCny > 0) g.prices.push(o.priceCny);
+        if (o.expectedProfitUsd != null) g.profits.push(o.expectedProfitUsd);
+        g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
+        if (o.bidAvailable === true) g.bidAvail++;
+        groups.set(gk, g);
+      }
+
+      // 브랜드 집계 (추천/주의 판단은 상품 발굴과 동일 기준)
+      type B = {
+        brand: string; spuCount: number; totalSold: number;
+        prices: number[]; profits: number[]; recCount: number; riskCount: number;
+      };
+      const brands = new Map<string, B>();
+      for (const g of groups.values()) {
+        const repPrice = median(g.prices);
+        const repProfit = g.profits.length ? median(g.profits) : null;
+        const lowComp = g.localMax === 0 || (g.soldMax > 0 && g.localMax <= g.soldMax * 0.3);
+        const bidRec = (repProfit ?? 0) >= 20 && g.soldMax >= 10 && lowComp && g.bidAvail > 0;
+        const riskFlag = g.soldMax < 5 && repPrice > 0;
+        const b =
+          brands.get(g.brand) ??
+          ({ brand: g.brand, spuCount: 0, totalSold: 0, prices: [], profits: [], recCount: 0, riskCount: 0 } as B);
+        b.spuCount++;
+        b.totalSold += g.soldMax;
+        if (repPrice > 0) b.prices.push(repPrice);
+        if (repProfit != null) b.profits.push(repProfit);
+        if (bidRec) b.recCount++;
+        if (riskFlag) b.riskCount++;
+        brands.set(g.brand, b);
+      }
+
+      const list = [...brands.values()]
+        .map(b => ({
+          brand: b.brand,
+          spuCount: b.spuCount,
+          totalSold: b.totalSold,
+          medianUsd: median(b.prices),
+          avgProfitUsd: b.profits.length
+            ? Math.round(b.profits.reduce((a, x) => a + x, 0) / b.profits.length)
+            : null,
+          recCount: b.recCount,
+          riskCount: b.riskCount,
+        }))
+        .sort((a, b) => b.totalSold - a.totalSold)
+        .slice(0, limit);
+
+      const totals = {
+        brands: brands.size,
+        spuCount: groups.size,
+        totalSold: [...groups.values()].reduce((a, g) => a + g.soldMax, 0),
+        recCount: list.reduce((a, b) => a + b.recCount, 0),
+      };
+      return { brands: list, totals };
+    }),
 });

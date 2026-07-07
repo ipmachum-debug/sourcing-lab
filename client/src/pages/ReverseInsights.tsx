@@ -52,8 +52,13 @@ const FILTERS: { key: Filter; label: string; icon: any }[] = [
 ];
 
 export default function ReverseInsights() {
-  const [term, setTerm] = useState("");
-  const [search, setSearch] = useState("");
+  // 브랜드 관리에서 넘어온 ?brand= 로 초기 필터 (브랜드→모델 드릴다운)
+  const initBrand = (() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("brand") ?? "";
+  })();
+  const [term, setTerm] = useState(initBrand);
+  const [search, setSearch] = useState(initBrand);
   const [category, setCategory] = useState("전체");
   const [filter, setFilter] = useState<Filter>("all");
   const [openSize, setOpenSize] = useState<string | null>(null);
