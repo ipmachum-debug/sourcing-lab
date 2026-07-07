@@ -29,7 +29,7 @@ interface BestSize { size: string; profit: number; bid: number; price: number; b
 interface Model {
   normKey: string; brand: string; productName: string; category: string | null;
   soldCount: number; avgUsd: number; lowUsd: number; highUsd: number; sizeCount: number;
-  profitUsd: number | null; bestProfitUsd: number | null; lowestBidUsd: number | null; bidAvailCnt: number;
+  profitUsd: number | null; minProfitUsd: number | null; bestProfitUsd: number | null; lowestBidUsd: number | null; bidAvailCnt: number;
   unbidCnt: number; localSeller: number; riskScore: number;
   safe: boolean; blue: boolean; risk: boolean; bidRec: boolean;
   recommendBidUsd: number | null; bestSizes: BestSize[];
@@ -254,9 +254,13 @@ function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: bo
         <td className="text-right px-3 py-2.5 font-semibold text-emerald-300">{m.soldCount.toLocaleString()}</td>
         <td className="text-right px-3 py-2.5 text-fuchsia-200">{usd(m.avgUsd)}</td>
         <td className={`text-right px-3 py-2.5 ${(m.profitUsd ?? 0) > 0 ? "text-emerald-300" : "text-slate-500"}`}>
-          {usd(m.profitUsd)}
-          {m.bestProfitUsd != null && m.bestProfitUsd > (m.profitUsd ?? 0) && (
-            <span className="block text-[10px] text-slate-600">최대 {usd(m.bestProfitUsd)}</span>
+          {m.minProfitUsd != null && m.bestProfitUsd != null && m.bestProfitUsd !== m.minProfitUsd ? (
+            <>
+              <span>{usd(m.minProfitUsd)}–{usd(m.bestProfitUsd)}</span>
+              <span className="block text-[10px] text-slate-600">사이즈별 · 대표 {usd(m.profitUsd)}</span>
+            </>
+          ) : (
+            usd(m.profitUsd)
           )}
         </td>
         <td className="text-right px-3 py-2.5 text-slate-300">{usd(m.lowestBidUsd)}</td>

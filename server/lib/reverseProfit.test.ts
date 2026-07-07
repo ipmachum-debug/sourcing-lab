@@ -53,8 +53,8 @@ describe("computeProfit", () => {
     // 매입 34,900원 / 안정가 $60 @1350 = 81,000원 매출 (중국시장 달러 기준)
     const p = computeProfit(34900, 60, DEFAULT_COST);
     expect(p.revenueKrw).toBe(81000);
-    // 수수료 9% + 환전 1.5% + 검수 3% = 13.5% of 81000 + 배송 5000 + 포장 1000
-    expect(p.feeKrw).toBe(Math.round(81000 * 0.09));
+    // 수수료 6%(판매 5%+결제 1%) + 환전 1.5% + 검수 3% + 배송 5000 + 포장 1000
+    expect(p.feeKrw).toBe(Math.round(81000 * 0.06));
     expect(p.deductKrw).toBe(
       p.feeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
     );

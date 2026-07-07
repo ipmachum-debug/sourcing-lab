@@ -172,7 +172,7 @@ export default function ReversePhoto() {
                             </div>
                           ) : <span />}
                           <button
-                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 1350, feePct: 9 })}
+                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 1350, feePct: 6 })}
                             className="text-[11px] neon-chip rounded-lg px-2 py-1 text-slate-200 flex items-center gap-1">
                             <Star className="h-3 w-3" /> 워치
                           </button>
