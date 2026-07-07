@@ -294,7 +294,12 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
             )}
           </span>
         ) : (
-          <DomesticEntry onSave={onSaveDomestic} saving={saving} />
+          <DomesticEntry
+            name={r.productName}
+            brand={r.brand}
+            onSave={onSaveDomestic}
+            saving={saving}
+          />
         )}
       </td>
       <td className="text-right px-3 py-2.5">
@@ -324,7 +329,9 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
               {r.recommendQty > 0 ? `${r.recommendQty}개 매입` : "매입"}
             </span>
           ) : (
-            <FindDomestic name={r.productName} brand={r.brand} />
+            <span className="text-[11px] text-slate-600" title="왼쪽 '국내가 찾기'로 매입가를 확인한 뒤 입력하면 딜로 전환됩니다">
+              국내가 입력 대기
+            </span>
           )}
         </div>
       </td>
@@ -332,31 +339,47 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
   );
 }
 
-function DomesticEntry({ onSave, saving }: { onSave: (krw: number) => void; saving: boolean }) {
+// 국내가 찾기 + 입력을 한 칸에: 찾기 링크로 매입가 확인 → 바로 아래 입력창에 입력 → 저장.
+// (외부 사이트 가격은 브라우저 보안상 자동 수집 불가 → 확인한 값을 여기 직접 입력)
+function DomesticEntry({
+  name,
+  brand,
+  onSave,
+  saving,
+}: {
+  name: string;
+  brand: string;
+  onSave: (krw: number) => void;
+  saving: boolean;
+}) {
   const [v, setV] = useState("");
   const submit = () => {
-    const n = Number(v) || 0;
+    // "149,000원" 처럼 콤마·단위가 붙어도 숫자만 추출
+    const n = Number(String(v).replace(/[^\d]/g, "")) || 0;
     if (n > 0) { onSave(n); setV(""); }
   };
   return (
-    <span className="inline-flex items-center gap-1 justify-end">
-      <input
-        value={v}
-        onChange={e => setV(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && submit()}
-        placeholder="국내가"
-        inputMode="numeric"
-        title="찾은 국내 매입가(원)를 입력하고 저장 → 방어선 계산"
-        className="w-20 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[12px] text-right text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60"
-      />
-      <button
-        onClick={submit}
-        disabled={saving || !v}
-        className="text-[11px] neon-chip rounded-md px-1.5 py-1 text-slate-200 disabled:opacity-40"
-      >
-        저장
-      </button>
-    </span>
+    <div className="flex flex-col items-end gap-1.5">
+      <span className="inline-flex items-center gap-1">
+        <input
+          value={v}
+          onChange={e => setV(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && submit()}
+          placeholder="국내가"
+          inputMode="numeric"
+          title="찾은 국내 매입가(원)를 입력하고 저장 → 방어선 계산 (149,000원 붙여넣기 OK)"
+          className="w-24 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[12px] text-right text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60"
+        />
+        <button
+          onClick={submit}
+          disabled={saving || !v}
+          className="text-[11px] neon-chip rounded-md px-1.5 py-1 text-slate-200 disabled:opacity-40"
+        >
+          저장
+        </button>
+      </span>
+      <FindDomestic name={name} brand={brand} />
+    </div>
   );
 }
 
