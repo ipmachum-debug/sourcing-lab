@@ -14,6 +14,7 @@ const DEFAULT_COST = {
   poizonFeePct: 10,
   feeMinKrw: 15000,
   feeMaxKrw: 45000,
+  extraFeePct: 2, // 적립+주문처리 부가 수수료
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,
@@ -28,13 +29,15 @@ function calcProfit(domesticBuyKrw: number, stableUsd: number, c: Cost) {
   const rawFee = Math.round((revenueKrw * c.poizonFeePct) / 100);
   const feeKrw = Math.min(c.feeMaxKrw, Math.max(c.feeMinKrw, rawFee));
   const feeFloorHit = rawFee < c.feeMinKrw;
+  const extraFeeKrw = Math.round((revenueKrw * c.extraFeePct) / 100);
+  const effectiveFeePct = revenueKrw > 0 ? Math.round(((feeKrw + extraFeeKrw) / revenueKrw) * 1000) / 10 : 0;
   const fxLossKrw = Math.round((revenueKrw * c.fxLossPct) / 100);
   const inspectRiskKrw = Math.round((revenueKrw * c.inspectRiskPct) / 100);
   const vatRefundKrw = c.vatRefund ? Math.round(domesticBuyKrw / 11) : 0;
-  const deductKrw = feeKrw + c.chinaShipKrw + fxLossKrw + c.packingKrw + inspectRiskKrw;
+  const deductKrw = feeKrw + extraFeeKrw + c.chinaShipKrw + fxLossKrw + c.packingKrw + inspectRiskKrw;
   const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw + vatRefundKrw;
   const marginPct = domesticBuyKrw > 0 ? Math.round((netProfitKrw / domesticBuyKrw) * 1000) / 10 : 0;
-  return { revenueKrw, feeKrw, feeFloorHit, vatRefundKrw, deductKrw, netProfitKrw, marginPct, lowPrice: revenueKrw <= 150000 };
+  return { revenueKrw, feeKrw: feeKrw + extraFeeKrw, effectiveFeePct, feeFloorHit, vatRefundKrw, deductKrw, netProfitKrw, marginPct, lowPrice: revenueKrw <= 150000 };
 }
 
 const GRADE_STYLE: Record<string, string> = {
@@ -52,7 +55,7 @@ const SOURCE_LABEL: Record<string, string> = {
 interface Deal {
   normKey: string; brand: string; productName: string; source: string; imageUrl: string | null;
   domesticBuyKrw: number; stableCny: number; avg30Cny: number; volume30: number; volatilityPct: number;
-  revenueKrw: number; feeKrw: number; vatRefundKrw: number; deductKrw: number; netProfitKrw: number; marginPct: number;
+  revenueKrw: number; feeKrw: number; effectiveFeePct: number; vatRefundKrw: number; deductKrw: number; netProfitKrw: number; marginPct: number;
   lowPrice: boolean; feeFloorHit: boolean;
   grade: "A" | "B" | "C" | "D"; recommendQty: number; stars: number; hasObservations: boolean;
   matchType?: "exact" | "watchlist" | "fuzzy";
@@ -140,7 +143,7 @@ export default function ReverseDeals() {
             {calcRes && (
               <div className="text-[11px] text-slate-500 mt-2 space-y-1">
                 <p>
-                  매출 {won(calcRes.revenueKrw)} − 매입 {won(Number(calc.buy))} − 수수료·배송·검수 {won(calcRes.deductKrw)}
+                  매출 {won(calcRes.revenueKrw)} − 수수료 {won(calcRes.feeKrw)}(<b className="text-slate-400">실효 {calcRes.effectiveFeePct}%</b>) − 매입 {won(Number(calc.buy))} − 배송·검수 {won(calcRes.deductKrw - calcRes.feeKrw)}
                   {" "}+ 부가세환급 <b className="text-emerald-300/90">{won(calcRes.vatRefundKrw)}</b> = <b className="text-slate-300">{won(calcRes.netProfitKrw)}</b>
                 </p>
                 {calcRes.lowPrice && (
@@ -176,6 +179,7 @@ export default function ReverseDeals() {
                   <CostIn label="수수료율(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={1} />
                   <CostIn label="최소수수료(원)" v={cost.feeMinKrw} on={v => setCost({ ...cost, feeMinKrw: v })} step={1000} />
                   <CostIn label="최대수수료(원)" v={cost.feeMaxKrw} on={v => setCost({ ...cost, feeMaxKrw: v })} step={1000} />
+                  <CostIn label="부가수수료(%)" v={cost.extraFeePct} on={v => setCost({ ...cost, extraFeePct: v })} step={0.5} />
                   <CostIn label="배송비(원)" v={cost.chinaShipKrw} on={v => setCost({ ...cost, chinaShipKrw: v })} step={500} />
                   <CostIn label="검수리스크(%)" v={cost.inspectRiskPct} on={v => setCost({ ...cost, inspectRiskPct: v })} step={0.5} />
                 </div>
@@ -243,7 +247,11 @@ function DealCard({ d, rank }: { d: Deal; rank: number }) {
         <Row label="국내 특가" value={won(d.domesticBuyKrw)} />
         <Row label="POIZON 안정가($)" value={<span className="text-fuchsia-200">{usd(d.stableCny)}</span>} />
         <Row label="매출 환산(원)" value={<span className="text-slate-300">{won(d.revenueKrw)}</span>} />
-        <Row label="수수료·배송·검수" value={<span className="text-slate-400">−{won(d.deductKrw)}</span>} />
+        <Row
+          label={`POIZON 수수료 (실효 ${d.effectiveFeePct}%)`}
+          value={<span className="text-slate-400">−{won(d.feeKrw)}{d.feeFloorHit && <span className="text-amber-400/80 text-[11px]"> 최소</span>}</span>}
+        />
+        <Row label="배송·검수 등" value={<span className="text-slate-400">−{won(d.deductKrw - d.feeKrw)}</span>} />
         {d.vatRefundKrw > 0 && (
           <Row label="부가세 환급" value={<span className="text-emerald-300/90">+{won(d.vatRefundKrw)}</span>} />
         )}
