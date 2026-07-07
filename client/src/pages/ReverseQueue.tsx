@@ -47,10 +47,12 @@ export default function ReverseQueue() {
   const [term, setTerm] = useState("");
   const [search, setSearch] = useState("");
 
+  const fx = trpc.reverseDeals.fxRate.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
   const q = trpc.reverseDeals.sourcingQueue.useQuery({
     status,
     category: category === "전체" ? undefined : category,
     search: search || undefined,
+    rate: fx.data?.rate,
     minMargin: 30,
     minSold: 1,
     limit: 100,
