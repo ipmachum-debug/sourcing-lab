@@ -44,10 +44,15 @@ interface Row {
 type Status = "hunt" | "deal" | "all";
 
 export default function ReverseQueue() {
+  // AI 비서·외부 링크에서 넘어온 ?search= 초기 필터
+  const initSearch = (() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("search") ?? "";
+  })();
   const [status, setStatus] = useState<Status>("hunt");
   const [category, setCategory] = useState("전체");
-  const [term, setTerm] = useState("");
-  const [search, setSearch] = useState("");
+  const [term, setTerm] = useState(initSearch);
+  const [search, setSearch] = useState(initSearch);
 
   const fx = trpc.reverseDeals.fxRate.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
   const q = trpc.reverseDeals.sourcingQueue.useQuery({
