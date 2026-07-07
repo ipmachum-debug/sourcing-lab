@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
+import { toCsv, downloadCsv, stamp } from "@/lib/csv";
 import {
   ListChecks,
   Search,
@@ -12,6 +13,8 @@ import {
   ChevronDown,
   ScanBarcode,
   Store,
+  Shield,
+  Download,
 } from "lucide-react";
 
 const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
@@ -32,6 +35,7 @@ interface Row {
   hasDomestic: boolean; domesticBuyKrw: number; domesticSource: string | null;
   domesticUrl: string | null; matchBy: "barcode" | "name" | null;
   netProfitKrw: number; marginPct: number; grade: string; recommendQty: number;
+  floorBidUsd: number; targetBidUsd: number;
   status: "hunt" | "deal" | "thin";
 }
 
@@ -59,6 +63,22 @@ export default function ReverseQueue() {
 
   const doSearch = () => setSearch(term.trim());
 
+  // 일괄입찰 CSV — 국내가 매칭된 상품의 방어 입찰가/목표가 내보내기 (POIZON 최저 입찰가 세팅용)
+  const exportBids = () => {
+    const withBid = rows.filter(r => r.hasDomestic && r.floorBidUsd > 0);
+    if (withBid.length === 0) return;
+    const csv = toCsv(
+      ["상품명", "브랜드", "SPU", "카테고리", "국내매입가(원)", "안정가($)", "방어선입찰가($)", "목표순익2만가($)", "예상마진(%)", "추천수량"],
+      withBid.map(r => [
+        r.productName, r.brand, r.spuId ?? "", r.category ?? "",
+        r.domesticBuyKrw, r.stableUsd, r.floorBidUsd, r.targetBidUsd,
+        r.marginPct.toFixed(1), r.recommendQty,
+      ])
+    );
+    downloadCsv(`소싱_방어입찰가_${stamp()}`, csv);
+  };
+  const bidCount = rows.filter(r => r.hasDomestic && r.floorBidUsd > 0).length;
+
   const TABS: { key: Status; label: string; icon: any; count?: number }[] = [
     { key: "hunt", label: "발굴 대상", icon: Compass, count: counts?.hunt },
     { key: "deal", label: "딜 확정", icon: Flame, count: counts?.deal },
@@ -70,16 +90,26 @@ export default function ReverseQueue() {
       <div className="cyber-stage p-6 sm:p-10">
         <div className="max-w-6xl mx-auto space-y-6">
           {/* 헤더 */}
-          <div>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <ListChecks className="h-3.5 w-3.5" /> Sourcing Queue
-            </span>
-            <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">소싱 큐</h1>
-            <p className="text-slate-300/80 mt-2">
-              뭐가 팔리는지는 <b className="text-white">이미 다 압니다</b>(판매자 카탈로그). 이제 질문은
-              하나 — <b className="text-fuchsia-300">이 잘 팔리는 걸 국내에서 싸게 어디서 사나</b>.
-              판매량 높은데 국내가만 없는 상품을 위에서부터 발굴하세요.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
+                <ListChecks className="h-3.5 w-3.5" /> Sourcing Queue
+              </span>
+              <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">소싱 큐</h1>
+              <p className="text-slate-300/80 mt-2 max-w-2xl">
+                뭐가 팔리는지는 <b className="text-white">이미 다 압니다</b>(판매자 카탈로그). 이제 질문은
+                하나 — <b className="text-fuchsia-300">이 잘 팔리는 걸 국내에서 싸게 어디서 사나</b>.
+                국내가가 매칭되면 <b className="text-white">방어 입찰가(이 아래면 손해)</b>까지 계산합니다.
+              </p>
+            </div>
+            <button
+              onClick={exportBids}
+              disabled={bidCount === 0}
+              title="국내가 매칭 상품의 방어/목표 입찰가를 CSV로 — POIZON 일괄입찰·최저 입찰가 세팅에 사용"
+              className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5 disabled:opacity-40 shrink-0"
+            >
+              <Download className="h-4 w-4" /> 입찰가 CSV {bidCount > 0 && `(${bidCount})`}
+            </button>
           </div>
 
           {/* 요약 */}
@@ -241,12 +271,19 @@ function QueueRow({ r }: { r: Row }) {
       </td>
       <td className="text-right px-3 py-2.5">
         {r.hasDomestic ? (
-          <span
-            className={`font-bold ${r.marginPct >= 30 ? "text-emerald-300" : r.marginPct > 0 ? "text-amber-300" : "text-red-400"}`}
-          >
-            {r.marginPct.toFixed(0)}%
-            {r.grade !== "-" && <span className="text-[10px] text-slate-500 ml-1">{r.grade}</span>}
-          </span>
+          <>
+            <span
+              className={`font-bold ${r.marginPct >= 30 ? "text-emerald-300" : r.marginPct > 0 ? "text-amber-300" : "text-red-400"}`}
+            >
+              {r.marginPct.toFixed(0)}%
+              {r.grade !== "-" && <span className="text-[10px] text-slate-500 ml-1">{r.grade}</span>}
+            </span>
+            {r.floorBidUsd > 0 && (
+              <span className="block text-[10px] text-slate-500" title="이 판매가 아래로 내려가면 손해 — POIZON 최저 입찰가 방어선">
+                <Shield className="inline h-2.5 w-2.5 text-cyan-400/70" /> 방어 {usd(r.floorBidUsd)} · 목표 {usd(r.targetBidUsd)}
+              </span>
+            )}
+          </>
         ) : (
           <span className="text-slate-600 text-xs">-</span>
         )}

@@ -282,3 +282,29 @@ export function evaluateDeal(
   stars = Math.max(0, Math.min(5, stars));
   return { stable, profit, grade, recommendQty: qty, stars };
 }
+
+/**
+ * 목표 순익(원) 확보에 필요한 최소 POIZON 판매가($) 역산.
+ *   floor(target=0) = 손익분기 판매가 → "이 아래로 팔면 손해"인 방어선.
+ *   수수료 클램프(최소/최대)가 구간별로 꺾여 닫힌식이 어려우므로 판매가를 이분 탐색.
+ */
+export function bidForTargetNet(
+  domesticBuyKrw: number,
+  targetNetKrw: number,
+  cost: CostParams = DEFAULT_COST,
+  category?: string | null
+): number {
+  if (domesticBuyKrw <= 0) return 0;
+  const netAt = (usd: number) =>
+    computeProfit(domesticBuyKrw, usd, cost, category).netProfitKrw;
+  let lo = 0;
+  let hi =
+    (domesticBuyKrw + Math.max(0, targetNetKrw) + 300000) / cost.rate + 100;
+  for (let g = 0; g < 10 && netAt(hi) < targetNetKrw; g++) hi *= 2;
+  for (let k = 0; k < 44; k++) {
+    const mid = (lo + hi) / 2;
+    if (netAt(mid) < targetNetKrw) lo = mid;
+    else hi = mid;
+  }
+  return Math.ceil(hi); // 올림 → 안전한 방어선($)
+}
