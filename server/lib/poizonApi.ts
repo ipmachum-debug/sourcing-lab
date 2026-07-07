@@ -73,7 +73,7 @@ export const POIZON_API = {
   submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
   autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
   listingList: { path: "/dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple", method: "POST" }, // ✅ 확정
-  cancelListing: { path: "/dop/api/v1/pop/api/v1/listing/cancel", method: "POST" }, // ⚠️ 추정
+  cancelListing: { path: "/dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding", method: "POST" }, // ✅ 확정
 
   // 확장(Default 포함) — 필요 시 순차 구현
   skuSpuByBarcode: { path: "/dop/api/v1/commodity/query-by-barcode", method: "POST" },
@@ -328,10 +328,6 @@ const zListingList = z
   })
   .passthrough();
 
-const zCancelResult = z
-  .object({ success: z.boolean().optional() })
-  .passthrough();
-
 // ── 핵심 5 (승인 즉시 사용) ─────────────────────────────
 
 /** 1) 상품번호(articleNumber) fuzzy 검색 → SPU 목록. 국내가로 POIZON 상품 찾을 때. */
@@ -528,17 +524,21 @@ export async function queryListingList(
   return callPoizon(POIZON_API.listingList, body, { schema: zListingList, ...opts });
 }
 
-/** 5b) 입찰(리스팅) 취소. */
+/**
+ * 5b) 입찰(리스팅) 취소 — 단일 sellerBiddingNo.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding
+ *   바디 { sellerBiddingNo } · 응답 data=boolean.
+ */
 export async function cancelListing(
-  listingNos: (string | number)[],
-  opts: CallOpts<z.infer<typeof zCancelResult>> = {}
+  sellerBiddingNo: string,
+  opts: CallOpts<boolean> = {}
 ) {
-  if (listingNos.length === 0)
-    throw new PoizonApiError("EMPTY", "취소할 리스팅이 없습니다.");
+  if (!sellerBiddingNo)
+    throw new PoizonApiError("EMPTY", "취소할 sellerBiddingNo가 필요합니다.");
   return callPoizon(
     POIZON_API.cancelListing,
-    { listingNos },
-    { schema: zCancelResult, ...opts }
+    { sellerBiddingNo },
+    { schema: zBoolResult, ...opts }
   );
 }
 
