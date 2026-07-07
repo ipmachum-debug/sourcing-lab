@@ -18,12 +18,14 @@ export const SOURCING_KEYWORDS: KwBrand[] = [
   {
     brand: "크록스",
     emoji: "🐊",
+    // 토큰이 짧고 흔해(메가→'메가데스', 에코 등) 브랜드까지 함께 검색해 정밀도 확보.
+    // 검색은 다중 토큰 AND 매칭이라 '크록스 메가'면 둘 다 포함된 상품만 잡힘.
     models: [
-      { label: "Classic Clog", q: "클래식" },
-      { label: "Bayaband", q: "바야" },
-      { label: "Echo Clog", q: "에코" },
-      { label: "Mega Crush", q: "메가" },
-      { label: "Platform", q: "플랫폼" },
+      { label: "Classic Clog", q: "크록스 클래식" },
+      { label: "Bayaband", q: "크록스 바야" },
+      { label: "Echo Clog", q: "크록스 에코" },
+      { label: "Mega Crush", q: "크록스 메가" },
+      { label: "Platform", q: "크록스 플랫폼" },
     ],
   },
   {

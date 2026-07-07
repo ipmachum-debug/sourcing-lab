@@ -38,6 +38,24 @@ const DOMESTIC_SOURCES = [
   "other",
 ] as const;
 
+// 검색어 → 다중 토큰 AND 매칭.
+//   "크록스 메가"면 '크록스' AND '메가'가 모두 상품명/브랜드에 있어야 함.
+//   단일 부분일치는 '메가'가 '메가데스'(뉴에라)에 오매칭되던 문제가 있어,
+//   브랜드+모델처럼 여러 토큰을 주면 교집합으로 좁혀 정밀도를 높인다.
+function searchWhere(q: string) {
+  const tokens = q
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  if (tokens.length === 0) return sql`1=1`;
+  const clauses = tokens.map(
+    t =>
+      sql`(${poizonSaleObservations.productName} LIKE ${"%" + t + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + t + "%"})`
+  );
+  return sql.join(clauses, sql` AND `);
+}
+
 // 상품 매칭키 (브랜드+상품 정규화) — 국내 풀·POIZON 풀 공용
 function normKeyOf(brand: string | undefined | null, name: string): string {
   return `${brand ?? ""} ${name}`
@@ -899,11 +917,7 @@ export const reverseDealsRouter = router({
           observedAt: poizonSaleObservations.observedAt,
         })
         .from(poizonSaleObservations)
-        .where(
-          q
-            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
-            : sql`1=1`
-        )
+        .where(searchWhere(q))
         .orderBy(desc(poizonSaleObservations.observedAt))
         .limit(20000);
 
@@ -1124,11 +1138,7 @@ export const reverseDealsRouter = router({
           localSellerCount: poizonSaleObservations.localSellerCount,
         })
         .from(poizonSaleObservations)
-        .where(
-          q
-            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
-            : sql`1=1`
-        )
+        .where(searchWhere(q))
         .orderBy(desc(poizonSaleObservations.observedAt))
         .limit(40000);
       // SKU 단위 최신만
@@ -1386,11 +1396,7 @@ export const reverseDealsRouter = router({
           observedAt: poizonSaleObservations.observedAt,
         })
         .from(poizonSaleObservations)
-        .where(
-          q
-            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
-            : sql`1=1`
-        )
+        .where(searchWhere(q))
         .orderBy(desc(poizonSaleObservations.observedAt))
         .limit(60000);
 
