@@ -13,6 +13,7 @@ const FEE_TIERS = [
   { key: "etc", label: "뷰티·완구·기타", pct: 10, min: 15000 },
 ] as const;
 const FEE_MAX = 45000;
+const EXTRA_FEE_PCT = 2; // 적립+주문처리 부가 수수료(보수적)
 
 function calc(i: {
   buyKRW: number; poizonCNY: number; rate: number; feePct: number; feeMin: number;
@@ -20,15 +21,17 @@ function calc(i: {
 }) {
   const poizonKRW = Math.round(i.poizonCNY * i.rate);
   const rawFee = Math.round(poizonKRW * i.feePct / 100);
-  const fee = Math.min(FEE_MAX, Math.max(i.feeMin, rawFee)); // 클램프
+  const baseFee = Math.min(FEE_MAX, Math.max(i.feeMin, rawFee)); // 클램프
+  const fee = baseFee + Math.round(poizonKRW * EXTRA_FEE_PCT / 100); // 부가 수수료 포함
   const feeFloorHit = rawFee < i.feeMin;
+  const effectiveFeePct = poizonKRW > 0 ? Math.round((fee / poizonKRW) * 1000) / 10 : 0;
   const vat = i.vatRefund ? Math.round(i.buyKRW / 11) : 0;    // 부가세 환급 = 매입가 ÷ 11
   const gross = poizonKRW - fee - i.buyKRW - i.intlShip + vat;   // 검수 통과 시 순익
   const p = Math.min(1, Math.max(0, i.rejectPct / 100));
   const expected = Math.round(gross * (1 - p) - i.roundtripShip * p); // 검수 리스크 반영 기대순익
   const marginRate = poizonKRW > 0 ? (gross / poizonKRW) * 100 : 0;
   const lowPrice = poizonKRW <= 150000;
-  return { poizonKRW, fee, feeFloorHit, vat, gross, expected, marginRate, lowPrice };
+  return { poizonKRW, fee, feeFloorHit, effectiveFeePct, vat, gross, expected, marginRate, lowPrice };
 }
 
 const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -69,7 +72,7 @@ export default function ReverseArbitrage() {
   const bidFor = (targetNet: number) => {
     // target = poizonKRW − poizonKRW*feePct/100 − buyKRW − intlShip + vat
     const vat = vatRefund ? Math.round(buyKRW / 11) : 0;
-    const needKRW = (targetNet + buyKRW + intlShip - vat) / (1 - feePct / 100);
+    const needKRW = (targetNet + buyKRW + intlShip - vat) / (1 - (feePct + EXTRA_FEE_PCT) / 100);
     return { krw: Math.round(needKRW), usd: rate > 0 ? Math.round(needKRW / rate) : 0 };
   };
 
@@ -162,7 +165,7 @@ export default function ReverseArbitrage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 text-left">
               <Break label="POIZON 원화" value={won(r.poizonKRW)} plus />
-              <Break label={r.feeFloorHit ? "수수료(최소적용)" : `수수료 ${feePct}%`} value={`−${won(r.fee)}`} />
+              <Break label={`수수료 실효 ${r.effectiveFeePct}%${r.feeFloorHit ? " (최소적용)" : ""}`} value={`−${won(r.fee)}`} />
               <Break label="검수 통과 시 순익" value={won(r.gross)} plus />
               <Break label="부가세 환급" value={`+${won(r.vat)}`} plus />
             </div>

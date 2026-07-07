@@ -20,6 +20,7 @@ export interface CostParams {
   poizonFeePct: number; // POIZON 수수료율 (%) — 신발/의류 10%
   feeMinKrw: number; // 최소 수수료 (원)
   feeMaxKrw: number; // 최대 수수료 (원)
+  extraFeePct: number; // POIZON 부가 수수료(적립+주문처리, %) — 보수적 버퍼
   chinaShipKrw: number; // 국내→POIZON 배송비 등 (건당, 원)
   fxLossPct: number; // 환전 손실 (%)
   packingKrw: number; // 포장비 (건당, 원)
@@ -36,6 +37,7 @@ export const DEFAULT_COST: CostParams = {
   poizonFeePct: 10,
   feeMinKrw: 15000,
   feeMaxKrw: 45000,
+  extraFeePct: 2, // 적립+주문처리 수수료 보수적 버퍼
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,
@@ -147,13 +149,15 @@ export interface ProfitBreakdown {
   revenueKrw: number; // 안정 판매가 → 원 환산 매출(판매가)
   domesticBuyKrw: number; // 국내 매입가
   feeKrw: number; // POIZON 수수료 (10~14% 클램프 15k~45k)
+  extraFeeKrw: number; // 부가 수수료(적립+주문처리)
+  effectiveFeePct: number; // 실효 수수료율 = (수수료+부가) ÷ 판매가 × 100
   feeFloorHit: boolean; // 최소 수수료가 적용됨(저가 불리)
   chinaShipKrw: number; // 국내→POIZON 배송비 등
   fxLossKrw: number; // 환전 손실
   packingKrw: number; // 포장비
   inspectRiskKrw: number; // 반품/검수 리스크
   vatRefundKrw: number; // 부가세 환급(+) = 매입가 ÷ 11
-  deductKrw: number; // 매입가 제외 총 차감 (수수료+배송+환전+포장+검수)
+  deductKrw: number; // 매입가 제외 총 차감 (수수료+부가+배송+환전+포장+검수)
   netProfitKrw: number; // 순이익 = 판매가 − 매입가 − 차감 + 부가세환급
   marginPct: number; // 마진율 (순이익 ÷ 매입가 × 100)
   lowPrice: boolean; // 판매가 15만원 이하(최소 수수료 타격 구간)
@@ -172,13 +176,18 @@ export function computeProfit(
     cost,
     category
   );
+  const extraFeeKrw = Math.round((revenueKrw * cost.extraFeePct) / 100);
+  const effectiveFeePct =
+    revenueKrw > 0
+      ? Math.round(((feeKrw + extraFeeKrw) / revenueKrw) * 1000) / 10
+      : 0;
   const fxLossKrw = Math.round((revenueKrw * cost.fxLossPct) / 100);
   const inspectRiskKrw = Math.round((revenueKrw * cost.inspectRiskPct) / 100);
   const chinaShipKrw = Math.round(cost.chinaShipKrw);
   const packingKrw = Math.round(cost.packingKrw);
   const vatRefundKrw = cost.vatRefund ? Math.round(domesticBuyKrw / 11) : 0;
   const deductKrw =
-    feeKrw + chinaShipKrw + fxLossKrw + packingKrw + inspectRiskKrw;
+    feeKrw + extraFeeKrw + chinaShipKrw + fxLossKrw + packingKrw + inspectRiskKrw;
   const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw + vatRefundKrw;
   const marginPct =
     domesticBuyKrw > 0
@@ -188,6 +197,8 @@ export function computeProfit(
     revenueKrw,
     domesticBuyKrw,
     feeKrw,
+    extraFeeKrw,
+    effectiveFeePct,
     feeFloorHit,
     chinaShipKrw,
     fxLossKrw,

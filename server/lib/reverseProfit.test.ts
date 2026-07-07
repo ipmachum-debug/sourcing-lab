@@ -59,8 +59,11 @@ describe("computeProfit", () => {
     expect(p.lowPrice).toBe(true); // 판매가 15만원 이하
     // 부가세 환급 = 매입가 ÷ 11
     expect(p.vatRefundKrw).toBe(Math.round(34900 / 11));
+    // 부가 수수료(적립+주문처리) 포함
+    expect(p.extraFeeKrw).toBe(Math.round(81000 * 0.02));
+    expect(p.effectiveFeePct).toBeCloseTo(((15000 + p.extraFeeKrw) / 81000) * 100, 1);
     expect(p.deductKrw).toBe(
-      p.feeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
+      p.feeKrw + p.extraFeeKrw + 5000 + p.fxLossKrw + 1000 + p.inspectRiskKrw
     );
     // 순이익 = 판매가 − 매입가 − 차감 + 부가세환급
     expect(p.netProfitKrw).toBe(81000 - 34900 - p.deductKrw + p.vatRefundKrw);
