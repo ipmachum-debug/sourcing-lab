@@ -36,6 +36,7 @@ interface Row {
   hasDomestic: boolean; domesticBuyKrw: number; domesticSource: string | null;
   domesticUrl: string | null; matchBy: "barcode" | "name" | null;
   netProfitKrw: number; marginPct: number; grade: string; recommendQty: number;
+  revenueKrw: number; feeKrw: number; vatRefundKrw: number;
   floorBidUsd: number; targetBidUsd: number;
   status: "hunt" | "deal" | "thin";
 }
@@ -257,7 +258,9 @@ export default function ReverseQueue() {
 }
 
 function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw: number) => void; saving: boolean }) {
+  const [open, setOpen] = useState(false);
   return (
+    <>
     <tr className="border-t border-white/8 hover:bg-white/[0.02]">
       <td className="px-3 py-2.5">
         <p className="font-medium text-slate-100 truncate max-w-[280px]">{r.productName}</p>
@@ -304,19 +307,21 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
       </td>
       <td className="text-right px-3 py-2.5">
         {r.hasDomestic ? (
-          <>
+          <button onClick={() => setOpen(o => !o)} className="text-right group" title="실순익 분해 보기">
             <span
               className={`font-bold ${r.marginPct >= 30 ? "text-emerald-300" : r.marginPct > 0 ? "text-amber-300" : "text-red-400"}`}
             >
               {r.marginPct.toFixed(0)}%
               {r.grade !== "-" && <span className="text-[10px] text-slate-500 ml-1">{r.grade}</span>}
+              <ChevronDown className={`inline h-3 w-3 text-slate-600 ml-0.5 transition-transform ${open ? "rotate-180" : ""}`} />
             </span>
+            <span className="block text-[10px] text-emerald-300/80">순익 {won(r.netProfitKrw)}</span>
             {r.floorBidUsd > 0 && (
               <span className="block text-[10px] text-slate-500" title="이 판매가 아래로 내려가면 손해 — POIZON 최저 입찰가 방어선">
                 <Shield className="inline h-2.5 w-2.5 text-cyan-400/70" /> 방어 {usd(r.floorBidUsd)} · 목표 {usd(r.targetBidUsd)}
               </span>
             )}
-          </>
+          </button>
         ) : (
           <span className="text-slate-600 text-xs">-</span>
         )}
@@ -336,6 +341,51 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
         </div>
       </td>
     </tr>
+    {open && r.hasDomestic && (
+      <tr className="bg-white/[0.03]">
+        <td colSpan={7} className="px-3 py-3">
+          <NetProfitCard r={r} />
+        </td>
+      </tr>
+    )}
+    </>
+  );
+}
+
+// 실순익 분해 카드 — "내가 얼마 버는가"를 크게. 판매가·수수료·매입가·부가세환급·순이익.
+function NetProfitCard({ r }: { r: Row }) {
+  const items: { label: string; value: string; tone?: string; sign?: string }[] = [
+    { label: "POIZON 판매가(안정)", value: won(r.revenueKrw), sign: "" },
+    { label: "POIZON 수수료", value: won(r.feeKrw), tone: "text-red-300", sign: "−" },
+    { label: "국내 매입가", value: won(r.domesticBuyKrw), tone: "text-red-300", sign: "−" },
+    { label: "부가세 환급", value: won(r.vatRefundKrw), tone: "text-emerald-300", sign: "+" },
+  ];
+  return (
+    <div className="flex flex-wrap items-stretch gap-2">
+      {items.map(it => (
+        <div key={it.label} className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 min-w-[130px]">
+          <p className="text-[10px] text-slate-500">{it.label}</p>
+          <p className={`text-sm font-semibold mt-0.5 ${it.tone ?? "text-slate-100"}`}>
+            {it.sign}{it.value}
+          </p>
+        </div>
+      ))}
+      <div className="rounded-lg bg-emerald-500/15 border border-emerald-400/30 px-4 py-2 min-w-[150px] flex flex-col justify-center">
+        <p className="text-[10px] text-emerald-300/80">순이익 (마진 {r.marginPct.toFixed(0)}%)</p>
+        <p className="text-xl font-black text-emerald-300 mt-0.5">{won(r.netProfitKrw)}</p>
+      </div>
+      {r.recommendQty > 0 && (
+        <div className="rounded-lg bg-fuchsia-500/15 border border-fuchsia-400/30 px-4 py-2 flex flex-col justify-center">
+          <p className="text-[10px] text-fuchsia-300/80">추천 매입</p>
+          <p className="text-xl font-black text-fuchsia-200 mt-0.5">
+            {r.recommendQty}개
+            <span className="text-[11px] font-normal text-slate-400 ml-1">
+              (예상 {won(r.netProfitKrw * r.recommendQty)})
+            </span>
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
