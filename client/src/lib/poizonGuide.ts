@@ -196,6 +196,13 @@ export const POIZON_GUIDE: GuideSection[] = [
     body: "경로: 상품 → 신상품 등록 → 일괄 업로드 또는 직접 입력.\n직접 입력에서 '브랜드 공식 홈페이지 URL' 방식이면 제출해도 '임시 저장'이므로 반드시 '심사 제출'을 눌러야 함.",
   },
   {
+    id: "api-endpoints",
+    cat: "API·기타",
+    title: "API 엔드포인트 지도 (기능 연결)",
+    keywords: ["api", "엔드포인트", "자동 입찰", "정산 api", "카탈로그", "automatic bidding"],
+    body: "Open API가 프로그램 전 기능을 커버 — 엑셀 수동 업로드를 대체할 수 있음:\n· Item(상품): Paginated Query by Category / by article number / by brand → 카탈로그 자동 수집\n· Listing&Inventory: ★ Submit Automatic Bidding(자동 입찰 제출) · Get Lowest Price(최저가) · Query Automatic Follow-Up(자동 따라잡기 조회) · Cancel Listing\n· Consignment(보관): Inbound Create/List/Inspection/Modify/Cancel\n· Order/Fulfillment: Order List · Confirm · Ship Order · Modify Tracking · Express Label\n· Bill(정산): Billing Cycle Invoice · Reconciliation · Real-Time Reconciliation → 실제 정산액 자동 수집\n· Return/Merchant: 반품·회수·SKU 코드\n★ 엔드게임: 카탈로그 수집 → 발굴/방어입찰가 계산 → Submit Automatic Bidding으로 자동 제출 → Bill로 정산 확인 = 완전 자동 루프.\n전제: 자격증명 + Sign 알고리즘.",
+  },
+  {
     id: "bbc",
     cat: "API·기타",
     title: "BBC 판매",
