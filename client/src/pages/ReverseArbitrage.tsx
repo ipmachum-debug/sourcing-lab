@@ -3,22 +3,32 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Scale, TriangleAlert, Search, Check } from "lucide-react";
 
-// 역직구 아비트리지 순익 계산 — 국내매입 → POIZON 판매 기준.
-const DEFAULT_FEE = 6;      // POIZON 셀러 수수료: 판매 5% + 결제 1%
+// 역직구 정밀 순익 계산 — 국내매입 → POIZON 판매 기준.
+// 수수료 = 판매가 × 요율(신발·의류 10%, 가방·시계·액세서리 14%), 단 [최소, 최대] 클램프.
+const DEFAULT_FEE = 10;
 const DEFAULT_RATE = 1350;  // POIZON 판매 시장=중국(득물) → 시세 $, 환율(원/$)로 환산
+const FEE_TIERS = [
+  { key: "shoes", label: "신발·의류", pct: 10, min: 15000 },
+  { key: "bag", label: "가방·시계·액세서리", pct: 14, min: 18000 },
+  { key: "etc", label: "뷰티·완구·기타", pct: 10, min: 15000 },
+] as const;
+const FEE_MAX = 45000;
 
 function calc(i: {
-  buyKRW: number; poizonCNY: number; rate: number; feePct: number;
+  buyKRW: number; poizonCNY: number; rate: number; feePct: number; feeMin: number;
   intlShip: number; rejectPct: number; roundtripShip: number; vatRefund: boolean;
 }) {
   const poizonKRW = Math.round(i.poizonCNY * i.rate);
-  const fee = Math.round(poizonKRW * i.feePct / 100);
-  const vat = i.vatRefund ? Math.round(i.buyKRW * 10 / 110) : 0; // 매입가 포함 부가세 환급
+  const rawFee = Math.round(poizonKRW * i.feePct / 100);
+  const fee = Math.min(FEE_MAX, Math.max(i.feeMin, rawFee)); // 클램프
+  const feeFloorHit = rawFee < i.feeMin;
+  const vat = i.vatRefund ? Math.round(i.buyKRW / 11) : 0;    // 부가세 환급 = 매입가 ÷ 11
   const gross = poizonKRW - fee - i.buyKRW - i.intlShip + vat;   // 검수 통과 시 순익
   const p = Math.min(1, Math.max(0, i.rejectPct / 100));
   const expected = Math.round(gross * (1 - p) - i.roundtripShip * p); // 검수 리스크 반영 기대순익
   const marginRate = poizonKRW > 0 ? (gross / poizonKRW) * 100 : 0;
-  return { poizonKRW, fee, vat, gross, expected, marginRate };
+  const lowPrice = poizonKRW <= 150000;
+  return { poizonKRW, fee, feeFloorHit, vat, gross, expected, marginRate, lowPrice };
 }
 
 const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -27,11 +37,14 @@ export default function ReverseArbitrage() {
   const [buyKRW, setBuyKRW] = useState(45000);
   const [poizonCNY, setPoizonCNY] = useState(345);
   const [rate, setRate] = useState(DEFAULT_RATE);
-  const [feePct, setFeePct] = useState(DEFAULT_FEE);
+  const [tier, setTier] = useState<(typeof FEE_TIERS)[number]["key"]>("shoes");
   const [intlShip, setIntlShip] = useState(3000);
   const [rejectPct, setRejectPct] = useState(8);
   const [roundtripShip, setRoundtripShip] = useState(12000);
   const [vatRefund, setVatRefund] = useState(true);
+  const feeTier = FEE_TIERS.find(t => t.key === tier)!;
+  const feePct = feeTier.pct;
+  const feeMin = feeTier.min;
 
   // 카탈로그(판매자 엑셀)에서 안정가($) 불러오기
   const [term, setTerm] = useState("");
@@ -46,11 +59,19 @@ export default function ReverseArbitrage() {
   }[];
 
   const r = useMemo(
-    () => calc({ buyKRW, poizonCNY, rate, feePct, intlShip, rejectPct, roundtripShip, vatRefund }),
-    [buyKRW, poizonCNY, rate, feePct, intlShip, rejectPct, roundtripShip, vatRefund]
+    () => calc({ buyKRW, poizonCNY, rate, feePct, feeMin, intlShip, rejectPct, roundtripShip, vatRefund }),
+    [buyKRW, poizonCNY, rate, feePct, feeMin, intlShip, rejectPct, roundtripShip, vatRefund]
   );
   const good = r.expected >= 15000 && r.marginRate >= 20;
   const ok = r.expected > 0 && !good;
+
+  // 적정 입찰가 제안: 목표 순이익 확보에 필요한 판매가($) (수수료 요율 구간 가정)
+  const bidFor = (targetNet: number) => {
+    // target = poizonKRW − poizonKRW*feePct/100 − buyKRW − intlShip + vat
+    const vat = vatRefund ? Math.round(buyKRW / 11) : 0;
+    const needKRW = (targetNet + buyKRW + intlShip - vat) / (1 - feePct / 100);
+    return { krw: Math.round(needKRW), usd: rate > 0 ? Math.round(needKRW / rate) : 0 };
+  };
 
   return (
     <DashboardLayout>
@@ -112,9 +133,17 @@ export default function ReverseArbitrage() {
             <Num label="POIZON 안정 판매가 ($)" value={poizonCNY} onChange={setPoizonCNY} />
             <Num label="환율 (원/$)" value={rate} onChange={setRate} />
             <Num label="배송비 (원)" value={intlShip} onChange={setIntlShip} />
-            <Slide label="POIZON 수수료" value={feePct} onChange={setFeePct} min={3} max={20} step={0.5} suffix="%" />
             <Slide label="검수 탈락률" value={rejectPct} onChange={setRejectPct} min={0} max={40} step={1} suffix="%" />
             <Num label="탈락 시 왕복배송 (원)" value={roundtripShip} onChange={setRoundtripShip} />
+            <div>
+              <label className="text-sm font-medium text-slate-200">품목(수수료 요율)</label>
+              <select value={tier} onChange={e => setTier(e.target.value as any)}
+                className="mt-1.5 w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2.5 text-white outline-none focus:border-fuchsia-400/60">
+                {FEE_TIERS.map(t => (
+                  <option key={t.key} value={t.key} className="bg-slate-900">{t.label} · {t.pct}% (최소 {t.min.toLocaleString()}원)</option>
+                ))}
+              </select>
+            </div>
             <label className="flex items-center gap-2 mt-6 cursor-pointer">
               <input type="checkbox" checked={vatRefund} onChange={e => setVatRefund(e.target.checked)} className="accent-fuchsia-500 h-4 w-4" />
               <span className="text-sm text-slate-200">부가세 환급(수출 영세율) 반영 <span className="text-slate-500">+{won(r.vat)}</span></span>
@@ -133,10 +162,48 @@ export default function ReverseArbitrage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 text-left">
               <Break label="POIZON 원화" value={won(r.poizonKRW)} plus />
-              <Break label="수수료" value={`−${won(r.fee)}`} />
+              <Break label={r.feeFloorHit ? "수수료(최소적용)" : `수수료 ${feePct}%`} value={`−${won(r.fee)}`} />
               <Break label="검수 통과 시 순익" value={won(r.gross)} plus />
               <Break label="부가세 환급" value={`+${won(r.vat)}`} plus />
             </div>
+          </div>
+
+          {r.lowPrice && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
+              <TriangleAlert className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-200">
+                판매가 15만원 이하 — <b>최소 수수료 {feeMin.toLocaleString()}원</b>{r.feeFloorHit ? " 적용 중" : " 근접"}이라 저가일수록 불리해요. 15만원 이상 상품을 우선 보세요.
+              </div>
+            </div>
+          )}
+
+          {/* 적정 입찰가 제안 — 최저가 추격 대신 "마진 방어 입찰가" */}
+          <div className="glass rounded-2xl p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Scale className="h-4 w-4 text-fuchsia-300" />
+              <h2 className="text-sm font-semibold text-slate-100">적정 입찰가 제안</h2>
+              <span className="text-[11px] text-slate-500">최저가 추격 금지 · 목표 순이익 확보 판매가</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "방어선 (순익 3천)", t: 3000, tone: "text-slate-200" },
+                { label: "목표 순익 2만", t: 20000, tone: "text-emerald-300" },
+                { label: "목표 순익 3만", t: 30000, tone: "text-emerald-300" },
+              ].map(o => {
+                const b = bidFor(o.t);
+                return (
+                  <div key={o.t} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                    <p className="text-[11px] text-slate-400">{o.label}</p>
+                    <p className={`text-lg font-black mt-0.5 ${o.tone}`}>${b.usd}</p>
+                    <p className="text-[10px] text-slate-500">{won(b.krw)}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              현재 최저가가 <b className="text-slate-300">방어선 아래로</b> 내려가면 따라가지 마세요 — 순익이 안 남습니다.
+              (수수료 {feePct}% 구간 가정 · 검수 탈락 제외 기준)
+            </p>
           </div>
 
           {rejectPct >= 15 && (

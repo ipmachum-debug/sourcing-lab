@@ -60,19 +60,25 @@ function effectiveBuyKrw(r: {
 const costInput = z.object({
   rate: z.number().int().min(1).max(3000).optional(),
   poizonFeePct: z.number().min(0).max(30).optional(),
+  feeMinKrw: z.number().int().min(0).max(200000).optional(),
+  feeMaxKrw: z.number().int().min(0).max(500000).optional(),
   chinaShipKrw: z.number().int().min(0).max(100000).optional(),
   fxLossPct: z.number().min(0).max(20).optional(),
   packingKrw: z.number().int().min(0).max(50000).optional(),
   inspectRiskPct: z.number().min(0).max(30).optional(),
+  vatRefund: z.boolean().optional(),
 });
 function resolveCost(i: z.infer<typeof costInput>): CostParams {
   return {
     rate: i.rate ?? DEFAULT_COST.rate,
     poizonFeePct: i.poizonFeePct ?? DEFAULT_COST.poizonFeePct,
+    feeMinKrw: i.feeMinKrw ?? DEFAULT_COST.feeMinKrw,
+    feeMaxKrw: i.feeMaxKrw ?? DEFAULT_COST.feeMaxKrw,
     chinaShipKrw: i.chinaShipKrw ?? DEFAULT_COST.chinaShipKrw,
     fxLossPct: i.fxLossPct ?? DEFAULT_COST.fxLossPct,
     packingKrw: i.packingKrw ?? DEFAULT_COST.packingKrw,
     inspectRiskPct: i.inspectRiskPct ?? DEFAULT_COST.inspectRiskPct,
+    vatRefund: i.vatRefund ?? DEFAULT_COST.vatRefund,
   };
 }
 
@@ -786,7 +792,8 @@ export const reverseDealsRouter = router({
           samples,
           now,
           cost,
-          soldHint || undefined
+          soldHint || undefined,
+          catOf({ category: null, productName: c.name })
         );
         if (!v) continue;
         deals.push({
@@ -801,9 +808,13 @@ export const reverseDealsRouter = router({
           volume30: v.stable.volume30,
           volatilityPct: v.stable.volatilityPct,
           revenueKrw: v.profit.revenueKrw,
+          feeKrw: v.profit.feeKrw,
+          vatRefundKrw: v.profit.vatRefundKrw,
           deductKrw: v.profit.deductKrw,
           netProfitKrw: v.profit.netProfitKrw,
           marginPct: v.profit.marginPct,
+          lowPrice: v.profit.lowPrice,
+          feeFloorHit: v.profit.feeFloorHit,
           grade: v.grade,
           recommendQty: v.recommendQty,
           stars: v.stars,
@@ -992,7 +1003,7 @@ export const reverseDealsRouter = router({
         let netProfitKrw = 0, marginPct = 0, grade = "-", recommendQty = 0;
         let status: "hunt" | "deal" | "thin";
         if (dom) {
-          const v = evaluateDeal(dom.buy, g.samples, now, cost, g.soldMax);
+          const v = evaluateDeal(dom.buy, g.samples, now, cost, g.soldMax, category);
           if (v) {
             netProfitKrw = v.profit.netProfitKrw;
             marginPct = v.profit.marginPct;

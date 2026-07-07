@@ -17,23 +17,61 @@
 /** 풀 코스트 파라미터 (원/달러, %는 백분율). 유저·상품별로 조정 가능. */
 export interface CostParams {
   rate: number; // 환율 (원/달러, KRW per USD)
-  poizonFeePct: number; // POIZON 수수료 (%)
-  chinaShipKrw: number; // 중국행 배송비 (건당, 원)
+  poizonFeePct: number; // POIZON 수수료율 (%) — 신발/의류 10%
+  feeMinKrw: number; // 최소 수수료 (원)
+  feeMaxKrw: number; // 최대 수수료 (원)
+  chinaShipKrw: number; // 국내→POIZON 배송비 등 (건당, 원)
   fxLossPct: number; // 환전 손실 (%)
   packingKrw: number; // 포장비 (건당, 원)
   inspectRiskPct: number; // 반품/검수 리스크 비용 (매출 대비 %)
+  vatRefund: boolean; // 부가세 환급(수출 영세율) 반영 = 매입가 ÷ 11
 }
 
 // ★ POIZON 판매 기준 시장 = 중국(득물) → 시세는 달러($). 정산은 원화.
-//   revenue(원) = 시세($) × rate(원/달러). 기본 환율 1350, 환전손실 1.5%.
+//   수수료 = 판매가 × 10%, 단 최소 15,000 / 최대 45,000 (신발·의류, 한국 판매자 기준).
+//   → 15만원 이하 저가 상품은 최소 수수료가 마진을 무너뜨림(저가 경고).
+//   부가세 환급 = 국내 매입가 ÷ 11 (수출 영세율, 적격증빙 전제).
 export const DEFAULT_COST: CostParams = {
   rate: 1350,
-  poizonFeePct: 6, // 판매 수수료 5% + 결제 수수료 1%
+  poizonFeePct: 10,
+  feeMinKrw: 15000,
+  feeMaxKrw: 45000,
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,
   inspectRiskPct: 3,
+  vatRefund: true,
 };
+
+// ★ POIZON 수수료는 카테고리(대분류)별로 다름 (실제 요금표):
+//   가방·시계·액세서리 → 14% / 최소 18,000
+//   신발·의류·운동·뷰티·완구·기타 → 10% / 최소 15,000
+//   최대는 공통 45,000
+export interface FeeTier {
+  pct: number;
+  minKrw: number;
+  maxKrw: number;
+}
+export function feeTier(category: string | null | undefined): FeeTier {
+  if (category === "가방" || category === "액세서리")
+    return { pct: 14, minKrw: 18000, maxKrw: 45000 };
+  return { pct: 10, minKrw: 15000, maxKrw: 45000 };
+}
+
+// POIZON 수수료 = 판매가 × 요율, 단 [최소, 최대]로 클램프.
+//   category 주면 카테고리 요율, 없으면 cost 기본값 사용.
+export function poizonFeeKrw(
+  revenueKrw: number,
+  cost: CostParams,
+  category?: string | null
+): { fee: number; raw: number; floorHit: boolean } {
+  const t = category
+    ? feeTier(category)
+    : { pct: cost.poizonFeePct, minKrw: cost.feeMinKrw, maxKrw: cost.feeMaxKrw };
+  const raw = Math.round((revenueKrw * t.pct) / 100);
+  const fee = Math.min(t.maxKrw, Math.max(t.minKrw, raw));
+  return { fee, raw, floorHit: raw < t.minKrw };
+}
 
 /** 한 상품·사이즈의 관측 시세 샘플 (위안, 관측 시각 epoch ms) */
 export interface PriceSample {
@@ -106,33 +144,42 @@ export function stableSellPrice(
 }
 
 export interface ProfitBreakdown {
-  revenueKrw: number; // 안정 판매가 → 원 환산 매출
+  revenueKrw: number; // 안정 판매가 → 원 환산 매출(판매가)
   domesticBuyKrw: number; // 국내 매입가
-  feeKrw: number; // POIZON 수수료
-  chinaShipKrw: number; // 중국 배송비
+  feeKrw: number; // POIZON 수수료 (10~14% 클램프 15k~45k)
+  feeFloorHit: boolean; // 최소 수수료가 적용됨(저가 불리)
+  chinaShipKrw: number; // 국내→POIZON 배송비 등
   fxLossKrw: number; // 환전 손실
   packingKrw: number; // 포장비
   inspectRiskKrw: number; // 반품/검수 리스크
+  vatRefundKrw: number; // 부가세 환급(+) = 매입가 ÷ 11
   deductKrw: number; // 매입가 제외 총 차감 (수수료+배송+환전+포장+검수)
-  netProfitKrw: number; // 순이익
+  netProfitKrw: number; // 순이익 = 판매가 − 매입가 − 차감 + 부가세환급
   marginPct: number; // 마진율 (순이익 ÷ 매입가 × 100)
+  lowPrice: boolean; // 판매가 15만원 이하(최소 수수료 타격 구간)
 }
 
-/** 안정 판매가(위안) × 국내 매입가(원) → 풀 코스트 순이익·마진율 */
+/** 안정 판매가($) × 국내 매입가(원) → 풀 코스트 순이익·마진율. category로 수수료 요율 결정 */
 export function computeProfit(
   domesticBuyKrw: number,
-  stableSellCny: number,
-  cost: CostParams = DEFAULT_COST
+  stableSellUsd: number,
+  cost: CostParams = DEFAULT_COST,
+  category?: string | null
 ): ProfitBreakdown {
-  const revenueKrw = Math.round(stableSellCny * cost.rate);
-  const feeKrw = Math.round((revenueKrw * cost.poizonFeePct) / 100);
+  const revenueKrw = Math.round(stableSellUsd * cost.rate);
+  const { fee: feeKrw, floorHit: feeFloorHit } = poizonFeeKrw(
+    revenueKrw,
+    cost,
+    category
+  );
   const fxLossKrw = Math.round((revenueKrw * cost.fxLossPct) / 100);
   const inspectRiskKrw = Math.round((revenueKrw * cost.inspectRiskPct) / 100);
   const chinaShipKrw = Math.round(cost.chinaShipKrw);
   const packingKrw = Math.round(cost.packingKrw);
+  const vatRefundKrw = cost.vatRefund ? Math.round(domesticBuyKrw / 11) : 0;
   const deductKrw =
     feeKrw + chinaShipKrw + fxLossKrw + packingKrw + inspectRiskKrw;
-  const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw;
+  const netProfitKrw = revenueKrw - domesticBuyKrw - deductKrw + vatRefundKrw;
   const marginPct =
     domesticBuyKrw > 0
       ? Math.round((netProfitKrw / domesticBuyKrw) * 1000) / 10
@@ -141,13 +188,16 @@ export function computeProfit(
     revenueKrw,
     domesticBuyKrw,
     feeKrw,
+    feeFloorHit,
     chinaShipKrw,
     fxLossKrw,
     packingKrw,
     inspectRiskKrw,
+    vatRefundKrw,
     deductKrw,
     netProfitKrw,
     marginPct,
+    lowPrice: revenueKrw <= 150000,
   };
 }
 
@@ -203,11 +253,12 @@ export function evaluateDeal(
   samples: PriceSample[],
   now: number,
   cost: CostParams = DEFAULT_COST,
-  volumeHint?: number
+  volumeHint?: number,
+  category?: string | null
 ): DealVerdict | null {
   const stable = stableSellPrice(samples, now, volumeHint);
   if (!stable || domesticBuyKrw <= 0) return null;
-  const profit = computeProfit(domesticBuyKrw, stable.stableCny, cost);
+  const profit = computeProfit(domesticBuyKrw, stable.stableCny, cost, category);
   const grade = stabilityGrade(stable);
   const qty = recommendQty(profit.marginPct, grade, stable.volume30);
   // 별점: 마진율 + 안정성 조합
