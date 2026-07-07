@@ -20,6 +20,8 @@ const TOOLS = [
 
 // 오늘 해야 할 일 — 사업가 관점. 데이터에서 액션을 뽑아 AI가 우선순위로 제안.
 const ACTION_STYLE: Record<string, { emoji: string; ring: string }> = {
+  limit: { emoji: "🔴", ring: "ring-red-400/40" },
+  room: { emoji: "🟢", ring: "ring-emerald-400/40" },
   buy: { emoji: "🛒", ring: "ring-fuchsia-400/30" },
   surge: { emoji: "🔥", ring: "ring-orange-400/30" },
   rebid: { emoji: "📉", ring: "ring-orange-400/30" },
