@@ -63,15 +63,17 @@ export function readiness(): {
 }
 
 // ── 엔드포인트 맵 (문서 확정 시 여기만 수정) ──────────────
-// method/path 모두 추정. 파란 링크 클릭 → 상세 페이지의 실제 경로로 교체.
+// ✅ 확정 prefix: /dop/api/v1/pop/api/v1/...  (recommend-bid/batchPrice 문서로 확인)
+// ⚠️ 표시는 여전히 추정 suffix — 각 문서 링크로 확정 필요.
 export const POIZON_API = {
   // ⭐ 핵심 5 (역경매 워크플로우)
-  spuByArticleNumber: { path: "/dop/api/v1/spu/query-by-article-number", method: "POST" },
-  spuByGlobalSpuId: { path: "/dop/api/v1/spu/query-by-global-spu-id", method: "POST" },
-  listingRecommendBatch: { path: "/dop/api/v1/bidding/lowest-price-recommend/batch", method: "POST" },
-  submitAutoBid: { path: "/dop/api/v1/bidding/auto/submit", method: "POST" },
-  listingList: { path: "/dop/api/v1/bidding/listing/list", method: "POST" },
-  cancelListing: { path: "/dop/api/v1/bidding/listing/cancel", method: "POST" },
+  spuByArticleNumber: { path: "/dop/api/v1/pop/api/v1/spu/query-by-article-number", method: "POST" }, // ⚠️ 추정
+  spuByGlobalSpuId: { path: "/dop/api/v1/pop/api/v1/spu/query-by-global-spu-id", method: "POST" }, // ⚠️ 추정
+  listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
+  submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
+  autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
+  listingList: { path: "/dop/api/v1/pop/api/v1/listing/list-simplified", method: "POST" }, // ⚠️ 추정
+  cancelListing: { path: "/dop/api/v1/pop/api/v1/listing/cancel", method: "POST" }, // ⚠️ 추정
 
   // 확장(Default 포함) — 필요 시 순차 구현
   skuSpuByBarcode: { path: "/dop/api/v1/commodity/query-by-barcode", method: "POST" },
@@ -328,17 +330,55 @@ export async function querySpuByGlobalSpuId(
   );
 }
 
-/** 3) 최저가 기반 입찰 추천(배치) — 방어선/목표가 판단의 POIZON 측 기준값. */
+/** 최저가 추천 요청 파라미터 (문서 batchPrice 샘플 기준). */
+export interface RecommendParams {
+  /** DW skuId 배열(최대 20). skuIds/globalSkuIdList 중 하나 필수. skuIds 권장. */
+  globalSkuIdList?: (string | number)[];
+  region?: string; // "US"
+  currency?: string; // "USD"
+  countryCode?: string; // "US"
+  biddingType?: number; // 샘플 20
+  saleType?: number; // 샘플 7
+  uid?: number; // 판매자 uid(미지정 시 env POIZON_UID)
+}
+
+/**
+ * 3) 최저가 기반 입찰 추천(배치) — 방어선/목표가 판단의 POIZON 측 기준값.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/recommend-bid/batchPrice
+ *   바디: skuIds[](또는 globalSkuIdList) · region · currency · countryCode · biddingType · saleType · uid.
+ *   ⚠️ biddingType/saleType 의미·응답 스키마는 문서로 최종 확정.
+ */
 export async function queryListingRecommendations(
   skuIds: (string | number)[],
-  region = "US",
+  params: RecommendParams = {},
   opts: CallOpts<z.infer<typeof zRecommendList>> = {}
 ) {
-  return callPoizon(
-    POIZON_API.listingRecommendBatch,
-    { skuIds, region },
-    { schema: zRecommendList, ...opts }
-  );
+  const skus = (skuIds ?? []).slice(0, 20).map(Number).filter(Number.isFinite);
+  const globals = (params.globalSkuIdList ?? []).slice(0, 20).map(Number).filter(Number.isFinite);
+  if (skus.length === 0 && globals.length === 0)
+    throw new PoizonApiError(
+      "EMPTY",
+      "skuIds 또는 globalSkuIdList 중 하나는 필요합니다(최대 20개, skuIds 권장)."
+    );
+  const uid =
+    params.uid ??
+    (process.env.POIZON_UID ? Number(process.env.POIZON_UID) : undefined);
+  const body: Record<string, unknown> = {
+    language: "ko",
+    timeZone: "Asia/Seoul",
+    region: params.region ?? "US",
+    currency: params.currency ?? "USD",
+    countryCode: params.countryCode ?? "US",
+    biddingType: params.biddingType ?? 20,
+    saleType: params.saleType ?? 7,
+  };
+  if (skus.length) body.skuIds = skus;
+  if (globals.length) body.globalSkuIdList = globals;
+  if (uid != null && Number.isFinite(uid)) body.uid = uid;
+  return callPoizon(POIZON_API.listingRecommendBatch, body, {
+    schema: zRecommendList,
+    ...opts,
+  });
 }
 
 export interface AutoBidItem {
@@ -360,6 +400,55 @@ export async function submitAutoBidding(
     POIZON_API.submitAutoBid,
     { region, items },
     { schema: zSubmitResult, ...opts }
+  );
+}
+
+// followType: 7=중국 최저가 추종, 8=중국 최저가보다 항상 한 단계 낮게(방어선까지만).
+export type FollowType = 6 | 7 | 8 | number;
+
+export interface AutoFollowBidParams {
+  /** 입찰 번호(내 리스팅). Query listing list에서 획득. */
+  biddingNo: string;
+  /** 추종 하한가 = 방어선. 이 아래로는 자동 추종하지 않음(우리 엔진 floorBid). */
+  lowestPrice: number;
+  /** 7=중국 최저가 추종 · 8=한 단계 아래. 기본 8(방어적). */
+  followType?: FollowType;
+  /** true=자동추종 시작 · false=자동추종 취소. */
+  autoSwitch?: boolean;
+  /** 발송지: US·CN·HK·TW·MO·JP·KR·FR·IT·GB·ES·DE. */
+  countryCode?: string;
+  /** 리스팅 통화: CNY·USD·HKD·JPY·SGD·EUR·KRW. */
+  currency?: string;
+}
+
+const zBoolResult = z.boolean();
+
+/**
+ * 4b) 자동 추종 입찰 제출 — ★역경매 자동화 핵심.
+ *   경로 ✅확정: /dop/api/v1/pop/api/v1/auto-follow-bidding/submit
+ *   followType 8 + lowestPrice(방어선)로 "최저가 추격 금지, 방어선까지만" 구현.
+ *   autoSwitch=false로 호출하면 해당 자동추종 취소.
+ *   응답 data=boolean(성공 여부).
+ */
+export async function submitAutoFollowBid(
+  params: AutoFollowBidParams,
+  opts: CallOpts<boolean> = {}
+) {
+  if (!params.biddingNo)
+    throw new PoizonApiError("EMPTY", "biddingNo(입찰 번호)가 필요합니다.");
+  if (!(params.lowestPrice > 0))
+    throw new PoizonApiError("EMPTY", "lowestPrice(방어선)는 0보다 커야 합니다.");
+  return callPoizon(
+    POIZON_API.autoFollowBidSubmit,
+    {
+      biddingNo: params.biddingNo,
+      lowestPrice: Math.round(params.lowestPrice),
+      followType: params.followType ?? 8,
+      autoSwitch: params.autoSwitch ?? true,
+      countryCode: params.countryCode ?? "US",
+      currency: params.currency ?? "USD",
+    },
+    { schema: zBoolResult, ...opts }
   );
 }
 
