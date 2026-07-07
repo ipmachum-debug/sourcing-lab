@@ -508,6 +508,7 @@ export const reverseDealsRouter = router({
           .array(
             z.object({
               spuId: z.string().max(60).optional(),
+              skuId: z.string().max(60).optional(),
               barcode: z.string().max(40).optional(), // 바코드(GTIN) — 국내 exact 매칭
               productName: z.string().min(1).max(300),
               brand: z.string().max(100).optional(),
@@ -515,6 +516,11 @@ export const reverseDealsRouter = router({
               size: z.string().max(40).optional(),
               priceUsd: z.number().min(0).max(1000000).default(0), // 30일 평균 거래가($)
               soldCount: z.number().int().min(0).max(100000000).default(0), // 중국 총 판매량
+              expectedProfitUsd: z.number().min(-1000000).max(1000000).optional(), // 예상 수익($)
+              lowestBidUsd: z.number().min(0).max(1000000).optional(), // 현재 중국 최저 입찰가($)
+              bidAvailable: z.boolean().optional(), // 입찰 가능 여부
+              bidStatus: z.string().max(24).optional(), // 입찰 상태(원문)
+              localSellerCount: z.number().int().min(0).max(100000000).optional(), // 현지 판매자 판매량
             })
           )
           .min(1)
@@ -538,16 +544,29 @@ export const reverseDealsRouter = router({
         const brand = r.brand || detectBrand(r.productName) || null;
         const normKey = normKeyOf(brand, r.productName);
         const priceUsd = Math.round(r.priceUsd);
-        if (priceUsd > 0) {
+        // 시세·판매량이 없어도 입찰 데이터(예상수익/최저입찰가)가 있으면 적립
+        const hasSignal =
+          priceUsd > 0 ||
+          r.soldCount > 0 ||
+          (r.expectedProfitUsd ?? 0) !== 0 ||
+          (r.lowestBidUsd ?? 0) > 0;
+        if (hasSignal) {
           obsRows.push({
             normKey,
             spuId: r.spuId ?? null,
+            skuId: r.skuId ?? null,
             barcode: r.barcode ?? null,
             size: r.size ?? null,
             brand,
             productName: r.productName,
             priceCny: priceUsd, // ★ USD 값(중국시장 달러) — 필드명 유지
             soldCount30d: r.soldCount,
+            expectedProfitUsd:
+              r.expectedProfitUsd != null ? Math.round(r.expectedProfitUsd) : null,
+            lowestBidUsd: r.lowestBidUsd != null ? Math.round(r.lowestBidUsd) : null,
+            bidAvailable: r.bidAvailable ?? null,
+            bidStatus: r.bidStatus ?? null,
+            localSellerCount: r.localSellerCount ?? null,
             source: "seller" as const,
           });
         }
@@ -1036,24 +1055,33 @@ export const reverseDealsRouter = router({
       z.object({
         search: z.string().max(100).optional(), // 브랜드·상품명(예: 크록스)
         category: z.string().max(40).optional(),
+        filter: z
+          .enum(["all", "hot", "margin", "safe", "blue", "risk", "bid"])
+          .default("all"),
         limit: z.number().int().min(1).max(100).default(30),
       })
     )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const now = Date.now();
       const q = (input.search ?? "").trim();
 
-      const obs = await db
+      // 최신 스냅샷 우선: observedAt DESC로 읽어 SKU별 첫 등장(=최신)만 사용
+      const obsAll = await db
         .select({
           normKey: poizonSaleObservations.normKey,
           spuId: poizonSaleObservations.spuId,
+          skuId: poizonSaleObservations.skuId,
           size: poizonSaleObservations.size,
           brand: poizonSaleObservations.brand,
           productName: poizonSaleObservations.productName,
           priceCny: poizonSaleObservations.priceCny,
           soldCount30d: poizonSaleObservations.soldCount30d,
+          expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+          lowestBidUsd: poizonSaleObservations.lowestBidUsd,
+          bidAvailable: poizonSaleObservations.bidAvailable,
+          bidStatus: poizonSaleObservations.bidStatus,
+          localSellerCount: poizonSaleObservations.localSellerCount,
         })
         .from(poizonSaleObservations)
         .where(
@@ -1061,7 +1089,17 @@ export const reverseDealsRouter = router({
             ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
             : sql`1=1`
         )
-        .limit(30000);
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(40000);
+      // SKU 단위 최신만
+      const seenSku = new Set<string>();
+      const obs = [] as typeof obsAll;
+      for (const o of obsAll) {
+        const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
+        if (seenSku.has(k)) continue;
+        seenSku.add(k);
+        obs.push(o);
+      }
 
       // 카테고리 맵(정찰/판매자 시딩)
       const trows = await db
@@ -1081,10 +1119,15 @@ export const reverseDealsRouter = router({
         return s[Math.floor(s.length / 2)];
       };
 
-      // SPU(상품) 단위 묶음
+      // SPU(상품) 단위 묶음 (사이즈별 입찰/수익 레코드 포함)
+      type SizeRec = {
+        size: string | null; price: number; profit: number | null;
+        bid: number | null; bidAvailable: boolean | null; unbid: boolean;
+      };
       type G = {
         normKey: string; brand: string; name: string; category: string | null;
-        prices: number[]; soldMax: number; sizes: Set<string>;
+        prices: number[]; soldMax: number; localSellerMax: number;
+        sizes: Set<string>; recs: SizeRec[];
       };
       const groups = new Map<string, G>();
       const catFilter =
@@ -1097,11 +1140,20 @@ export const reverseDealsRouter = router({
           ({
             normKey: o.normKey, brand: o.brand ?? "", name: o.productName,
             category: catOf({ category: catByKey.get(o.normKey) ?? null, productName: o.productName }),
-            prices: [], soldMax: 0, sizes: new Set<string>(),
+            prices: [], soldMax: 0, localSellerMax: 0,
+            sizes: new Set<string>(), recs: [],
           } as G);
         if (o.priceCny > 0) g.prices.push(o.priceCny);
         g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        g.localSellerMax = Math.max(g.localSellerMax, o.localSellerCount ?? 0);
         if (o.size) g.sizes.add(o.size);
+        const st = String(o.bidStatus ?? "").trim().toLowerCase();
+        const unbid = /미입찰|not\s*bid|nobid|no\s*bid|없음|^0$|none/.test(st);
+        g.recs.push({
+          size: o.size ?? null, price: o.priceCny ?? 0,
+          profit: o.expectedProfitUsd ?? null, bid: o.lowestBidUsd ?? null,
+          bidAvailable: o.bidAvailable ?? null, unbid,
+        });
         groups.set(gk, g);
       }
 
@@ -1118,16 +1170,80 @@ export const reverseDealsRouter = router({
         g => !catFilter || g.category === catFilter
       );
 
-      // ① 모델 판매량 랭킹
-      const models = list
-        .map(g => ({
-          normKey: g.normKey, brand: g.brand, productName: g.name,
-          category: g.category, soldCount: g.soldMax,
-          avgUsd: median(g.prices), lowUsd: g.prices.length ? Math.min(...g.prices) : 0,
-          highUsd: g.prices.length ? Math.max(...g.prices) : 0, sizeCount: g.sizes.size,
-        }))
-        .sort((a, b) => b.soldCount - a.soldCount)
-        .slice(0, input.limit);
+      // ① 모델 엔리치먼트 — 발굴 필터·리스크 점수·입찰 추천·사이즈 추천
+      const enriched = list.map(g => {
+        const avgUsd = median(g.prices);
+        const profits = g.recs.map(r => r.profit).filter((x): x is number => x != null);
+        const maxProfitUsd = profits.length ? Math.max(...profits) : null;
+        const bids = g.recs.map(r => r.bid).filter((x): x is number => x != null && x > 0);
+        const lowestBidUsd = bids.length ? Math.min(...bids) : null;
+        const bidAvailCnt = g.recs.filter(r => r.bidAvailable === true).length;
+        const unbidCnt = g.recs.filter(r => r.unbid).length;
+        const localSeller = g.localSellerMax;
+        // 경쟁도 낮음: 현지 판매자가 없거나 중국 총판매의 30% 이하
+        const lowComp = localSeller === 0 || (g.soldMax > 0 && localSeller <= g.soldMax * 0.3);
+        // 리스크 점수(높을수록 위험): 무판매·저마진·경쟁과다
+        let riskScore = 0;
+        if (g.soldMax < 10) riskScore += 35;
+        if (g.soldMax < 3) riskScore += 20;
+        if (maxProfitUsd != null && maxProfitUsd <= 0) riskScore += 20;
+        if (!lowComp) riskScore += 15;
+        if (avgUsd > 0 && g.soldMax < 3) riskScore += 10; // 가격만 있고 사실상 무판매
+        riskScore = Math.min(100, riskScore);
+        // 발굴 플래그
+        const safe = g.soldMax > 0 && bidAvailCnt > 0 && avgUsd > 0;
+        const blue = g.soldMax >= 10 && lowComp;
+        const riskFlag = g.soldMax < 5 && avgUsd > 0; // 판매 거의 없는데 가격만 있음
+        const bidRec =
+          (maxProfitUsd ?? 0) >= 20 && g.soldMax >= 10 && lowComp &&
+          bidAvailCnt > 0 && unbidCnt > 0;
+        // 추천 입찰가: 게이트 통과 시 현재 최저가와 동일(약간 낮게 매칭)
+        const recommendBidUsd = bidRec ? lowestBidUsd : null;
+        // 사이즈 추천: 예상수익 높은 순 + 입찰 공백 우선
+        const bestSizes = g.recs
+          .filter(r => r.size)
+          .map(r => ({
+            size: r.size as string, profit: r.profit ?? 0, bid: r.bid ?? 0,
+            price: r.price ?? 0, bidAvailable: r.bidAvailable === true, unbid: r.unbid,
+          }))
+          .sort((a, b) => b.profit - a.profit || Number(b.unbid) - Number(a.unbid))
+          .slice(0, 5);
+        return {
+          normKey: g.normKey, brand: g.brand, productName: g.name, category: g.category,
+          soldCount: g.soldMax, avgUsd,
+          lowUsd: g.prices.length ? Math.min(...g.prices) : 0,
+          highUsd: g.prices.length ? Math.max(...g.prices) : 0,
+          sizeCount: g.sizes.size,
+          maxProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
+          riskScore, safe, blue, risk: riskFlag, bidRec, recommendBidUsd, bestSizes,
+        };
+      });
+
+      // 필터별 개수(탭 뱃지)
+      const counts = {
+        all: enriched.length,
+        hot: enriched.filter(m => m.soldCount > 0).length,
+        margin: enriched.filter(m => (m.maxProfitUsd ?? 0) > 0).length,
+        safe: enriched.filter(m => m.safe).length,
+        blue: enriched.filter(m => m.blue).length,
+        risk: enriched.filter(m => m.risk).length,
+        bid: enriched.filter(m => m.bidRec).length,
+      };
+
+      // 필터 적용 + 정렬
+      const F = input.filter;
+      let picked = enriched;
+      if (F === "safe") picked = enriched.filter(m => m.safe);
+      else if (F === "blue") picked = enriched.filter(m => m.blue);
+      else if (F === "risk") picked = enriched.filter(m => m.risk);
+      else if (F === "bid") picked = enriched.filter(m => m.bidRec);
+      picked = [...picked].sort((a, b) => {
+        if (F === "margin" || F === "bid")
+          return (b.maxProfitUsd ?? -1e9) - (a.maxProfitUsd ?? -1e9);
+        if (F === "risk") return b.riskScore - a.riskScore;
+        return b.soldCount - a.soldCount; // hot/all/safe/blue → 판매량
+      });
+      const models = picked.slice(0, input.limit);
 
       // ② 가격대별($) 수요 — 모델 중앙가 기준 버킷
       const BANDS: [number, number, string][] = [
@@ -1175,6 +1291,8 @@ export const reverseDealsRouter = router({
 
       return {
         models,
+        counts,
+        filter: F,
         bands,
         sizes,
         categories,
@@ -1183,6 +1301,107 @@ export const reverseDealsRouter = router({
           totalSold: list.reduce((a, g) => a + g.soldMax, 0),
           avgUsd: median(list.map(g => median(g.prices)).filter(x => x > 0)),
         },
+      };
+    }),
+
+  // ===== 모니터링 — 업로드 스냅샷 diff ("이번에 좋아진 상품") =====
+  //   업로드 간격(주/2주 무관) DATE(observed_at) 기준 최신 vs 직전 스냅샷을 SKU별 비교.
+  //   최저입찰가↓ · 예상수익↑ · 판매량↑ · 경쟁↓ · 입찰가능 전환을 "개선"으로 집계.
+  catalogChanges: protectedProcedure
+    .input(
+      z.object({
+        search: z.string().max(100).optional(),
+        limit: z.number().int().min(1).max(200).default(60),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const q = (input.search ?? "").trim();
+      const rows = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          skuId: poizonSaleObservations.skuId,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+          expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+          lowestBidUsd: poizonSaleObservations.lowestBidUsd,
+          bidAvailable: poizonSaleObservations.bidAvailable,
+          bidStatus: poizonSaleObservations.bidStatus,
+          localSellerCount: poizonSaleObservations.localSellerCount,
+          observedAt: poizonSaleObservations.observedAt,
+        })
+        .from(poizonSaleObservations)
+        .where(
+          q
+            ? sql`(${poizonSaleObservations.productName} LIKE ${"%" + q + "%"} OR ${poizonSaleObservations.brand} LIKE ${"%" + q + "%"})`
+            : sql`1=1`
+        )
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(60000);
+
+      const dateOf = (v: unknown) => String(v ?? "").slice(0, 10);
+      const allDates = new Set<string>();
+      // SKU별 날짜별 최신 레코드(내림차순이라 각 날짜 첫 등장 유지)
+      const bySku = new Map<string, { date: string; r: (typeof rows)[number] }[]>();
+      for (const r of rows) {
+        const d = dateOf(r.observedAt);
+        allDates.add(d);
+        const key = r.skuId || `${r.spuId || r.normKey}|${r.size || ""}`;
+        const arr = bySku.get(key) ?? [];
+        if (!arr.some(x => x.date === d)) arr.push({ date: d, r });
+        bySku.set(key, arr);
+      }
+      const snapshotDates = [...allDates].sort().reverse();
+      if (snapshotDates.length < 2) {
+        return { changes: [], snapshots: snapshotDates.length, hasPrev: false, curDate: snapshotDates[0] ?? null, prevDate: null };
+      }
+
+      type Ch = {
+        productName: string; brand: string | null; size: string | null;
+        good: number; bidDelta: number; profitDelta: number; soldDelta: number;
+        localDelta: number; curBid: number | null; curProfit: number | null;
+        curSold: number; newlyBidable: boolean;
+      };
+      const changes: Ch[] = [];
+      for (const arr of bySku.values()) {
+        if (arr.length < 2) continue;
+        const cur = arr[0].r;
+        const prev = arr[1].r;
+        const bidDelta = (cur.lowestBidUsd ?? 0) - (prev.lowestBidUsd ?? 0);
+        const profitDelta = (cur.expectedProfitUsd ?? 0) - (prev.expectedProfitUsd ?? 0);
+        const soldDelta = (cur.soldCount30d ?? 0) - (prev.soldCount30d ?? 0);
+        const priceDelta = (cur.priceCny ?? 0) - (prev.priceCny ?? 0);
+        const localDelta = (cur.localSellerCount ?? 0) - (prev.localSellerCount ?? 0);
+        const newlyBidable = cur.bidAvailable === true && prev.bidAvailable !== true;
+        if (!bidDelta && !profitDelta && !soldDelta && !priceDelta && !localDelta && !newlyBidable)
+          continue;
+        let good = 0;
+        if (bidDelta < 0) good++; // 최저 입찰가 하락 → 진입 유리
+        if (profitDelta > 0) good++;
+        if (soldDelta > 0) good++;
+        if (localDelta < 0) good++; // 경쟁 감소
+        if (newlyBidable) good++;
+        changes.push({
+          productName: cur.productName, brand: cur.brand, size: cur.size,
+          good, bidDelta, profitDelta, soldDelta, localDelta,
+          curBid: cur.lowestBidUsd ?? null, curProfit: cur.expectedProfitUsd ?? null,
+          curSold: cur.soldCount30d ?? 0, newlyBidable,
+        });
+      }
+      changes.sort(
+        (a, b) => b.good - a.good || Math.abs(b.profitDelta) - Math.abs(a.profitDelta)
+      );
+      return {
+        changes: changes.slice(0, input.limit),
+        snapshots: snapshotDates.length,
+        hasPrev: true,
+        curDate: snapshotDates[0],
+        prevDate: snapshotDates[1],
       };
     }),
 

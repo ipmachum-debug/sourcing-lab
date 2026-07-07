@@ -1896,12 +1896,18 @@ export const poizonSaleObservations = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     normKey: varchar("norm_key", { length: 255 }).notNull(), // 상품 매칭키(브랜드+상품)
     spuId: varchar("spu_id", { length: 60 }), // POIZON SPU_ID(있으면 정확 매칭키)
+    skuId: varchar("sku_id", { length: 60 }), // POIZON SKU_ID(사이즈 단위 정확키)
     barcode: varchar("barcode", { length: 40 }), // 바코드(GTIN) — 국내몰 exact 매칭 다리
     size: varchar("size", { length: 40 }), // 사이즈(있으면) — 사이즈별 회전율
     brand: varchar("brand", { length: 100 }),
     productName: varchar("product_name", { length: 300 }).notNull(),
-    priceCny: int("price_cny").notNull(), // POIZON 시세 (중국시장 USD, 필드명 유지)
-    soldCount30d: int("sold_count_30d").default(0), // 최근 30일 판매량
+    priceCny: int("price_cny").notNull(), // POIZON 시세=최근 30일 평균 거래가 (중국시장 USD, 필드명 유지)
+    soldCount30d: int("sold_count_30d").default(0), // 중국 총 판매량(SPU 단위)
+    expectedProfitUsd: int("expected_profit_usd"), // 예상 수익($) — 엑셀 제공값
+    lowestBidUsd: int("lowest_bid_usd"), // 현재 중국 최저 입찰가($)
+    bidAvailable: boolean("bid_available"), // 사용자 입찰 가능 여부
+    bidStatus: varchar("bid_status", { length: 24 }), // 입찰 상태(원문) — 미입찰/입찰중 등
+    localSellerCount: int("local_seller_count"), // 현지 판매자 총 판매량 — 경쟁도
     source: varchar("source", { length: 30 }).default("extension"), // extension/seller/manual
     observedAt: timestamp("observed_at", tsOpts).defaultNow().notNull(),
   },
@@ -1910,6 +1916,7 @@ export const poizonSaleObservations = mysqlTable(
     keySizeIdx: index("idx_pso_key_size").on(t.normKey, t.size),
     obsIdx: index("idx_pso_observed").on(t.observedAt),
     spuIdx: index("idx_pso_spu").on(t.spuId),
+    skuIdx: index("idx_pso_sku").on(t.skuId),
     barcodeIdx: index("idx_pso_barcode").on(t.barcode),
   })
 );

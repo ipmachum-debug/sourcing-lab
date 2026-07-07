@@ -8,7 +8,7 @@ import { Globe2, Camera, Scale, Store, ListChecks, BarChart3, Package, Ship, Spa
 // 역직구 채널 홈 — 판매자 카탈로그(엑셀) 주도 소싱 엔진.
 const TOOLS = [
   { icon: Store, emoji: "🏬", title: "판매자 엑셀", desc: "POIZON 판매자센터 전체 내보내기 → 카탈로그 시딩", path: "/reverse/seller" },
-  { icon: BarChart3, emoji: "📊", title: "소싱 인사이트", desc: "잘 팔리는 모델·가격대·사이즈 한눈에", path: "/reverse/insights" },
+  { icon: BarChart3, emoji: "📊", title: "상품 발굴", desc: "고회전·고마진·안전·블루오션 필터 + 입찰 추천", path: "/reverse/insights" },
   { icon: ListChecks, emoji: "🧭", title: "소싱 큐", desc: "국내가만 잡으면 딜 — 발굴/딜 우선순위 + 추천 수량", path: "/reverse/queue" },
   { icon: Camera, emoji: "📸", title: "사진 소싱", desc: "매장 가격표 사진 → AI OCR → 즉시 매입 판단", path: "/reverse/photo" },
   { icon: Scale, emoji: "⚖️", title: "정밀 계산기", desc: "검수 탈락·부가세 환급까지 반영한 진짜 순익", path: "/reverse/arbitrage" },

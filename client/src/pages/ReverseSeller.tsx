@@ -15,6 +15,7 @@ const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 
 interface SellerRow {
   spuId?: string;
+  skuId?: string;
   barcode?: string;
   productName: string;
   brand?: string;
@@ -22,6 +23,11 @@ interface SellerRow {
   size?: string;
   priceUsd: number;
   soldCount: number;
+  expectedProfitUsd?: number;
+  lowestBidUsd?: number;
+  bidAvailable?: boolean;
+  bidStatus?: string;
+  localSellerCount?: number;
 }
 
 // "$345" · "345.0" · "1,234" → 345 / 1234
@@ -29,6 +35,23 @@ function parseUsd(v: unknown): number {
   const s = String(v ?? "").replace(/[$,\s₩¥]/g, "");
   const m = s.match(/([0-9]+(?:\.[0-9]+)?)/);
   return m ? Math.round(parseFloat(m[1])) : 0;
+}
+
+// 예상 수익은 음수 가능: "-$12" · "$20" → -12 / 20
+function parseSignedUsd(v: unknown): number {
+  const raw = String(v ?? "").trim();
+  const neg = /^-|^\(.*\)$/.test(raw.replace(/[$,\s₩¥]/g, ""));
+  const n = parseUsd(v);
+  return neg ? -n : n;
+}
+
+// 입찰 가능 여부: 1/Y/가능 → true, 0/N/불가 → false
+function parseBool(v: unknown): boolean | undefined {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return undefined;
+  if (/^(1|y|yes|true|가능|예|o|available)/.test(s)) return true;
+  if (/^(0|n|no|false|불가|아니오|x|unavailable)/.test(s)) return false;
+  return undefined;
 }
 
 // 중국 총 판매량: "<5"→5, "300+"→300, "53,000+"→53000, "--"/""→0
@@ -44,7 +67,8 @@ function colIndex(headers: string[]): Record<string, number> {
   const idx: Record<string, number> = {};
   headers.forEach((raw, i) => {
     const h = String(raw || "").trim().toLowerCase().replace(/\s+/g, "");
-    if (idx.spuId == null && /spuid/.test(h)) idx.spuId = i;
+    if (idx.spuId == null && /^spuid|spu.*id/.test(h)) idx.spuId = i;
+    else if (idx.skuId == null && /^skuid|sku.*id/.test(h)) idx.skuId = i;
     else if (idx.barcode == null && /바코드|barcode|gtin/.test(h)) idx.barcode = i;
     else if (idx.productName == null && /^상품명|productname/.test(h))
       idx.productName = i;
@@ -54,6 +78,16 @@ function colIndex(headers: string[]): Record<string, number> {
     else if (idx.size == null && /사이즈|옵션|색상|size/.test(h)) idx.size = i;
     else if (idx.priceUsd == null && /평균거래가|30일|거래가|avgprice/.test(h))
       idx.priceUsd = i;
+    else if (idx.expectedProfit == null && /예상수익|예상\s*수익|expected.*profit|estprofit/.test(h))
+      idx.expectedProfit = i;
+    else if (idx.lowestBid == null && /최저입찰|최저\s*입찰|현재.*입찰|lowest.*bid|lowbid/.test(h))
+      idx.lowestBid = i;
+    else if (idx.bidAvailable == null && /입찰가능|입찰\s*가능|bid.*available|입찰여부/.test(h))
+      idx.bidAvailable = i;
+    else if (idx.bidStatus == null && /입찰상태|입찰\s*상태|bid.*status/.test(h))
+      idx.bidStatus = i;
+    else if (idx.localSeller == null && /현지판매자|현지\s*판매자|local.*seller/.test(h))
+      idx.localSeller = i;
     else if (idx.soldCount == null && /중국총판매량|총판매량|중국.*판매|판매량|soldcount|salesvolume/.test(h))
       idx.soldCount = i;
   });
@@ -92,6 +126,10 @@ async function parseWorkbook(
         idx.spuId != null
           ? String(cells[idx.spuId] ?? "").trim().slice(0, 60) || undefined
           : undefined,
+      skuId:
+        idx.skuId != null
+          ? String(cells[idx.skuId] ?? "").trim().slice(0, 60) || undefined
+          : undefined,
       barcode:
         idx.barcode != null
           ? String(cells[idx.barcode] ?? "").trim().slice(0, 40) || undefined
@@ -111,6 +149,18 @@ async function parseWorkbook(
           : undefined,
       priceUsd: idx.priceUsd != null ? parseUsd(cells[idx.priceUsd]) : 0,
       soldCount: idx.soldCount != null ? parseSold(cells[idx.soldCount]) : 0,
+      expectedProfitUsd:
+        idx.expectedProfit != null ? parseSignedUsd(cells[idx.expectedProfit]) : undefined,
+      lowestBidUsd:
+        idx.lowestBid != null ? parseUsd(cells[idx.lowestBid]) : undefined,
+      bidAvailable:
+        idx.bidAvailable != null ? parseBool(cells[idx.bidAvailable]) : undefined,
+      bidStatus:
+        idx.bidStatus != null
+          ? String(cells[idx.bidStatus] ?? "").trim().slice(0, 24) || undefined
+          : undefined,
+      localSellerCount:
+        idx.localSeller != null ? parseSold(cells[idx.localSeller]) : undefined,
     });
   }
   return { rows, skipped };
@@ -136,8 +186,11 @@ export default function ReverseSeller() {
   const importMut = trpc.reverseDeals.sellerImport.useMutation();
   const apiStatus = trpc.reverseDeals.openApiStatus.useQuery();
 
-  // 실제로 거래되는 것만: 시세($) + 판매량 둘 다 있는 SKU (죽은 SKU 제외)
-  const tradable = rows.filter(r => r.priceUsd > 0 && r.soldCount > 0);
+  // 살아있는 SKU: 시세·판매량·입찰가 중 하나라도 있는 것 (완전 빈 SKU만 제외)
+  //   위험/블루오션 판정엔 판매량 낮은 것도 필요 → 시세+판매 둘 다 요구하지 않음
+  const tradable = rows.filter(
+    r => r.priceUsd > 0 || r.soldCount > 0 || (r.lowestBidUsd ?? 0) > 0
+  );
   const active = onlyTradable ? tradable : rows;
 
   const onFile = async (f: File) => {
@@ -250,7 +303,7 @@ export default function ReverseSeller() {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Tile label="인식 SKU" value={rows.length.toLocaleString()} />
-                <Tile label="거래 SKU (시세+판매량)" value={tradable.length.toLocaleString()} tone="good" />
+                <Tile label="살아있는 SKU (시세·판매·입찰)" value={tradable.length.toLocaleString()} tone="good" />
                 <Tile
                   label="상품(SPU)"
                   value={new Set(active.map(r => r.spuId || r.productName)).size.toLocaleString()}
@@ -271,10 +324,10 @@ export default function ReverseSeller() {
                   className="accent-fuchsia-500 h-4 w-4"
                 />
                 <span className="text-sm text-slate-200">
-                  <b className="text-white">거래되는 것만 올리기</b> — 시세($)·판매량이 모두 있는 SKU만.
+                  <b className="text-white">빈 SKU 제외</b> — 시세·판매량·입찰가 중 하나라도 있는 것만.
                   {rows.length > tradable.length && (
                     <span className="text-slate-400">
-                      {" "}죽은 SKU {(rows.length - tradable.length).toLocaleString()}개 제외.
+                      {" "}완전 빈 SKU {(rows.length - tradable.length).toLocaleString()}개 제외.
                     </span>
                   )}
                 </span>

@@ -4,7 +4,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
 import {
-  BarChart3,
+  Compass,
   Search,
   TrendingUp,
   Ruler,
@@ -12,38 +12,68 @@ import {
   Store,
   ChevronDown,
   ExternalLink,
+  Gavel,
+  ShieldCheck,
+  Waves,
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
 } from "lucide-react";
 
-const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
+const usd = (n: number | null | undefined) =>
+  n == null ? "-" : `$${Math.round(n).toLocaleString("en-US")}`;
+const signedUsd = (n: number) =>
+  `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
 
+interface BestSize { size: string; profit: number; bid: number; price: number; bidAvailable: boolean; unbid: boolean; }
 interface Model {
   normKey: string; brand: string; productName: string; category: string | null;
   soldCount: number; avgUsd: number; lowUsd: number; highUsd: number; sizeCount: number;
+  maxProfitUsd: number | null; lowestBidUsd: number | null; bidAvailCnt: number;
+  unbidCnt: number; localSeller: number; riskScore: number;
+  safe: boolean; blue: boolean; risk: boolean; bidRec: boolean;
+  recommendBidUsd: number | null; bestSizes: BestSize[];
 }
-interface Band { label: string; lo: number; hi: number | null; models: number; totalSold: number; }
+interface Band { label: string; models: number; totalSold: number; }
 interface Size { size: string; models: number; demand: number; medianUsd: number; }
+type Counts = { all: number; hot: number; margin: number; safe: number; blue: number; risk: number; bid: number; };
+type Filter = "all" | "hot" | "margin" | "safe" | "blue" | "risk" | "bid";
+
+const FILTERS: { key: Filter; label: string; icon: any }[] = [
+  { key: "all", label: "전체", icon: Compass },
+  { key: "hot", label: "고회전", icon: TrendingUp },
+  { key: "margin", label: "고마진", icon: DollarSign },
+  { key: "bid", label: "입찰 추천", icon: Gavel },
+  { key: "safe", label: "안전", icon: ShieldCheck },
+  { key: "blue", label: "블루오션", icon: Waves },
+  { key: "risk", label: "위험", icon: AlertTriangle },
+];
 
 export default function ReverseInsights() {
   const [term, setTerm] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("전체");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [openSize, setOpenSize] = useState<string | null>(null);
 
   const q = trpc.reverseDeals.catalogInsights.useQuery({
     search: search || undefined,
     category: category === "전체" ? undefined : category,
-    limit: 30,
+    filter,
+    limit: 40,
   });
+  const changes = trpc.reverseDeals.catalogChanges.useQuery({ search: search || undefined });
   const data = q.data as
-    | {
-        models: Model[]; bands: Band[]; sizes: Size[];
+    | { models: Model[]; counts: Counts; bands: Band[]; sizes: Size[];
         categories: { name: string; count: number }[];
-        summary: { totalModels: number; totalSold: number; avgUsd: number };
-      }
+        summary: { totalModels: number; totalSold: number; avgUsd: number }; }
     | undefined;
 
   const doSearch = () => setSearch(term.trim());
   const maxBandSold = Math.max(1, ...(data?.bands.map(b => b.totalSold) ?? [1]));
-  const maxSizeDemand = Math.max(1, ...(data?.sizes.map(s => s.demand) ?? [1]));
+  const cd = changes.data as
+    | { changes: any[]; hasPrev: boolean; snapshots: number; curDate: string | null; prevDate: string | null }
+    | undefined;
 
   return (
     <DashboardLayout>
@@ -51,12 +81,12 @@ export default function ReverseInsights() {
         <div className="max-w-6xl mx-auto space-y-6">
           <div>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-widest neon-chip neon-magenta px-3 py-1 rounded-full uppercase">
-              <BarChart3 className="h-3.5 w-3.5" /> Sourcing Insights
+              <Compass className="h-3.5 w-3.5" /> Discovery
             </span>
-            <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">소싱 인사이트</h1>
+            <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">상품 발굴 · 입찰 추천</h1>
             <p className="text-slate-300/80 mt-2">
-              판매자 다운로드 자료로 <b className="text-white">중국에서 뭐가·어느 가격대가·어느 사이즈가</b>{" "}
-              잘 팔리는지 한눈에. 브랜드로 검색해 소싱 후보를 뽑으세요. (시세는 중국시장 $)
+              판매자 자료로 <b className="text-white">고회전·고마진·안전·블루오션</b>을 골라내고,{" "}
+              <b className="text-fuchsia-300">입찰 추천가</b>까지. 브랜드로 검색해 오늘 살 상품을 뽑으세요.
             </p>
           </div>
 
@@ -74,31 +104,23 @@ export default function ReverseInsights() {
                 />
               </div>
               <button onClick={doSearch} className="neon-btn rounded-lg px-4 py-2.5 text-sm font-semibold">검색</button>
-              {search && (
-                <button onClick={() => { setTerm(""); setSearch(""); }} className="text-sm text-slate-400 hover:text-white px-2">초기화</button>
-              )}
+              {search && <button onClick={() => { setTerm(""); setSearch(""); }} className="text-sm text-slate-400 hover:text-white px-2">초기화</button>}
             </div>
             {data?.categories && data.categories.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 {["전체", ...data.categories.map(c => c.name)].map(name => (
-                  <button
-                    key={name}
-                    onClick={() => setCategory(name)}
+                  <button key={name} onClick={() => setCategory(name)}
                     className={`rounded-full px-2.5 py-1 text-[12px] transition-all ${
-                      category === name
-                        ? "bg-fuchsia-500/25 text-fuchsia-100 ring-1 ring-fuchsia-400/40"
-                        : "text-slate-400 hover:text-slate-200 bg-white/5"
-                    }`}
-                  >
-                    {name}
-                    {name !== "전체" && (
-                      <span className="ml-1 opacity-60">{data.categories.find(c => c.name === name)?.count}</span>
-                    )}
+                      category === name ? "bg-fuchsia-500/25 text-fuchsia-100 ring-1 ring-fuchsia-400/40" : "text-slate-400 hover:text-slate-200 bg-white/5"}`}>
+                    {name}{name !== "전체" && <span className="ml-1 opacity-60">{data.categories.find(c => c.name === name)?.count}</span>}
                   </button>
                 ))}
               </div>
             )}
           </div>
+
+          {/* 변화 감지 (직전 업로드 대비) */}
+          {cd?.hasPrev && cd.changes.length > 0 && <ChangesPanel cd={cd} />}
 
           {q.isLoading ? (
             <div className="text-center text-slate-500 py-16">집계 중…</div>
@@ -113,93 +135,87 @@ export default function ReverseInsights() {
                 <Tile label="중앙 시세" value={usd(data.summary.avgUsd)} tone="mag" />
               </div>
 
+              {/* 발굴 필터 탭 */}
+              <div className="flex flex-wrap items-center gap-2">
+                {FILTERS.map(f => (
+                  <button key={f.key} onClick={() => setFilter(f.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${
+                      filter === f.key ? "neon-chip neon-magenta text-white" : "text-slate-400 hover:text-slate-200 bg-white/5"}`}>
+                    <f.icon className="h-3.5 w-3.5" />
+                    {f.label}
+                    <span className="text-[11px] opacity-70">{data.counts[f.key].toLocaleString()}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* 모델 랭킹 / 발굴 결과 */}
+              <div className="glass rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[860px]">
+                    <thead className="bg-white/5 text-xs text-slate-400">
+                      <tr>
+                        <th className="text-left font-medium px-3 py-2.5">모델</th>
+                        <th className="text-right font-medium px-3 py-2.5">판매량</th>
+                        <th className="text-right font-medium px-3 py-2.5">시세($)</th>
+                        <th className="text-right font-medium px-3 py-2.5">예상수익</th>
+                        <th className="text-right font-medium px-3 py-2.5">최저입찰</th>
+                        {filter === "bid" && <th className="text-right font-medium px-3 py-2.5">추천입찰</th>}
+                        <th className="text-center font-medium px-3 py-2.5">경쟁/리스크</th>
+                        <th className="text-center font-medium px-3 py-2.5">소싱</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.models.map(m => (
+                        <ModelRow key={m.normKey} m={m} bid={filter === "bid"}
+                          open={openSize === m.normKey}
+                          onToggle={() => setOpenSize(openSize === m.normKey ? null : m.normKey)} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* 가격대·사이즈 분포 */}
               <div className="grid lg:grid-cols-2 gap-6">
-                {/* ② 가격대별 수요 */}
                 <Panel icon={DollarSign} title="가격대별 수요" hint="모델 중앙가 기준 · 막대=총 판매량">
                   <div className="space-y-2.5">
                     {data.bands.map(b => (
                       <div key={b.label}>
                         <div className="flex items-center justify-between text-[13px] mb-1">
                           <span className="text-slate-200 font-medium">{b.label}</span>
-                          <span className="text-slate-400">
-                            {b.totalSold.toLocaleString()} <span className="text-slate-600">· {b.models}모델</span>
-                          </span>
+                          <span className="text-slate-400">{b.totalSold.toLocaleString()} <span className="text-slate-600">· {b.models}모델</span></span>
                         </div>
                         <div className="h-2.5 rounded-full bg-white/8 overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-400"
-                            style={{ width: `${Math.round((b.totalSold / maxBandSold) * 100)}%` }} />
+                          <div className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-400" style={{ width: `${Math.round((b.totalSold / maxBandSold) * 100)}%` }} />
                         </div>
                       </div>
                     ))}
                   </div>
                 </Panel>
-
-                {/* ③ 사이즈 분포 */}
                 <Panel icon={Ruler} title="사이즈 분포" hint="인기 모델이 취급하는 사이즈 (수요가중)">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                    {data.sizes.slice(0, 12).map(s => (
-                      <div key={s.size}>
-                        <div className="flex items-center justify-between text-[13px] mb-1">
-                          <span className="text-slate-200 font-medium truncate">{s.size}</span>
-                          <span className="text-slate-500 text-[11px]">{s.models}모델</span>
+                    {data.sizes.slice(0, 12).map(s => {
+                      const max = Math.max(1, ...data.sizes.map(x => x.demand));
+                      return (
+                        <div key={s.size}>
+                          <div className="flex items-center justify-between text-[13px] mb-1">
+                            <span className="text-slate-200 font-medium truncate">{s.size}</span>
+                            <span className="text-slate-500 text-[11px]">{s.models}모델</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-white/8 overflow-hidden">
+                            <div className="h-full bg-emerald-400/80" style={{ width: `${Math.round((s.demand / max) * 100)}%` }} />
+                          </div>
                         </div>
-                        <div className="h-2 rounded-full bg-white/8 overflow-hidden">
-                          <div className="h-full bg-emerald-400/80"
-                            style={{ width: `${Math.round((s.demand / maxSizeDemand) * 100)}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  {data.sizes.length === 0 && <p className="text-sm text-slate-500">사이즈 데이터 없음</p>}
                 </Panel>
               </div>
 
-              {/* ① 모델 판매량 랭킹 */}
-              <Panel icon={TrendingUp} title="잘 팔리는 모델 (판매량 순)" hint="바로 국내가를 찾아 소싱하세요">
-                <div className="overflow-x-auto -mx-1">
-                  <table className="w-full text-sm min-w-[680px]">
-                    <thead className="text-xs text-slate-400">
-                      <tr>
-                        <th className="text-left font-medium px-2 py-2 w-8">#</th>
-                        <th className="text-left font-medium px-2 py-2">모델</th>
-                        <th className="text-right font-medium px-2 py-2">판매량</th>
-                        <th className="text-right font-medium px-2 py-2">시세($)</th>
-                        <th className="text-center font-medium px-2 py-2">사이즈</th>
-                        <th className="text-center font-medium px-2 py-2">소싱</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.models.map((m, i) => (
-                        <tr key={m.normKey} className="border-t border-white/8">
-                          <td className="px-2 py-2 text-slate-500">{i + 1}</td>
-                          <td className="px-2 py-2">
-                            <p className="text-slate-100 truncate max-w-[300px]">{m.productName}</p>
-                            <p className="text-[11px] text-slate-500">{m.brand || "-"}{m.category ? ` · ${m.category}` : ""}</p>
-                          </td>
-                          <td className="text-right px-2 py-2 font-semibold text-emerald-300">{m.soldCount.toLocaleString()}</td>
-                          <td className="text-right px-2 py-2 text-fuchsia-200">
-                            {usd(m.avgUsd)}
-                            {m.highUsd > m.lowUsd && (
-                              <span className="block text-[10px] text-slate-600">{usd(m.lowUsd)}~{usd(m.highUsd)}</span>
-                            )}
-                          </td>
-                          <td className="text-center px-2 py-2 text-slate-400">{m.sizeCount || "-"}</td>
-                          <td className="px-2 py-2">
-                            <div className="flex justify-center">
-                              <FindDomestic name={m.productName} brand={m.brand} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Panel>
-
               <p className="text-[11px] text-slate-500">
-                💡 판매량은 <b className="text-slate-400">SPU(상품) 단위 중국 총계</b>입니다. 사이즈별 순수 판매량은
-                원자료에 없어 <b className="text-slate-400">인기 모델의 사이즈 취급도(수요가중)</b>로 표시했어요.
-                <Link href="/reverse/queue" className="underline text-fuchsia-300 ml-1">소싱 큐에서 매입 판단 →</Link>
+                💡 <b className="text-slate-400">입찰 추천</b> 조건: 예상수익 ≥$20 · 중국 판매량 ≥10 · 현지 판매자 적음 · 입찰 가능 · 미입찰.
+                판매량은 SPU(상품) 단위 총계이며, 사이즈 추천은 예상수익·입찰 공백 기준입니다.
+                <Link href="/reverse/queue" className="underline text-fuchsia-300 ml-1">소싱 큐에서 국내가 매칭 →</Link>
               </p>
             </>
           )}
@@ -209,9 +225,97 @@ export default function ReverseInsights() {
   );
 }
 
-function Panel({
-  icon: Icon, title, hint, children,
-}: { icon: any; title: string; hint?: string; children: React.ReactNode }) {
+function ModelRow({ m, bid, open, onToggle }: { m: Model; bid: boolean; open: boolean; onToggle: () => void }) {
+  const riskTone = m.riskScore >= 60 ? "text-red-400" : m.riskScore >= 35 ? "text-amber-300" : "text-emerald-300";
+  return (
+    <>
+      <tr className="border-t border-white/8 hover:bg-white/[0.02]">
+        <td className="px-3 py-2.5">
+          <button onClick={onToggle} className="text-left w-full group">
+            <p className="text-slate-100 truncate max-w-[300px] group-hover:text-fuchsia-200 flex items-center gap-1">
+              {m.productName}
+              <ChevronDown className={`h-3 w-3 text-slate-600 transition-transform ${open ? "rotate-180" : ""}`} />
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {m.brand || "-"}{m.category ? ` · ${m.category}` : ""} · 사이즈 {m.sizeCount}
+              {m.blue && <span className="text-cyan-400/80 ml-1">블루오션</span>}
+              {m.safe && <span className="text-emerald-400/80 ml-1">안전</span>}
+              {m.bidRec && <span className="text-fuchsia-300 ml-1">입찰추천</span>}
+            </p>
+          </button>
+        </td>
+        <td className="text-right px-3 py-2.5 font-semibold text-emerald-300">{m.soldCount.toLocaleString()}</td>
+        <td className="text-right px-3 py-2.5 text-fuchsia-200">{usd(m.avgUsd)}</td>
+        <td className={`text-right px-3 py-2.5 ${(m.maxProfitUsd ?? 0) > 0 ? "text-emerald-300" : "text-slate-500"}`}>{usd(m.maxProfitUsd)}</td>
+        <td className="text-right px-3 py-2.5 text-slate-300">{usd(m.lowestBidUsd)}</td>
+        {bid && (
+          <td className="text-right px-3 py-2.5">
+            {m.recommendBidUsd != null ? <span className="font-bold text-fuchsia-200">{usd(m.recommendBidUsd)}</span> : <span className="text-slate-600">-</span>}
+          </td>
+        )}
+        <td className="text-center px-3 py-2.5">
+          <span className="text-[12px] text-slate-400">{m.localSeller > 0 ? `현지 ${m.localSeller.toLocaleString()}` : "경쟁 낮음"}</span>
+          <span className={`block text-[10px] font-semibold ${riskTone}`}>리스크 {m.riskScore}</span>
+        </td>
+        <td className="px-3 py-2.5">
+          <div className="flex justify-center"><FindDomestic name={m.productName} brand={m.brand} /></div>
+        </td>
+      </tr>
+      {open && (
+        <tr className="bg-white/[0.03]">
+          <td colSpan={bid ? 8 : 7} className="px-3 py-3">
+            <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1"><Ruler className="h-3 w-3" /> 사이즈 추천 (예상수익·입찰 공백 순)</p>
+            <div className="flex flex-wrap gap-2">
+              {m.bestSizes.length === 0 && <span className="text-[12px] text-slate-500">사이즈별 데이터 없음</span>}
+              {m.bestSizes.map(s => (
+                <div key={s.size} className={`rounded-lg border px-2.5 py-1.5 text-[12px] ${s.unbid ? "border-fuchsia-400/40 bg-fuchsia-500/10" : "border-white/10 bg-white/5"}`}>
+                  <span className="font-semibold text-slate-100">{s.size}</span>
+                  <span className="text-slate-400 ml-2">수익 {usd(s.profit)}</span>
+                  <span className="text-slate-500 ml-2">입찰 {usd(s.bid)}</span>
+                  {s.unbid && <span className="text-fuchsia-300 ml-2">미입찰</span>}
+                  {s.bidAvailable && <span className="text-emerald-300 ml-1">가능</span>}
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function ChangesPanel({ cd }: { cd: { changes: any[]; snapshots: number; curDate: string | null; prevDate: string | null } }) {
+  const [open, setOpen] = useState(true);
+  const improved = cd.changes.filter(c => c.good > 0);
+  return (
+    <div className="glass rounded-2xl p-4 sm:p-5 ring-1 ring-fuchsia-400/30">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-fuchsia-300" />
+        <h2 className="text-sm font-semibold text-slate-100">이번 업로드에서 좋아진 상품</h2>
+        <span className="text-[11px] text-slate-500">{cd.prevDate} → {cd.curDate} · {improved.length}건</span>
+        <ChevronDown className={`h-4 w-4 text-slate-500 ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-3 grid sm:grid-cols-2 gap-2">
+          {improved.slice(0, 12).map((c, i) => (
+            <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-sm text-slate-100 truncate">{c.productName}<span className="text-slate-500 text-[11px]">{c.size ? ` · ${c.size}` : ""}</span></p>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[11px]">
+                {c.bidDelta < 0 && <span className="text-emerald-300 flex items-center gap-0.5"><ArrowDownRight className="h-3 w-3" />최저입찰 {signedUsd(c.bidDelta)}</span>}
+                {c.profitDelta > 0 && <span className="text-emerald-300 flex items-center gap-0.5"><ArrowUpRight className="h-3 w-3" />수익 {signedUsd(c.profitDelta)}</span>}
+                {c.soldDelta > 0 && <span className="text-cyan-300">판매 +{c.soldDelta.toLocaleString()}</span>}
+                {c.localDelta < 0 && <span className="text-emerald-300">경쟁 {c.localDelta}</span>}
+                {c.newlyBidable && <span className="text-fuchsia-300">입찰 가능 전환</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Panel({ icon: Icon, title, hint, children }: { icon: any; title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="glass rounded-2xl p-4 sm:p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -229,23 +333,18 @@ function FindDomestic({ name, brand }: { name: string; brand: string }) {
   const links = domesticSearchLinks(name, brand);
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="inline-flex items-center gap-1 text-[12px] font-semibold rounded-full px-2.5 py-1 bg-fuchsia-500/15 text-fuchsia-200 hover:bg-fuchsia-500/25"
-      >
-        <Store className="h-3 w-3" /> 국내가
-        <ChevronDown className="h-3 w-3" />
+      <button onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center gap-1 text-[12px] font-semibold rounded-full px-2.5 py-1 bg-fuchsia-500/15 text-fuchsia-200 hover:bg-fuchsia-500/25">
+        <Store className="h-3 w-3" /> 국내가 <ChevronDown className="h-3 w-3" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-20 mt-1 w-40 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-1 shadow-xl">
             {links.map(l => (
-              <a key={l.label} href={l.url} target="_blank" rel="noopener noreferrer"
-                onClick={() => setOpen(false)}
+              <a key={l.label} href={l.url} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}
                 className="flex items-center justify-between px-2.5 py-1.5 text-[13px] text-slate-200 rounded-lg hover:bg-white/10">
-                {l.label}
-                <ExternalLink className="h-3 w-3 text-slate-500" />
+                {l.label}<ExternalLink className="h-3 w-3 text-slate-500" />
               </a>
             ))}
           </div>
@@ -268,11 +367,11 @@ function Tile({ label, value, tone = "normal" }: { label: string; value: string;
 function EmptyState() {
   return (
     <div className="glass rounded-2xl p-8 text-center">
-      <BarChart3 className="h-8 w-8 text-slate-500 mx-auto mb-3" />
+      <Compass className="h-8 w-8 text-slate-500 mx-auto mb-3" />
       <p className="text-slate-300 font-medium">집계할 카탈로그가 없어요</p>
       <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
         <Link href="/reverse/seller" className="underline text-fuchsia-300">판매자센터 엑셀</Link>을 올리면
-        판매량·가격대·사이즈 인사이트가 여기 표시됩니다.
+        발굴 필터·입찰 추천·변화 감지가 여기 표시됩니다.
       </p>
     </div>
   );

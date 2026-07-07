@@ -137,7 +137,7 @@ const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "역직구 홈", path: "/reverse", emoji: "🏠", section: "main", channel: "reverse", group: "home" },
   // 엔진 (핵심 흐름)
   { icon: Store, label: "판매자 엑셀", path: "/reverse/seller", emoji: "🏬", section: "main", channel: "reverse", group: "engine" },
-  { icon: BarChart3, label: "소싱 인사이트", path: "/reverse/insights", emoji: "📊", section: "main", channel: "reverse", group: "engine" },
+  { icon: BarChart3, label: "상품 발굴", path: "/reverse/insights", emoji: "📊", section: "main", channel: "reverse", group: "engine" },
   { icon: ListChecks, label: "소싱 큐", path: "/reverse/queue", emoji: "🧭", section: "main", channel: "reverse", group: "engine" },
   { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "engine" },
   { icon: Scale, label: "정밀 계산기", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "engine" },
