@@ -132,36 +132,52 @@ function friendlyError(status: number, code: unknown, msg: string): string {
   return m || `POIZON API 오류 (status ${status}${c ? `, code ${c}` : ""}).`;
 }
 
-// ── 서명 ────────────────────────────────────────────────
-/**
- * 공통 서명. 파라미터 key 사전순 정렬 → "k1v1k2v2..." 연결 →
- * 앞뒤 appSecret 래핑 → MD5 대문자. (공식 Sign Tool로 최종 검증 필요)
- */
-export function sign(
-  params: Record<string, string | number>,
-  appSecret: string
-): string {
+// ── 서명 (공식 Step 4 알고리즘) ─────────────────────────
+// 1) 전체 파라미터(인증+비즈니스, app_key·timestamp 포함) 중 빈 값 제외
+// 2) 키 ASCII 오름차순 정렬 → key=urlencode(value)&... 로 연결 (stringA)
+//    · 값이 배열이면 원소를 콤마로 join (객체 원소는 compact JSON)
+//    · URL 인코딩은 Java URLEncoder 호환: 공백은 '+' (encodeURIComponent의 %20→+)
+// 3) 끝에 appSecret 붙임 → MD5(32) → 대문자
+function signValue(val: unknown): string {
+  if (Array.isArray(val)) {
+    return val
+      .map(el => (el !== null && typeof el === "object" ? JSON.stringify(el) : String(el)))
+      .join(",");
+  }
+  if (val !== null && typeof val === "object") return JSON.stringify(val);
+  return String(val);
+}
+function urlEncodeJava(s: string): string {
+  // Java URLEncoder 호환: 공백 → '+', 나머지는 encodeURIComponent
+  return encodeURIComponent(s).replace(/%20/g, "+");
+}
+export function sign(params: Record<string, unknown>, appSecret: string): string {
   const keys = Object.keys(params)
-    .filter(k => k !== "sign" && params[k] !== "" && params[k] != null)
-    .sort();
-  const joined = keys.map(k => `${k}${params[k]}`).join("");
-  const raw = `${appSecret}${joined}${appSecret}`;
-  return crypto.createHash("md5").update(raw, "utf8").digest("hex").toUpperCase();
+    .filter(k => k !== "sign" && params[k] != null && params[k] !== "")
+    .sort(); // ASCII 오름차순
+  const stringA = keys
+    .map(k => `${urlEncodeJava(k)}=${urlEncodeJava(signValue(params[k]))}`)
+    .join("&");
+  const stringSignTemp = stringA + appSecret;
+  return crypto
+    .createHash("md5")
+    .update(stringSignTemp, "utf8")
+    .digest("hex")
+    .toUpperCase();
 }
 
-/** 공통(인증) 파라미터 + sign 조립. sign은 인증 파라미터 위에서 계산(비즈니스 바디 제외). */
-function buildAuthParams(
+/** 인증 공통 파라미터(app_key/access_token/timestamp/language/timeZone). sign은 별도로 전체 위에서 계산. */
+function authParamsOf(
   cfg: PoizonApiConfig,
   timestampMs: number
 ): Record<string, string | number> {
-  const base: Record<string, string | number> = {
+  return {
     app_key: cfg.appKey,
     access_token: cfg.accessToken,
     timestamp: timestampMs,
     language: "ko",
     timeZone: "Asia/Seoul",
   };
-  return { ...base, sign: sign(base, cfg.appSecret) };
 }
 
 // ── 범용 호출기 ─────────────────────────────────────────
@@ -194,9 +210,12 @@ export async function callPoizon<T = unknown>(
     );
   }
   const timestamp = opts.timestampMs ?? Date.now();
-  const auth = buildAuthParams(cfg, timestamp);
+  const auth = authParamsOf(cfg, timestamp);
+  // ★ 서명은 인증+비즈니스 전체 파라미터 위에서 계산(공식 Step 4).
+  const signature = sign({ ...bizParams, ...auth }, cfg.appSecret);
+  // 인증 파라미터(+sign)는 쿼리스트링, 비즈니스 파라미터는 JSON 바디로 전송.
   const qs = new URLSearchParams(
-    Object.entries(auth).map(([k, v]) => [k, String(v)])
+    Object.entries({ ...auth, sign: signature }).map(([k, v]) => [k, String(v)])
   ).toString();
   const url = `${cfg.base}${ep.path}?${qs}`;
   const method = (ep.method || "POST").toUpperCase();
@@ -542,66 +561,79 @@ export async function cancelListing(
   );
 }
 
-// ── Seller Authorization (Access Token 발급) 스캐폴드 ────
-// 승인 후 OAuth 흐름: 인증 URL로 판매자 동의 → callback(code) → 토큰 교환.
-//   Callback: https://lumiriz.kr/api/poizon/callback (라우트 별도 배선 필요)
-//   ⚠️ authorize/token 엔드포인트·파라미터는 문서 확정 후 채움.
+// ── Seller Authorization (OAuth2 authorization_code) ────
+// ✅확정 흐름(ERP/ISV, authorization_code grant):
+//   1) 인증 페이지 /authorize 로 판매자 로그인·동의 → redirect_uri?code=...&state=...
+//   2) POST /api/v1/h5/passport/v1/oauth2/token (JSON) → access_token/refresh_token
+//   3) POST /api/v1/h5/passport/v1/oauth2/refresh_token 로 갱신
+//   ※ 토큰 교환/갱신은 sign 불필요 — client_id(appKey)+client_secret(appSecret) 직접.
+//   Callback: https://lumiriz.kr/api/poizon/callback (라우트 배선 필요)
 export const POIZON_OAUTH = {
-  authorize: "/dop/oauth/authorize", // 추정
-  token: "/dop/oauth/token", // 추정
+  authorize: "/authorize", // ✅ 확인 (호스트 루트)
+  token: "/api/v1/h5/passport/v1/oauth2/token", // ✅ 확인
+  refreshToken: "/api/v1/h5/passport/v1/oauth2/refresh_token", // ✅ 확인
   redirectUri: "https://lumiriz.kr/api/poizon/callback",
 };
 
-/** 판매자 인증 동의 URL 생성(리다이렉트용). */
+/** 판매자 인증 동의 URL 생성(리다이렉트용). scope=all 고정, redirect_uri는 encodeURIComponent. */
 export function buildAuthorizeUrl(state = ""): string | null {
   const appKey = process.env.POIZON_APP_KEY;
   if (!appKey) return null;
   const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
-  const qs = new URLSearchParams({
-    app_key: appKey,
-    redirect_uri: POIZON_OAUTH.redirectUri,
-    response_type: "code",
-    ...(state ? { state } : {}),
-  }).toString();
-  return `${base}${POIZON_OAUTH.authorize}?${qs}`;
+  const parts = [
+    `response_type=code`,
+    `client_id=${encodeURIComponent(appKey)}`,
+    `redirect_uri=${encodeURIComponent(POIZON_OAUTH.redirectUri)}`,
+    `scope=all`,
+    ...(state ? [`state=${encodeURIComponent(state)}`] : []),
+  ];
+  return `${base}${POIZON_OAUTH.authorize}?${parts.join("&")}`;
 }
 
-/**
- * OAuth code → Access Token 교환(스캐폴드).
- * 반환 토큰은 서버가 .env/보안저장소에 반영해야 함(여기서 저장하지 않음).
- * ⚠️ token 엔드포인트/파라미터/응답은 문서 확정 후 수정.
- */
-export async function exchangeCodeForToken(
-  code: string,
-  timestampMs = Date.now()
-): Promise<{ accessToken: string; expiresAt: number | null; raw: unknown }> {
-  const appKey = process.env.POIZON_APP_KEY;
-  const appSecret = process.env.POIZON_APP_SECRET;
-  if (!appKey || !appSecret)
+export interface OAuthTokens {
+  accessToken: string;
+  accessTokenExpiresAt: number | null; // epoch ms
+  refreshToken: string | null;
+  refreshTokenExpiresAt: number | null;
+  openId: string | null;
+  raw: unknown;
+}
+
+// 토큰 응답(교환·갱신 공통) 파싱.
+function parseTokenResponse(json: any, now: number): OAuthTokens {
+  const d = json?.data ?? {};
+  const at = d.access_token;
+  if (!at) {
     throw new PoizonApiError(
-      "MISSING_CREDENTIALS",
-      "토큰 교환에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+      json?.code ?? "TOKEN_FAIL",
+      friendlyError(200, json?.code, String(json?.msg ?? "토큰 응답에 access_token 없음")),
+      json
     );
-  const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
-  const params: Record<string, string | number> = {
-    app_key: appKey,
-    code,
-    grant_type: "authorization_code",
-    redirect_uri: POIZON_OAUTH.redirectUri,
-    timestamp: timestampMs,
+  }
+  const atExp = Number(d.access_token_expires_in ?? 0);
+  const rtExp = Number(d.refresh_token_expires_in ?? 0);
+  return {
+    accessToken: String(at),
+    accessTokenExpiresAt: atExp > 0 ? now + atExp * 1000 : null,
+    refreshToken: d.refresh_token ? String(d.refresh_token) : null,
+    refreshTokenExpiresAt: rtExp > 0 ? now + rtExp * 1000 : null,
+    openId: d.open_id ? String(d.open_id) : null,
+    raw: json,
   };
-  const signed = { ...params, sign: sign(params, appSecret) };
-  const qs = new URLSearchParams(
-    Object.entries(signed).map(([k, v]) => [k, String(v)])
-  ).toString();
+}
+
+async function postJson(path: string, body: Record<string, unknown>, now: number) {
+  const base = process.env.POIZON_API_BASE || "https://open.poizon.com";
   let res: Response;
   try {
-    res = await fetch(`${base}${POIZON_OAUTH.token}?${qs}`, {
+    res = await fetch(`${base}${path}`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
   } catch (e: any) {
-    throw new PoizonApiError("NETWORK", `토큰 교환 연결 실패: ${e?.message ?? e}`);
+    throw new PoizonApiError("NETWORK", `토큰 요청 연결 실패: ${e?.message ?? e}`);
   }
   const text = await res.text().catch(() => "");
   let json: any = null;
@@ -610,20 +642,63 @@ export async function exchangeCodeForToken(
   } catch {
     /* noop */
   }
-  const token = json?.data?.accessToken ?? json?.access_token ?? json?.data?.access_token;
-  if (!res.ok || !token) {
+  const code = json?.code ?? res.status;
+  const ok = res.ok && (code === 200 || code === "200" || code == null);
+  if (!ok) {
     throw new PoizonApiError(
-      json?.code ?? res.status,
-      friendlyError(res.status, json?.code, String(json?.msg ?? text ?? "토큰 교환 실패")),
+      code,
+      friendlyError(res.status, code, String(json?.msg ?? text ?? "토큰 요청 실패")),
       json ?? text
     );
   }
-  const expiresIn = Number(json?.data?.expiresIn ?? json?.expires_in ?? 0);
-  return {
-    accessToken: String(token),
-    expiresAt: expiresIn > 0 ? timestampMs + expiresIn * 1000 : null,
-    raw: json,
-  };
+  return parseTokenResponse(json, now);
+}
+
+/**
+ * OAuth authorization_code → Access/Refresh Token 교환.
+ *   POST /api/v1/h5/passport/v1/oauth2/token
+ *   바디 { client_id, client_secret, authorization_code } (JSON, sign 불필요).
+ * 반환 토큰은 서버가 .env/보안저장소에 반영해야 함(여기서 저장하지 않음).
+ */
+export async function exchangeCodeForToken(
+  code: string,
+  now: number = Date.now()
+): Promise<OAuthTokens> {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret)
+    throw new PoizonApiError(
+      "MISSING_CREDENTIALS",
+      "토큰 교환에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+    );
+  return postJson(
+    POIZON_OAUTH.token,
+    { client_id: appKey, client_secret: appSecret, authorization_code: code },
+    now
+  );
+}
+
+/**
+ * Refresh Token으로 Access Token 갱신(유효기간 내).
+ *   POST /api/v1/h5/passport/v1/oauth2/refresh_token
+ *   바디 { client_id, client_secret, refresh_token }.
+ */
+export async function refreshAccessToken(
+  refreshToken: string,
+  now: number = Date.now()
+): Promise<OAuthTokens> {
+  const appKey = process.env.POIZON_APP_KEY;
+  const appSecret = process.env.POIZON_APP_SECRET;
+  if (!appKey || !appSecret)
+    throw new PoizonApiError(
+      "MISSING_CREDENTIALS",
+      "토큰 갱신에는 POIZON_APP_KEY/POIZON_APP_SECRET 필요."
+    );
+  return postJson(
+    POIZON_OAUTH.refreshToken,
+    { client_id: appKey, client_secret: appSecret, refresh_token: refreshToken },
+    now
+  );
 }
 
 // ── 카탈로그 동기화용(기존) — SKU 기본정보 → 판매자 엑셀 행 형태 ──
