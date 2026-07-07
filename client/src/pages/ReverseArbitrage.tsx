@@ -75,6 +75,22 @@ export default function ReverseArbitrage() {
     const needKRW = (targetNet + buyKRW + intlShip - vat) / (1 - (feePct + EXTRA_FEE_PCT) / 100);
     return { krw: Math.round(needKRW), usd: rate > 0 ? Math.round(needKRW / rate) : 0 };
   };
+  // 목표 마진율(순익/판매가) 확보에 필요한 판매가
+  const priceForMargin = (m: number) => {
+    const vat = vatRefund ? Math.round(buyKRW / 11) : 0;
+    const denom = 1 - (feePct + EXTRA_FEE_PCT) / 100 - m;
+    if (denom <= 0) return { krw: 0, usd: 0 };
+    const needKRW = (buyKRW + intlShip - vat) / denom;
+    return { krw: Math.round(needKRW), usd: rate > 0 ? Math.round(needKRW / rate) : 0 };
+  };
+  // 추천가 4종: 손절 < 방어(손익분기) < 추천 입찰 < 추천 판매
+  const targetNet = Math.max(20000, Math.round(buyKRW * 0.25));
+  const REC = [
+    { key: "cut", label: "손절가", sub: "−15% 손실 허용선", ...bidFor(-Math.round(buyKRW * 0.15)), tone: "text-red-400", ring: "ring-red-400/30" },
+    { key: "defend", label: "최저 방어가", sub: "손익분기 (이 아래 손해)", ...bidFor(0), tone: "text-amber-300", ring: "ring-amber-400/40" },
+    { key: "bid", label: "추천 입찰가", sub: `목표 순익 ${won(targetNet)}`, ...bidFor(targetNet), tone: "text-fuchsia-200", ring: "ring-fuchsia-400/40" },
+    { key: "sell", label: "추천 판매가", sub: "마진 30% 확보", ...priceForMargin(0.3), tone: "text-emerald-300", ring: "ring-emerald-400/30" },
+  ];
 
   return (
     <DashboardLayout>
@@ -180,32 +196,27 @@ export default function ReverseArbitrage() {
             </div>
           )}
 
-          {/* 적정 입찰가 제안 — 최저가 추격 대신 "마진 방어 입찰가" */}
+          {/* 추천가 판단 — 손절 / 방어 / 입찰 / 판매 4종 */}
           <div className="glass rounded-2xl p-4 sm:p-5">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1">
               <Scale className="h-4 w-4 text-fuchsia-300" />
-              <h2 className="text-sm font-semibold text-slate-100">적정 입찰가 제안</h2>
-              <span className="text-[11px] text-slate-500">최저가 추격 금지 · 목표 순이익 확보 판매가</span>
+              <h2 className="text-sm font-semibold text-slate-100">추천가 판단</h2>
+              <span className="text-[11px] text-slate-500">최저가 추격 금지 · 방어선 아래로 안 감</span>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: "방어선 (순익 3천)", t: 3000, tone: "text-slate-200" },
-                { label: "목표 순익 2만", t: 20000, tone: "text-emerald-300" },
-                { label: "목표 순익 3만", t: 30000, tone: "text-emerald-300" },
-              ].map(o => {
-                const b = bidFor(o.t);
-                return (
-                  <div key={o.t} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                    <p className="text-[11px] text-slate-400">{o.label}</p>
-                    <p className={`text-lg font-black mt-0.5 ${o.tone}`}>${b.usd}</p>
-                    <p className="text-[10px] text-slate-500">{won(b.krw)}</p>
-                  </div>
-                );
-              })}
+            <p className="text-[11px] text-slate-500 mb-3">낮음 → 높음 순: 손절선 아래면 정리, 방어선 위에서만 입찰, 판매가는 마진 목표.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {REC.map(o => (
+                <div key={o.key} className={`rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 ring-1 ${o.ring}`}>
+                  <p className="text-[11px] text-slate-400">{o.label}</p>
+                  <p className={`text-lg font-black mt-0.5 ${o.tone}`}>{o.usd > 0 ? `$${o.usd}` : "-"}</p>
+                  <p className="text-[10px] text-slate-500">{o.krw > 0 ? won(o.krw) : ""}</p>
+                  <p className="text-[10px] text-slate-600 mt-0.5">{o.sub}</p>
+                </div>
+              ))}
             </div>
             <p className="text-[11px] text-slate-500 mt-2">
-              현재 최저가가 <b className="text-slate-300">방어선 아래로</b> 내려가면 따라가지 마세요 — 순익이 안 남습니다.
-              (수수료 {feePct}% 구간 가정 · 검수 탈락 제외 기준)
+              POIZON 최저 입찰가를 <b className="text-slate-300">방어선(${REC[1].usd}) 이상</b>으로 세팅하세요.
+              (수수료 {feePct}%+{EXTRA_FEE_PCT}% 구간 · 검수 탈락 제외 기준)
             </p>
           </div>
 

@@ -2080,3 +2080,13 @@ export const poizonOauthToken = mysqlTable(
 
 export type PoizonOauthToken = typeof poizonOauthToken.$inferSelect;
 export type InsertPoizonOauthToken = typeof poizonOauthToken.$inferInsert;
+
+// ==================== 역직구 사업 설정 (현금 잔고 등) ====================
+// 사용자당 1행. 오늘의 브리핑에서 '추가 매입 가능액' 계산에 사용.
+export const reverseSettings = mysqlTable("reverse_settings", {
+  userId: int("user_id").primaryKey(),
+  cashKrw: int("cash_krw").default(0).notNull(), // 가용 현금(원)
+  updatedAt: timestamp("updated_at", tsOpts).defaultNow().notNull(),
+});
+
+export type ReverseSettings = typeof reverseSettings.$inferSelect;

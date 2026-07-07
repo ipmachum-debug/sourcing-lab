@@ -7,6 +7,7 @@ import {
   poizonTrending,
   reverseSkuWatch,
   reversePurchases,
+  reverseSettings,
 } from "../../drizzle/schema";
 import { and, desc, eq, gte, like, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -1634,6 +1635,29 @@ ${facts}
       }
     }),
 
+  // ===== 사업 설정 (가용 현금) =====
+  settings: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const [r] = await db
+      .select({ cashKrw: reverseSettings.cashKrw })
+      .from(reverseSettings)
+      .where(eq(reverseSettings.userId, ctx.user!.id))
+      .limit(1);
+    return { cashKrw: Number(r?.cashKrw ?? 0) };
+  }),
+  setCash: protectedProcedure
+    .input(z.object({ cashKrw: z.number().int().min(0).max(100000000000) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db
+        .insert(reverseSettings)
+        .values({ userId: ctx.user!.id, cashKrw: input.cashKrw })
+        .onDuplicateKeyUpdate({ set: { cashKrw: input.cashKrw } });
+      return { ok: true };
+    }),
+
   // ===== 오늘의 브리핑 (사업가 관점 액션 제안) =====
   // 매입 파이프라인 + 카탈로그 신호에서 '오늘 해야 할 일'을 뽑아 우선순위로 제안.
   //   숫자는 실데이터, 문장은 AI가 다듬음(환각 방지: 주어진 지표만).
@@ -1652,9 +1676,19 @@ ${facts}
         settleProfit: sql<number>`coalesce(sum(case when ${reversePurchases.status} = 'sold' then (${reversePurchases.soldPrice} - ${reversePurchases.buyPrice}) * ${reversePurchases.qty} else 0 end), 0)`,
         weekBuyAmount: sql<number>`coalesce(sum(case when ${reversePurchases.buyDate} >= ${weekAgo} then ${reversePurchases.buyPrice} * ${reversePurchases.qty} else 0 end), 0)`,
         weekBuyCount: sql<number>`sum(case when ${reversePurchases.buyDate} >= ${weekAgo} then 1 else 0 end)`,
+        // 재고에 묶인 자금(미판매) = 매입 후 아직 판매/정산 안 된 것
+        committedBuy: sql<number>`coalesce(sum(case when ${reversePurchases.status} in ('purchased','inspecting','listed') then ${reversePurchases.buyPrice} * ${reversePurchases.qty} else 0 end), 0)`,
       })
       .from(reversePurchases)
       .where(eq(reversePurchases.userId, uid));
+
+    // 가용 현금 설정
+    const [cashRow] = await db
+      .select({ cashKrw: reverseSettings.cashKrw })
+      .from(reverseSettings)
+      .where(eq(reverseSettings.userId, uid))
+      .limit(1);
+    const cashKrw = Number(cashRow?.cashKrw ?? 0);
 
     // 2) 카탈로그 입찰 추천 수 (최신 스냅샷 경량 그룹)
     const obsAll = await db
@@ -1668,8 +1702,10 @@ ${facts}
         priceCny: poizonSaleObservations.priceCny,
         soldCount30d: poizonSaleObservations.soldCount30d,
         expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+        lowestBidUsd: poizonSaleObservations.lowestBidUsd,
         bidAvailable: poizonSaleObservations.bidAvailable,
         localSellerCount: poizonSaleObservations.localSellerCount,
+        observedAt: poizonSaleObservations.observedAt,
       })
       .from(poizonSaleObservations)
       .orderBy(desc(poizonSaleObservations.observedAt))
@@ -1677,9 +1713,16 @@ ${facts}
     const seen = new Set<string>();
     type G = { brand: string; profits: number[]; soldMax: number; localMax: number; bidAvail: number };
     const groups = new Map<string, G>();
+    // SKU별 날짜 2개(최신·직전) — 입찰/시세 변동 감지
+    const bySku = new Map<string, { date: string; bid: number; price: number }[]>();
     for (const o of obsAll) {
       const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
-      if (seen.has(k)) continue;
+      const date = String(o.observedAt ?? "").slice(0, 10);
+      const arr = bySku.get(k) ?? [];
+      if (arr.length < 2 && !arr.some(x => x.date === date))
+        arr.push({ date, bid: o.lowestBidUsd ?? 0, price: o.priceCny ?? 0 });
+      bySku.set(k, arr);
+      if (seen.has(k)) continue; // 최신 스냅샷만 그룹 집계
       seen.add(k);
       const gk = o.spuId || o.normKey;
       const g = groups.get(gk) ?? { brand: o.brand ?? "", profits: [], soldMax: 0, localMax: 0, bidAvail: 0 };
@@ -1688,6 +1731,14 @@ ${facts}
       g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
       if (o.bidAvailable === true) g.bidAvail++;
       groups.set(gk, g);
+    }
+    // 입찰/시세 하락 SKU 수(진입 유리 · 재입찰 점검)
+    let bidChangeCount = 0;
+    for (const arr of bySku.values()) {
+      if (arr.length < 2) continue;
+      const cur = arr[0], prev = arr[1];
+      if ((cur.bid > 0 && prev.bid > 0 && cur.bid < prev.bid) || (cur.price > 0 && prev.price > 0 && cur.price < prev.price * 0.95))
+        bidChangeCount++;
     }
     const median = (a: number[]) => (a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
     let recCount = 0;
@@ -1714,6 +1765,13 @@ ${facts}
         detail: "소싱 큐에서 국내가·방어선 확인 후 매입",
         href: "/reverse/queue",
       });
+    if (bidChangeCount > 0)
+      actions.push({
+        kind: "rebid", priority: 2,
+        title: `${bidChangeCount}개 시세·입찰 하락 — 입찰 점검`,
+        detail: "최저가 내려감 → 방어선 재확인 후 재입찰",
+        href: "/reverse/insights",
+      });
     if (Number(pp?.inspectPending ?? 0) > 0)
       actions.push({ kind: "inspect", priority: 2, title: `검수 결과 ${pp.inspectPending}건 확인`, detail: "합격/탈락 처리로 재고 확정", href: "/reverse/purchases" });
     if (Number(pp?.settleAmount ?? 0) > 0)
@@ -1721,15 +1779,30 @@ ${facts}
     if (Number(pp?.listedCount ?? 0) > 0)
       actions.push({ kind: "stock", priority: 4, title: `판매중 재고 ${pp.listedCount}건`, detail: "가격·경쟁 점검", href: "/reverse/purchases" });
     if (Number(pp?.weekBuyAmount ?? 0) > 0)
-      actions.push({ kind: "cash", priority: 5, title: `이번 주 매입 ${won(pp.weekBuyAmount)}`, detail: `${pp.weekBuyCount}건 · 현금 흐름 점검` });
+      actions.push({ kind: "week", priority: 6, title: `이번 주 매입 ${won(pp.weekBuyAmount)}`, detail: `${pp.weekBuyCount}건 · 현금 흐름 점검` });
+    // 현금 잔고 설정 시: 추가 매입 가능액 = 가용 현금 − 재고에 묶인 자금
+    const committed = Number(pp?.committedBuy ?? 0);
+    const buyable = cashKrw - committed;
+    if (cashKrw > 0)
+      actions.push({
+        kind: "cash", priority: 5,
+        title: buyable > 0 ? `추가 매입 가능 ${won(buyable)}` : "가용 현금 소진 — 정산 회수 우선",
+        detail: `가용 ${won(cashKrw)} − 재고 ${won(committed)}`,
+      });
+
+    actions.sort((a, b) => a.priority - b.priority);
 
     const metrics = {
       recCount,
+      bidChangeCount,
       inspectPending: Number(pp?.inspectPending ?? 0),
       listedCount: Number(pp?.listedCount ?? 0),
       settleAmount: Number(pp?.settleAmount ?? 0),
       settleProfit: Number(pp?.settleProfit ?? 0),
       weekBuyAmount: Number(pp?.weekBuyAmount ?? 0),
+      cashKrw,
+      committed,
+      buyable,
     };
 
     if (actions.length === 0) {
