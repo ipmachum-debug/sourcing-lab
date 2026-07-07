@@ -85,6 +85,25 @@ export default function ReverseQueue() {
     });
   };
 
+  // 딜 → 매입 확정: 매입 관리(reverse_purchases)에 기록 생성 (소싱→매입 데이터 흐름)
+  const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
+  const buyMut = trpc.reversePurchase.create.useMutation({
+    onSuccess: () => toast.success("매입 관리에 등록됨 — 매입 관리에서 상태를 진행하세요"),
+    onError: e => toast.error(e.message),
+    onSettled: () => setPurchasingKey(null),
+  });
+  const confirmPurchase = (r: Row) => {
+    setPurchasingKey(r.groupKey);
+    buyMut.mutate({
+      brand: r.brand || undefined,
+      productName: r.productName,
+      buyChannel: r.domesticSource ? SOURCE_LABEL[r.domesticSource] ?? r.domesticSource : undefined,
+      buyPrice: Math.round(r.domesticBuyKrw),
+      qty: r.recommendQty > 0 ? r.recommendQty : 1,
+      buyDate: new Date().toISOString().slice(0, 10),
+    });
+  };
+
   const doSearch = () => setSearch(term.trim());
 
   // 일괄입찰 CSV — 국내가 매칭된 상품의 방어 입찰가/목표가 내보내기 (POIZON 최저 입찰가 세팅용)
@@ -244,6 +263,8 @@ export default function ReverseQueue() {
                         r={r}
                         onSaveDomestic={p => saveDomestic(r, p)}
                         saving={domMut.isPending}
+                        onPurchase={() => confirmPurchase(r)}
+                        purchasing={purchasingKey === r.groupKey}
                       />
                     ))}
                   </tbody>
@@ -257,7 +278,7 @@ export default function ReverseQueue() {
   );
 }
 
-function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw: number) => void; saving: boolean }) {
+function QueueRow({ r, onSaveDomestic, saving, onPurchase, purchasing }: { r: Row; onSaveDomestic: (krw: number) => void; saving: boolean; onPurchase: () => void; purchasing: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -329,10 +350,15 @@ function QueueRow({ r, onSaveDomestic, saving }: { r: Row; onSaveDomestic: (krw:
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-center">
           {r.status === "deal" ? (
-            <span className="inline-flex items-center gap-1 text-[12px] font-semibold neon-chip neon-magenta rounded-full px-2.5 py-1" title="추천 매입 수량 (수요·마진·등급 기반 사이징)">
+            <button
+              onClick={onPurchase}
+              disabled={purchasing}
+              className="inline-flex items-center gap-1 text-[12px] font-semibold neon-chip neon-magenta rounded-full px-2.5 py-1 hover:brightness-110 disabled:opacity-50"
+              title="이 수량으로 매입 관리에 등록 (매입처·매입가·수량 자동 채움)"
+            >
               <Flame className="h-3 w-3" />
-              {r.recommendQty > 0 ? `${r.recommendQty}개 매입` : "매입"}
-            </span>
+              {purchasing ? "등록 중…" : r.recommendQty > 0 ? `${r.recommendQty}개 매입` : "매입"}
+            </button>
           ) : (
             <span className="text-[11px] text-slate-600" title="왼쪽 '국내가 찾기'로 매입가를 확인한 뒤 입력하면 딜로 전환됩니다">
               국내가 입력 대기
