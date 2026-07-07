@@ -123,21 +123,60 @@ function WatchlistAlerts() {
 // 오늘 해야 할 일 — 사업가 관점. 데이터에서 액션을 뽑아 AI가 우선순위로 제안.
 const ACTION_STYLE: Record<string, { emoji: string; ring: string }> = {
   buy: { emoji: "🛒", ring: "ring-fuchsia-400/30" },
+  rebid: { emoji: "📉", ring: "ring-orange-400/30" },
   inspect: { emoji: "🔍", ring: "ring-amber-400/30" },
   settle: { emoji: "💵", ring: "ring-emerald-400/30" },
   stock: { emoji: "📦", ring: "ring-cyan-400/30" },
-  cash: { emoji: "💰", ring: "ring-slate-400/20" },
+  cash: { emoji: "💰", ring: "ring-fuchsia-400/20" },
+  week: { emoji: "🧾", ring: "ring-slate-400/20" },
 };
 interface Action { kind: string; priority: number; title: string; detail: string; href?: string }
 function DailyBriefing() {
+  const utils = trpc.useUtils();
   const q = trpc.reverseDeals.dailyBriefing.useQuery(undefined, { refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 });
   const d = q.data as { headline: string; actions: Action[]; metrics: any } | undefined;
+  // 가용 현금 설정
+  const cashQ = trpc.reverseDeals.settings.useQuery(undefined, { staleTime: 10 * 60 * 1000 });
+  const [cash, setCash] = useState("");
+  const [editCash, setEditCash] = useState(false);
+  const cashMut = trpc.reverseDeals.setCash.useMutation({
+    onSuccess: () => {
+      utils.reverseDeals.settings.invalidate();
+      utils.reverseDeals.dailyBriefing.invalidate();
+      setEditCash(false);
+    },
+  });
+  const curCash = cashQ.data?.cashKrw ?? 0;
+  const saveCash = () => {
+    const n = Number(String(cash).replace(/[^\d]/g, "")) || 0;
+    cashMut.mutate({ cashKrw: n });
+  };
   return (
     <section className="glass rounded-2xl p-5 sm:p-6 ring-1 ring-fuchsia-400/30">
       <div className="flex items-center gap-2 mb-1">
         <Bot className="h-5 w-5 text-fuchsia-300" />
         <h2 className="text-lg font-black text-white">오늘 해야 할 일</h2>
+        <button
+          onClick={() => { setCash(String(curCash || "")); setEditCash(e => !e); }}
+          className="ml-auto text-[11px] text-slate-400 hover:text-fuchsia-300"
+          title="가용 현금을 설정하면 '추가 매입 가능액'이 계산됩니다"
+        >
+          💰 가용 현금 {curCash > 0 ? `${curCash.toLocaleString("ko-KR")}원` : "설정"}
+        </button>
       </div>
+      {editCash && (
+        <div className="flex items-center gap-1.5 mb-3">
+          <input
+            value={cash}
+            onChange={e => setCash(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && saveCash()}
+            placeholder="가용 현금(원)"
+            inputMode="numeric"
+            className="w-40 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[12px] text-right text-white placeholder:text-slate-600 outline-none focus:border-fuchsia-400/60"
+          />
+          <button onClick={saveCash} disabled={cashMut.isPending} className="text-[11px] neon-chip rounded-md px-2 py-1 text-slate-200 disabled:opacity-40">저장</button>
+        </div>
+      )}
       {q.isLoading ? (
         <p className="text-sm text-slate-500 py-4">브리핑 준비 중…</p>
       ) : (
