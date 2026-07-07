@@ -134,7 +134,8 @@ function colIndex(headers: string[]): Record<string, number> {
 }
 
 async function parseWorkbook(
-  buf: ArrayBuffer
+  buf: ArrayBuffer,
+  rate: number
 ): Promise<{ rows: SellerRow[]; skipped: number; currency: Currency; converted: number }> {
   // xlsx(SheetJS ~600KB)는 업로드 시에만 지연 로드 → 초기 번들 경량화
   const XLSX = await import("xlsx");
@@ -202,14 +203,14 @@ async function parseWorkbook(
           ? String(cells[idx.size] ?? "").trim().slice(0, 40) || undefined
           : undefined,
       priceUsd:
-        idx.priceUsd != null ? parseMoney(cells[idx.priceUsd], currency) ?? 0 : 0,
+        idx.priceUsd != null ? parseMoney(cells[idx.priceUsd], currency, rate) ?? 0 : 0,
       soldCount: idx.soldCount != null ? parseSold(cells[idx.soldCount]) : 0,
       expectedProfitUsd:
         idx.expectedProfit != null
-          ? parseMoney(cells[idx.expectedProfit], currency)
+          ? parseMoney(cells[idx.expectedProfit], currency, rate)
           : undefined,
       lowestBidUsd:
-        idx.lowestBid != null ? parseMoney(cells[idx.lowestBid], currency) : undefined,
+        idx.lowestBid != null ? parseMoney(cells[idx.lowestBid], currency, rate) : undefined,
       bidAvailable:
         idx.bidAvailable != null ? parseBool(cells[idx.bidAvailable]) : undefined,
       bidStatus:
@@ -240,7 +241,9 @@ export default function ReverseSeller() {
   } | null>(null);
 
   const [onlyTradable, setOnlyTradable] = useState(true);
-  const [meta, setMeta] = useState<{ currency: Currency; converted: number } | null>(null);
+  const [meta, setMeta] = useState<{ currency: Currency; converted: number; rate: number } | null>(null);
+  const fx = trpc.reverseDeals.fxRate.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
+  const rate = fx.data?.rate ?? KRW_USD_RATE;
   const importMut = trpc.reverseDeals.sellerImport.useMutation();
   const apiStatus = trpc.reverseDeals.openApiStatus.useQuery();
   const clearMut = trpc.reverseDeals.sellerClear.useMutation({
@@ -263,14 +266,14 @@ export default function ReverseSeller() {
     setFileName(f.name);
     try {
       const buf = await f.arrayBuffer();
-      const { rows: parsed, skipped: sk, currency, converted } = await parseWorkbook(buf);
+      const { rows: parsed, skipped: sk, currency, converted } = await parseWorkbook(buf, rate);
       setRows(parsed);
       setSkipped(sk);
-      setMeta({ currency, converted });
+      setMeta({ currency, converted, rate });
       if (parsed.length === 0)
         toast.error("인식된 행이 없어요. 판매자센터 '전체 내보내기' 엑셀이 맞는지 확인하세요.");
       else if (currency === "KRW")
-        toast.success(`${parsed.length.toLocaleString()}개 SKU 인식 · 원화 엑셀 → $ 자동 환산(÷${KRW_USD_RATE})`);
+        toast.success(`${parsed.length.toLocaleString()}개 SKU 인식 · 원화 엑셀 → $ 자동 환산(÷${rate})`);
       else toast.success(`${parsed.length.toLocaleString()}개 SKU 인식`);
     } catch (e: any) {
       toast.error(`엑셀 읽기 실패: ${e?.message ?? e}`);
@@ -370,8 +373,8 @@ export default function ReverseSeller() {
                 <Info className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>
                   <b>원화(KRW) 엑셀 감지</b> — 금액 {meta.converted.toLocaleString()}행을
-                  <b> ÷{KRW_USD_RATE}로 $ 자동 환산</b>했습니다. (POIZON 판매자센터를 한국어/원화로
-                  내보내면 금액이 KRW로 나옵니다. USD로 내보내면 그대로 사용)
+                  <b> ÷{meta.rate}{fx.data?.source === "live" ? "(실시간)" : ""}로 $ 자동 환산</b>했습니다.
+                  순이익(원)은 환율 변동과 무관하게 정확합니다(왕복 상쇄). USD로 내보내면 그대로 사용.
                 </span>
               </p>
             )}

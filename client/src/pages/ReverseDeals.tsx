@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Flame, Settings2, Star, TrendingUp, Info, Calculator } from "lucide-react";
@@ -63,9 +63,16 @@ interface Deal {
 
 export default function ReverseDeals() {
   const [cost, setCost] = useState<Cost>(DEFAULT_COST);
+  const [rateTouched, setRateTouched] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [minMargin, setMinMargin] = useState(30);
   const [onlyRec, setOnlyRec] = useState(false);
+
+  // 실시간 환율을 기본값으로 (사용자가 직접 바꾸기 전까지)
+  const fx = trpc.reverseDeals.fxRate.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
+  useEffect(() => {
+    if (fx.data?.rate && !rateTouched) setCost(c => ({ ...c, rate: fx.data!.rate }));
+  }, [fx.data?.rate, rateTouched]);
 
   const q = trpc.reverseDeals.todayDeals.useQuery({
     ...cost, minMargin, onlyRecommended: onlyRec, limit: 20,
@@ -175,7 +182,7 @@ export default function ReverseDeals() {
             {showSettings && (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
-                  <CostIn label="환율(원/$)" v={cost.rate} on={v => setCost({ ...cost, rate: v })} step={10} />
+                  <CostIn label="환율(원/$)" v={cost.rate} on={v => { setRateTouched(true); setCost({ ...cost, rate: v }); }} step={10} />
                   <CostIn label="수수료율(%)" v={cost.poizonFeePct} on={v => setCost({ ...cost, poizonFeePct: v })} step={1} />
                   <CostIn label="최소수수료(원)" v={cost.feeMinKrw} on={v => setCost({ ...cost, feeMinKrw: v })} step={1000} />
                   <CostIn label="최대수수료(원)" v={cost.feeMaxKrw} on={v => setCost({ ...cost, feeMaxKrw: v })} step={1000} />

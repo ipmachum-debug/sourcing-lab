@@ -22,6 +22,7 @@ import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
 import { isConfigured as poizonApiConfigured } from "../lib/poizonApi";
+import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
   "musinsa",
@@ -1453,6 +1454,13 @@ export const reverseDealsRouter = router({
         prevDate: snapshotDates[1],
       };
     }),
+
+  // ===== 실시간 환율 (USD→KRW) =====
+  //   판매자 엑셀 KRW→USD 정규화·$ 표시·엔진 기본 환율에 공용. 6h 캐시 + 폴백.
+  fxRate: protectedProcedure.query(async () => {
+    const fx = await getKrwUsdRate();
+    return { rate: fx.rate, source: fx.source, at: fx.at };
+  }),
 
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
