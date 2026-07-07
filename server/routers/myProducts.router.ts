@@ -228,6 +228,81 @@ export const myProductsRouter = router({
       return { ok: true };
     }),
 
+  // POIZON API 연동 상태 — 자동 동기화 가능 여부.
+  poizonSyncStatus: protectedProcedure.query(async () => {
+    const { readiness } = await import("../lib/poizonApi");
+    const r = readiness();
+    let hasToken = r.accessToken;
+    if (!hasToken) {
+      try {
+        const st = await import("../lib/poizonTokenStore");
+        hasToken = (await st.resolveAccessToken()) != null;
+      } catch {
+        /* db 미연결 */
+      }
+    }
+    return { ready: !!(r.appKey && r.appSecret && hasToken), hasToken: !!hasToken };
+  }),
+
+  // POIZON API로 내 상품 시세 자동 동기화 (승인·인증 후 활성).
+  //   sku 칸에 POIZON skuId(숫자)를 넣은 활성 상품 → batchPrice로 US 시세를 스냅샷에 기록.
+  syncPoizon: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const uid = ctx.user!.id;
+
+    const { readiness, queryListingRecommendations } = await import("../lib/poizonApi");
+    const r = readiness();
+    let hasToken = r.accessToken;
+    if (!hasToken) {
+      try {
+        const st = await import("../lib/poizonTokenStore");
+        hasToken = (await st.resolveAccessToken()) != null;
+      } catch {
+        /* db */
+      }
+    }
+    if (!r.appKey || !r.appSecret || !hasToken) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "POIZON API 미연동 — 승인 후 /api/poizon/authorize 인증하면 자동 동기화가 활성화됩니다.",
+      });
+    }
+
+    const prods = await db
+      .select()
+      .from(myProducts)
+      .where(and(eq(myProducts.userId, uid), eq(myProducts.active, true)));
+    const withSku = prods.filter(p => p.sku && Number.isFinite(Number(p.sku)) && Number(p.sku) > 0);
+    if (withSku.length === 0) {
+      return { synced: 0, skipped: prods.length, message: "POIZON skuId를 sku 칸에 넣은 활성 상품이 없습니다." };
+    }
+
+    const recs = (await queryListingRecommendations(withSku.map(p => Number(p.sku)))) as any[];
+    const byId = new Map<string, any>();
+    for (const rec of recs) byId.set(String(rec.skuId ?? rec.globalSkuId), rec);
+
+    let synced = 0;
+    for (const p of withSku) {
+      const rec = byId.get(String(Number(p.sku)));
+      if (!rec) continue;
+      // USD 최소단위(센트) → 달러
+      const usd =
+        rec.usMinPrice != null
+          ? Math.round(rec.usMinPrice / 100)
+          : rec.globalMinPrice != null
+            ? Math.round(rec.globalMinPrice / 100)
+            : 0;
+      if (usd <= 0) continue;
+      await db
+        .insert(productSnapshots)
+        .values({ userId: uid, myProductId: p.id, capturedDate: today(), source: "poizon", poizonPriceCny: usd })
+        .onDuplicateKeyUpdate({ set: { poizonPriceCny: usd } });
+      synced++;
+    }
+    return { synced, skipped: prods.length - withSku.length, message: `${synced}건 POIZON 시세 갱신` };
+  }),
+
   // 상품별 추이 (기본 30일)
   trend: protectedProcedure
     .input(
