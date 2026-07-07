@@ -210,6 +210,13 @@ export const POIZON_GUIDE: GuideSection[] = [
     body: "BBC 판매(보세창고, 배송 1–3일)는 별도 '한국 판매자 BBC창고 서비스 안내서' 참고.",
   },
   {
+    id: "size-match-crocs",
+    cat: "발송·주문",
+    title: "사이즈 매칭 — 크록스(US/EU→KR mm)",
+    keywords: ["사이즈", "크록스", "crocs", "mm", "eu", "us", "매칭", "한국 사이즈", "220", "270", "310"],
+    body: "POIZON 사이즈는 상품마다 표기가 다르다(KR mm / EU / US). KR mm 표기는 그대로 국내 사이즈로 매입, EU/US는 브랜드별 대조표로 변환(브랜드마다 EU→KR 편차가 있어 자동변환은 KR/mm 표기에만 적용).\n크록스 남녀공용(UNISEX) US→KR:\n· M3/W5=220 · M4/W6=230 · M5/W7=240 · M6/W8=250 · M7/W9=260 · M8/W10=265 · M9/W11=270 · M10/W12=280 · M11=290 · M12=300 · M13=310\n※ 일부 사이즈는 조기 품절 가능. 다른 브랜드(나이키·뉴발 등)는 각 공식 사이즈표를 사용.",
+  },
+  {
     id: "open-api",
     cat: "API·기타",
     title: "오픈 API (Phase 2)",

@@ -21,7 +21,8 @@ import {
 import { detectBrand } from "../lib/brandDetect";
 import { bestMatch, makeCandidate } from "../lib/matchProduct";
 import { catOf, CANON_CATS } from "../lib/category";
-import { isConfigured as poizonApiConfigured } from "../lib/poizonApi";
+import { cleanSizeLabel, krMmOf } from "../lib/sizeMatch";
+import { isConfigured as poizonApiConfigured, readiness as poizonReadiness } from "../lib/poizonApi";
 import { getKrwUsdRate } from "../lib/fxRate";
 
 const DOMESTIC_SOURCES = [
@@ -991,7 +992,8 @@ export const reverseDealsRouter = router({
         if (o.priceCny > 0) g.samples.push({ priceCny: o.priceCny, at });
         g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
         if (o.barcode) g.barcodes.add(o.barcode);
-        if (o.size) g.sizes.add(o.size);
+        const qsz = cleanSizeLabel(o.size);
+        if (qsz) g.sizes.add(qsz);
         groups.set(gk, g);
       }
 
@@ -1196,12 +1198,13 @@ export const reverseDealsRouter = router({
         if (o.priceCny > 0) g.prices.push(o.priceCny);
         g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
         g.localSellerMax = Math.max(g.localSellerMax, o.localSellerCount ?? 0);
-        if (o.size) g.sizes.add(o.size);
+        const sz = cleanSizeLabel(o.size); // 색상·괄호 제거한 순수 사이즈
+        if (sz) g.sizes.add(sz);
         const st = String(o.bidStatus ?? "").trim().toLowerCase();
         // 입찰 상태 "0:미입찰 1:입찰완료" — 엑셀은 0.0/1.0 float 문자열로 들어옴
         const unbid = /미입찰|not\s*bid|nobid|no\s*bid|없음|none|^0(\.0+)?$/.test(st);
         g.recs.push({
-          size: o.size ?? null, price: o.priceCny ?? 0,
+          size: sz, price: o.priceCny ?? 0,
           profit: o.expectedProfitUsd ?? null, bid: o.lowestBidUsd ?? null,
           bidAvailable: o.bidAvailable ?? null, unbid,
         });
@@ -1230,7 +1233,11 @@ export const reverseDealsRouter = router({
         );
         const pool = reliable.length ? reliable : g.recs.filter(r => r.price > 0);
         const priced = pool.slice().sort((a, b) => a.price - b.price);
-        const rep = priced.length ? priced[Math.floor(priced.length / 2)] : null;
+        // 대표 사이즈 = 거래가 중앙값. 단, 정산(예상)이 채워진 사이즈를 우선해
+        //   '정산 대표 -' 빈칸을 막는다(정산값 없는 사이즈가 중앙에 걸리는 경우 방지).
+        const repArr = priced.filter(r => r.profit != null);
+        const repPool = repArr.length ? repArr : priced;
+        const rep = repPool.length ? repPool[Math.floor(repPool.length / 2)] : null;
         const avgUsd = rep ? rep.price : median(g.prices);
         const lowestBidUsd = rep?.bid ?? null; // 대표 사이즈 최저입찰가
         const profitUsd = rep?.profit ?? null; // 대표 사이즈 POIZON 정산(예상)=판매가−수수료
@@ -1263,7 +1270,7 @@ export const reverseDealsRouter = router({
         const bestSizes = pool
           .filter(r => r.size)
           .map(r => ({
-            size: r.size as string, profit: r.profit ?? 0, bid: r.bid ?? 0,
+            size: r.size as string, krMm: krMmOf(r.size), profit: r.profit ?? 0, bid: r.bid ?? 0,
             price: r.price ?? 0, bidAvailable: r.bidAvailable === true, unbid: r.unbid,
           }))
           .sort((a, b) => b.profit - a.profit || Number(b.unbid) - Number(a.unbid))
@@ -1340,7 +1347,7 @@ export const reverseDealsRouter = router({
       }
       const sizes = [...sizeMap.entries()]
         .map(([size, e]) => ({
-          size, models: e.models, demand: e.demand, medianUsd: median(e.prices),
+          size, krMm: krMmOf(size), models: e.models, demand: e.demand, medianUsd: median(e.prices),
         }))
         .sort((a, b) => b.demand - a.demand)
         .slice(0, 24);
@@ -1471,11 +1478,128 @@ export const reverseDealsRouter = router({
   // ===== Open API 자동 동기화 상태 (Phase 2) =====
   // 판매자 엑셀 수동 업로드를 대체할 자동 동기화 준비 상태. 자격증명이 세팅되면 활성.
   openApiStatus: protectedProcedure.query(() => {
+    const r = poizonReadiness();
     return {
       configured: poizonApiConfigured(),
-      note: poizonApiConfigured()
-        ? "POIZON Open API 자격증명 확인됨 — 자동 동기화 준비 완료. (엔드포인트: sku-basic-info/by-sku, region=US)"
-        : "Phase 2: 엔드포인트·파라미터 확인됨(sku-basic-info/by-sku · skuIds · region=US). 남은 것 = POIZON_APP_KEY/SECRET/ACCESS_TOKEN 자격증명 + 공식 Sign Tool 서명 알고리즘 검증.",
+      readiness: r, // { appKey, appSecret, accessToken, ready }
+      note: r.ready
+        ? "POIZON Open API 자격증명 확인됨 — 클라이언트 가동 준비 완료(핵심 5 + 확장). URL·서명은 문서 기준 최종 검증 필요."
+        : r.accessToken
+          ? "Access Token 확인됨. App Key/Secret 상태 점검 필요."
+          : "Default 패키지 심사 대기(已申请). 클라이언트 코드는 준비 완료 — 승인 후 Seller Authorization으로 Access Token만 발급해 POIZON_ACCESS_TOKEN에 넣으면 가동.",
     };
   }),
+
+  // ===== 브랜드 대시보드 (ERP 진입점) =====
+  // 카탈로그를 브랜드 단위로 롤업: 총상품(SPU)·총판매량·대표 시세·평균 정산·추천/주의 수.
+  //   상품 발굴이 '모델' 단위라면, 여기는 그 위 '브랜드' 단위 관제탑.
+  brandDashboard: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(80) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const limit = input?.limit ?? 80;
+
+      const obsAll = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          skuId: poizonSaleObservations.skuId,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+          expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+          bidAvailable: poizonSaleObservations.bidAvailable,
+          localSellerCount: poizonSaleObservations.localSellerCount,
+        })
+        .from(poizonSaleObservations)
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(60000);
+
+      // SKU 최신 스냅샷만
+      const seen = new Set<string>();
+      type O = (typeof obsAll)[number];
+      const obs: O[] = [];
+      for (const o of obsAll) {
+        const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        obs.push(o);
+      }
+
+      const median = (arr: number[]) => {
+        if (!arr.length) return 0;
+        const s = arr.slice().sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+
+      // SPU(상품) 묶음
+      type G = {
+        brand: string; prices: number[]; soldMax: number;
+        localMax: number; profits: number[]; bidAvail: number;
+      };
+      const groups = new Map<string, G>();
+      for (const o of obs) {
+        const gk = o.spuId || o.normKey;
+        const brand = (o.brand || detectBrand(o.productName) || "기타").trim() || "기타";
+        const g =
+          groups.get(gk) ??
+          ({ brand, prices: [], soldMax: 0, localMax: 0, profits: [], bidAvail: 0 } as G);
+        if (o.priceCny > 0) g.prices.push(o.priceCny);
+        if (o.expectedProfitUsd != null) g.profits.push(o.expectedProfitUsd);
+        g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
+        if (o.bidAvailable === true) g.bidAvail++;
+        groups.set(gk, g);
+      }
+
+      // 브랜드 집계 (추천/주의 판단은 상품 발굴과 동일 기준)
+      type B = {
+        brand: string; spuCount: number; totalSold: number;
+        prices: number[]; profits: number[]; recCount: number; riskCount: number;
+      };
+      const brands = new Map<string, B>();
+      for (const g of groups.values()) {
+        const repPrice = median(g.prices);
+        const repProfit = g.profits.length ? median(g.profits) : null;
+        const lowComp = g.localMax === 0 || (g.soldMax > 0 && g.localMax <= g.soldMax * 0.3);
+        const bidRec = (repProfit ?? 0) >= 20 && g.soldMax >= 10 && lowComp && g.bidAvail > 0;
+        const riskFlag = g.soldMax < 5 && repPrice > 0;
+        const b =
+          brands.get(g.brand) ??
+          ({ brand: g.brand, spuCount: 0, totalSold: 0, prices: [], profits: [], recCount: 0, riskCount: 0 } as B);
+        b.spuCount++;
+        b.totalSold += g.soldMax;
+        if (repPrice > 0) b.prices.push(repPrice);
+        if (repProfit != null) b.profits.push(repProfit);
+        if (bidRec) b.recCount++;
+        if (riskFlag) b.riskCount++;
+        brands.set(g.brand, b);
+      }
+
+      const list = [...brands.values()]
+        .map(b => ({
+          brand: b.brand,
+          spuCount: b.spuCount,
+          totalSold: b.totalSold,
+          medianUsd: median(b.prices),
+          avgProfitUsd: b.profits.length
+            ? Math.round(b.profits.reduce((a, x) => a + x, 0) / b.profits.length)
+            : null,
+          recCount: b.recCount,
+          riskCount: b.riskCount,
+        }))
+        .sort((a, b) => b.totalSold - a.totalSold)
+        .slice(0, limit);
+
+      const totals = {
+        brands: brands.size,
+        spuCount: groups.size,
+        totalSold: [...groups.values()].reduce((a, g) => a + g.soldMax, 0),
+        recCount: list.reduce((a, b) => a + b.recCount, 0),
+      };
+      return { brands: list, totals };
+    }),
 });
