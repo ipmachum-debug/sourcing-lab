@@ -1633,6 +1633,124 @@ ${facts}
       }
     }),
 
+  // ===== AI 비서 (카탈로그 근거 대화) =====
+  // "오늘 뭐 사?" 같은 질문에 카탈로그 상위 상품을 근거로 답. 데이터 밖 환각 금지.
+  aiAssistant: protectedProcedure
+    .input(
+      z.object({
+        question: z.string().min(1).max(300),
+        category: z.string().max(40).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 최신 스냅샷 → SPU 묶음 → 상위 상품 컨텍스트
+      const obsAll = await db
+        .select({
+          normKey: poizonSaleObservations.normKey,
+          spuId: poizonSaleObservations.spuId,
+          skuId: poizonSaleObservations.skuId,
+          size: poizonSaleObservations.size,
+          brand: poizonSaleObservations.brand,
+          productName: poizonSaleObservations.productName,
+          priceCny: poizonSaleObservations.priceCny,
+          soldCount30d: poizonSaleObservations.soldCount30d,
+          expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+          localSellerCount: poizonSaleObservations.localSellerCount,
+        })
+        .from(poizonSaleObservations)
+        .orderBy(desc(poizonSaleObservations.observedAt))
+        .limit(60000);
+      const seen = new Set<string>();
+      type G = { brand: string; name: string; prices: number[]; profits: number[]; soldMax: number; localMax: number };
+      const groups = new Map<string, G>();
+      for (const o of obsAll) {
+        const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const gk = o.spuId || o.normKey;
+        const g = groups.get(gk) ?? { brand: o.brand ?? "", name: o.productName, prices: [], profits: [], soldMax: 0, localMax: 0 };
+        if (o.priceCny > 0) g.prices.push(o.priceCny);
+        if (o.expectedProfitUsd != null) g.profits.push(o.expectedProfitUsd);
+        g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+        g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
+        groups.set(gk, g);
+      }
+      const median = (a: number[]) => (a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
+      const catFilter = input.category && input.category !== "전체" ? input.category : null;
+      let models = [...groups.values()]
+        .filter(g => (!catFilter || catOf({ category: null, productName: g.name }) === catFilter))
+        .map(g => ({
+          name: g.name, brand: g.brand,
+          sold: g.soldMax, price: median(g.prices), profit: g.profits.length ? median(g.profits) : null,
+          comp: g.localMax === 0 ? "없음" : g.localMax <= g.soldMax * 0.3 ? "낮음" : "높음",
+        }))
+        .sort((a, b) => b.sold - a.sold)
+        .slice(0, 45);
+
+      if (models.length === 0) {
+        return { answer: "아직 카탈로그가 비어 있어요. 판매자센터 엑셀을 먼저 올려주세요.", picks: [], source: "empty" as const };
+      }
+
+      const ctx = models
+        .map((m, i) => `${i + 1}. ${m.brand ? m.brand + " " : ""}${m.name} | 판매 ${m.sold} | 시세 $${Math.round(m.price)} | 정산 ${m.profit != null ? "$" + Math.round(m.profit) : "미상"} | 경쟁 ${m.comp}`)
+        .join("\n");
+
+      const prompt = `당신은 POIZON 역직구(국내 매입 → POIZON 판매) 소싱 비서입니다.
+아래 '카탈로그 상위 상품' 목록만 근거로 판매자의 질문에 답하세요.
+목록에 없는 상품을 지어내지 말고, 숫자를 왜곡하지 마세요. 한국어로 간결하게.
+
+[카탈로그 상위 상품]
+${ctx}
+
+[질문]
+${input.question}
+
+다음 JSON만 출력:
+{
+  "answer": "질문에 대한 2~4문장 답변(핵심 근거 숫자 포함)",
+  "picks": [{"name":"목록의 상품명 그대로","reason":"추천/주의 이유 20자 내외"}]
+}
+picks는 질문과 관련된 상품 최대 5개(없으면 빈 배열).`;
+
+      try {
+        const res = await invokeLLM({
+          messages: [
+            { role: "system", content: "역직구 소싱 비서. 카탈로그 목록 밖 환각 금지. 유효한 JSON만." },
+            { role: "user", content: prompt },
+          ],
+        });
+        const raw = res.choices?.[0]?.message?.content;
+        const text = (typeof raw === "string" ? raw : "").replace(/```json\n?|```/g, "").trim();
+        const p = JSON.parse(text);
+        const nameSet = new Map(models.map(m => [m.name, m]));
+        const picks = (Array.isArray(p.picks) ? p.picks : [])
+          .slice(0, 5)
+          .map((x: any) => {
+            const m = nameSet.get(String(x.name));
+            return {
+              name: String(x.name).slice(0, 200),
+              brand: m?.brand ?? "",
+              sold: m?.sold ?? 0,
+              price: m?.price ?? 0,
+              profit: m?.profit ?? null,
+              reason: String(x.reason ?? "").slice(0, 60),
+            };
+          });
+        return { answer: String(p.answer ?? "").slice(0, 800), picks, source: "ai" as const };
+      } catch {
+        // 폴백: 판매량 상위로 간단 답변
+        const top = models.slice(0, 5);
+        return {
+          answer: `지금 판매량 기준 상위는 ${top.map(m => m.name).slice(0, 3).join(", ")} 입니다. 국내가를 확인해 마진을 계산해보세요.`,
+          picks: top.map(m => ({ name: m.name, brand: m.brand, sold: m.sold, price: m.price, profit: m.profit, reason: `판매 ${m.sold}` })),
+          source: "rule" as const,
+        };
+      }
+    }),
+
   // ===== 브랜드 대시보드 (ERP 진입점) =====
   // 카탈로그를 브랜드 단위로 롤업: 총상품(SPU)·총판매량·대표 시세·평균 정산·추천/주의 수.
   //   상품 발굴이 '모델' 단위라면, 여기는 그 위 '브랜드' 단위 관제탑.
