@@ -67,8 +67,8 @@ export function readiness(): {
 // ⚠️ 표시는 여전히 추정 suffix — 각 문서 링크로 확정 필요.
 export const POIZON_API = {
   // ⭐ 핵심 5 (역경매 워크플로우)
-  spuByArticleNumber: { path: "/dop/api/v1/pop/api/v1/spu/query-by-article-number", method: "POST" }, // ⚠️ 추정
-  spuByGlobalSpuId: { path: "/dop/api/v1/pop/api/v1/spu/query-by-global-spu-id", method: "POST" }, // ⚠️ 추정
+  spuByArticleNumber: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/spu/spu-basic-info/by-article-number", method: "POST" }, // ✅ 확정
+  spuByGlobalSpuId: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/spu/spu-basic-info/by-global-spu-id", method: "POST" }, // ⚠️ 패턴 추정
   listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
   submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
   autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
@@ -77,7 +77,7 @@ export const POIZON_API = {
 
   // 확장(Default 포함) — 필요 시 순차 구현
   skuSpuByBarcode: { path: "/dop/api/v1/commodity/query-by-barcode", method: "POST" },
-  skuBasicInfoBySku: { path: "/commodity/intl/sku/sku-basic-info/by-sku", method: "POST" },
+  skuBasicInfoBySku: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/sku/sku-basic-info/by-sku", method: "POST" }, // ⚠️ 패턴 추정
   orderListV2: { path: "/dop/api/v1/order/list/v2", method: "POST" },
   orderConfirm: { path: "/dop/api/v1/order/confirm", method: "POST" },
   realtimeReconciliation: { path: "/dop/api/v1/bill/realtime/list", method: "POST" },
