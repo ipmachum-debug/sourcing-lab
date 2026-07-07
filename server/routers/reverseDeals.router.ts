@@ -1435,8 +1435,8 @@ export const reverseDealsRouter = router({
     return {
       configured: poizonApiConfigured(),
       note: poizonApiConfigured()
-        ? "POIZON Open API 자격증명 확인됨 — 자동 동기화 준비 완료."
-        : "Phase 2: POIZON_APP_KEY/SECRET/ACCESS_TOKEN 설정 + 공식 Sign 문서 검증 후 자동 동기화 활성화.",
+        ? "POIZON Open API 자격증명 확인됨 — 자동 동기화 준비 완료. (엔드포인트: sku-basic-info/by-sku, region=US)"
+        : "Phase 2: 엔드포인트·파라미터 확인됨(sku-basic-info/by-sku · skuIds · region=US). 남은 것 = POIZON_APP_KEY/SECRET/ACCESS_TOKEN 자격증명 + 공식 Sign Tool 서명 알고리즘 검증.",
     };
   }),
 });
