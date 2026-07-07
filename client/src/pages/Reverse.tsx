@@ -17,113 +17,13 @@ const TOOLS = [
   { icon: Ship, emoji: "🌏", title: "수출 관리", desc: "채널별 판매·정산·회계", path: "/reverse/exports" },
 ];
 
-const SEV_STYLE: Record<string, string> = {
-  high: "border-red-400/40 bg-red-500/10",
-  med: "border-amber-400/30 bg-amber-500/10",
-  info: "border-emerald-400/25 bg-emerald-500/10",
-};
-const SEV_DOT: Record<string, string> = { high: "bg-red-400", med: "bg-amber-400", info: "bg-emerald-400" };
-
-interface AlertRow {
-  skuId: number; productName: string; brand: string | null;
-  type: string; deltaPct: number; latestCny: number; severity: string; message: string;
-}
-
-interface SurgeAlert {
-  normKey: string; productName: string; brand: string | null; category: string;
-  type: "price_surge" | "sold_surge" | "new_hot"; deltaPct: number; latestCny: number; soldCount: number;
-  severity: string; message: string;
-}
-const SURGE_TAG: Record<string, { label: string; cls: string }> = {
-  price_surge: { label: "시세급등", cls: "bg-orange-500/20 text-orange-300" },
-  sold_surge: { label: "판매급증", cls: "bg-cyan-500/20 text-cyan-300" },
-  new_hot: { label: "신규급부상", cls: "bg-fuchsia-500/20 text-fuchsia-300" },
-};
-
-function MarketSurge() {
-  const [cat, setCat] = useState<string>("전체");
-  const q = trpc.poizonTrending.surgeAlerts.useQuery(undefined, { refetchOnWindowFocus: false });
-  const d = q.data as { alerts: SurgeAlert[]; total: number } | undefined;
-  if (!d || d.alerts.length === 0) return null;
-  const cats = ["전체", ...Array.from(new Set(d.alerts.map(a => a.category)))];
-  const shown = cat === "전체" ? d.alerts : d.alerts.filter(a => a.category === cat);
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Flame className="h-4 w-4 text-orange-300" />
-        <h2 className="text-sm font-semibold text-slate-100 tracking-wide">시장 급상승</h2>
-        <span className="text-[11px] text-slate-500">POIZON 시세·판매 급변 {d.total}건</span>
-        <Link href="/reverse/insights" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
-          소싱 인사이트 <ArrowRight className="h-3 w-3" />
-        </Link>
-      </div>
-      {cats.length > 2 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {cats.map(c => (
-            <button key={c} onClick={() => setCat(c)}
-              className={`text-[11px] px-2.5 py-1 rounded-lg border ${cat === c ? "bg-orange-500/20 text-orange-200 border-orange-400/40" : "border-white/10 text-slate-400"}`}>{c}</button>
-          ))}
-        </div>
-      )}
-      <div className="grid sm:grid-cols-2 gap-2.5">
-        {shown.slice(0, 8).map((a, i) => {
-          const t = SURGE_TAG[a.type];
-          return (
-            <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-3 flex items-start gap-2.5">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${t.cls}`}>{t.label}</span>
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-100 text-sm truncate">{a.productName}</p>
-                <p className="text-[12px] text-slate-300">{a.message}</p>
-                <p className="text-[10px] text-slate-500">{a.brand || ""}{a.brand ? " · " : ""}{a.category}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function WatchlistAlerts() {
-  const q = trpc.reverseDeals.watchAlerts.useQuery(undefined, { refetchOnWindowFocus: false });
-  const d = q.data as { alerts: AlertRow[]; watched: number; withData: number } | undefined;
-  if (!d || d.watched === 0) return null;
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Bell className="h-4 w-4 text-fuchsia-300" />
-        <h2 className="text-sm font-semibold text-slate-100 tracking-wide">워치리스트 알림</h2>
-        <span className="text-[11px] text-slate-500">감시 {d.watched}개 · 시세 표본 {d.withData}개</span>
-        <Link href="/reverse/queue" className="ml-auto text-[11px] text-fuchsia-300 flex items-center gap-0.5 hover:underline">
-          소싱 큐 <ArrowRight className="h-3 w-3" />
-        </Link>
-      </div>
-      {d.alerts.length === 0 ? (
-        <div className="glass rounded-2xl p-4 text-sm text-slate-400">
-          ✅ 조용합니다 — 워치리스트 SKU에 ±10% 시세 변동·판매 급증 없음. (시세가 쌓이면 자동 감지)
-        </div>
-      ) : (
-        <div className="grid sm:grid-cols-2 gap-2.5">
-          {d.alerts.slice(0, 8).map((a, i) => (
-            <div key={i} className={`rounded-xl border p-3 flex items-start gap-2.5 ${SEV_STYLE[a.severity]}`}>
-              <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${SEV_DOT[a.severity]}`} />
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-100 text-sm truncate">{a.productName}</p>
-                <p className="text-[12px] text-slate-300">{a.message}</p>
-                <p className="text-[10px] text-slate-500">{a.brand || ""}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
 
 // 오늘 해야 할 일 — 사업가 관점. 데이터에서 액션을 뽑아 AI가 우선순위로 제안.
 const ACTION_STYLE: Record<string, { emoji: string; ring: string }> = {
   buy: { emoji: "🛒", ring: "ring-fuchsia-400/30" },
+  surge: { emoji: "🔥", ring: "ring-orange-400/30" },
   rebid: { emoji: "📉", ring: "ring-orange-400/30" },
+  watch: { emoji: "🔔", ring: "ring-amber-400/30" },
   inspect: { emoji: "🔍", ring: "ring-amber-400/30" },
   settle: { emoji: "💵", ring: "ring-emerald-400/30" },
   stock: { emoji: "📦", ring: "ring-cyan-400/30" },
@@ -151,6 +51,15 @@ function DailyBriefing() {
     const n = Number(String(cash).replace(/[^\d]/g, "")) || 0;
     cashMut.mutate({ cashKrw: n });
   };
+  // 모니터링 흡수: 시장 급상승 + 내 SKU 워치 알림을 브리핑 액션으로
+  const surge = trpc.poizonTrending.surgeAlerts.useQuery(undefined, { refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 });
+  const watch = trpc.reverseDeals.watchAlerts.useQuery(undefined, { refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 });
+  const surgeN = (surge.data as any)?.total ?? 0;
+  const watchN = (watch.data as any)?.alerts?.length ?? 0;
+  const merged: Action[] = [...(d?.actions ?? [])];
+  if (surgeN > 0) merged.push({ kind: "surge", priority: 1.5, title: `시장 급상승 ${surgeN}건`, detail: "POIZON 시세·판매 급변 — 발굴 점검", href: "/reverse/insights" });
+  if (watchN > 0) merged.push({ kind: "watch", priority: 2.5, title: `내 SKU 알림 ${watchN}건`, detail: "시세 급락·경쟁 변화 확인", href: "/reverse/my-products" });
+  merged.sort((a, b) => a.priority - b.priority);
   return (
     <section className="glass rounded-2xl p-5 sm:p-6 ring-1 ring-fuchsia-400/30">
       <div className="flex items-center gap-2 mb-1">
@@ -182,9 +91,9 @@ function DailyBriefing() {
       ) : (
         <>
           <p className="text-slate-300 text-sm mb-4">{d?.headline}</p>
-          {d && d.actions.length > 0 ? (
+          {merged.length > 0 ? (
             <ol className="space-y-2">
-              {d.actions.map((a, i) => {
+              {merged.map((a, i) => {
                 const st = ACTION_STYLE[a.kind] ?? { emoji: "•", ring: "ring-white/10" };
                 const inner = (
                   <div className={`flex items-center gap-3 rounded-xl bg-white/5 ring-1 ${st.ring} px-3 py-2.5 ${a.href ? "hover:bg-white/10 transition-colors" : ""}`}>
@@ -289,17 +198,11 @@ export default function Reverse() {
             </span>
           </div>
 
-          {/* 오늘 해야 할 일 — 사업가용 첫 화면 */}
+          {/* 오늘 해야 할 일 — 사업가용 첫 화면 (급상승·워치 알림 흡수) */}
           <DailyBriefing />
 
           {/* 종합 관제 대시보드 */}
           <CommandDeck />
-
-          {/* 워치리스트 알림 (앱 메인 표시) */}
-          <WatchlistAlerts />
-
-          {/* 시장 급상승 알림 */}
-          <MarketSurge />
 
           {/* 3단계 */}
           <section>
