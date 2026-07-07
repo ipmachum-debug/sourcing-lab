@@ -598,8 +598,16 @@ export const POIZON_OAUTH = {
   authorize: "/authorize", // ✅ 확인 (호스트 루트)
   token: "/api/v1/h5/passport/v1/oauth2/token", // ✅ 확인
   refreshToken: "/api/v1/h5/passport/v1/oauth2/refresh_token", // ✅ 확인
-  redirectUri: "https://lumiriz.kr/api/poizon/callback",
 };
+
+/**
+ * OAuth redirect_uri — 앱 콘솔의 Redirect URL과 정확히 일치해야 함.
+ *   기본값: https://lumiriz.kr/api/poizon/callback (우리 콜백 라우트)
+ *   콘솔이 다른 값만 허용하면 env POIZON_REDIRECT_URI로 덮어쓰기(코드 수정 불필요).
+ */
+export function redirectUri(): string {
+  return process.env.POIZON_REDIRECT_URI || "https://lumiriz.kr/api/poizon/callback";
+}
 
 /** 판매자 인증 동의 URL 생성(리다이렉트용). scope=all 고정, redirect_uri는 encodeURIComponent. */
 export function buildAuthorizeUrl(state = ""): string | null {
@@ -609,7 +617,7 @@ export function buildAuthorizeUrl(state = ""): string | null {
   const parts = [
     `response_type=code`,
     `client_id=${encodeURIComponent(appKey)}`,
-    `redirect_uri=${encodeURIComponent(POIZON_OAUTH.redirectUri)}`,
+    `redirect_uri=${encodeURIComponent(redirectUri())}`,
     `scope=all`,
     ...(state ? [`state=${encodeURIComponent(state)}`] : []),
   ];
