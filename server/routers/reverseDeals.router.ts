@@ -6,6 +6,7 @@ import {
   poizonPricePool,
   poizonTrending,
   reverseSkuWatch,
+  reversePurchases,
 } from "../../drizzle/schema";
 import { and, desc, eq, gte, like, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -1632,6 +1633,128 @@ ${facts}
         return fallback();
       }
     }),
+
+  // ===== 오늘의 브리핑 (사업가 관점 액션 제안) =====
+  // 매입 파이프라인 + 카탈로그 신호에서 '오늘 해야 할 일'을 뽑아 우선순위로 제안.
+  //   숫자는 실데이터, 문장은 AI가 다듬음(환각 방지: 주어진 지표만).
+  dailyBriefing: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const uid = ctx.user!.id;
+    const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+
+    // 1) 매입 파이프라인 (저비용 SQL)
+    const [pp] = await db
+      .select({
+        inspectPending: sql<number>`sum(case when ${reversePurchases.status} = 'inspecting' or ${reversePurchases.inspectStatus} = 'pending' then 1 else 0 end)`,
+        listedCount: sql<number>`sum(case when ${reversePurchases.status} = 'listed' then 1 else 0 end)`,
+        settleAmount: sql<number>`coalesce(sum(case when ${reversePurchases.status} = 'sold' then ${reversePurchases.soldPrice} * ${reversePurchases.qty} else 0 end), 0)`,
+        settleProfit: sql<number>`coalesce(sum(case when ${reversePurchases.status} = 'sold' then (${reversePurchases.soldPrice} - ${reversePurchases.buyPrice}) * ${reversePurchases.qty} else 0 end), 0)`,
+        weekBuyAmount: sql<number>`coalesce(sum(case when ${reversePurchases.buyDate} >= ${weekAgo} then ${reversePurchases.buyPrice} * ${reversePurchases.qty} else 0 end), 0)`,
+        weekBuyCount: sql<number>`sum(case when ${reversePurchases.buyDate} >= ${weekAgo} then 1 else 0 end)`,
+      })
+      .from(reversePurchases)
+      .where(eq(reversePurchases.userId, uid));
+
+    // 2) 카탈로그 입찰 추천 수 (최신 스냅샷 경량 그룹)
+    const obsAll = await db
+      .select({
+        normKey: poizonSaleObservations.normKey,
+        spuId: poizonSaleObservations.spuId,
+        skuId: poizonSaleObservations.skuId,
+        size: poizonSaleObservations.size,
+        brand: poizonSaleObservations.brand,
+        productName: poizonSaleObservations.productName,
+        priceCny: poizonSaleObservations.priceCny,
+        soldCount30d: poizonSaleObservations.soldCount30d,
+        expectedProfitUsd: poizonSaleObservations.expectedProfitUsd,
+        bidAvailable: poizonSaleObservations.bidAvailable,
+        localSellerCount: poizonSaleObservations.localSellerCount,
+      })
+      .from(poizonSaleObservations)
+      .orderBy(desc(poizonSaleObservations.observedAt))
+      .limit(60000);
+    const seen = new Set<string>();
+    type G = { brand: string; profits: number[]; soldMax: number; localMax: number; bidAvail: number };
+    const groups = new Map<string, G>();
+    for (const o of obsAll) {
+      const k = o.skuId || `${o.spuId || o.normKey}|${o.size || ""}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const gk = o.spuId || o.normKey;
+      const g = groups.get(gk) ?? { brand: o.brand ?? "", profits: [], soldMax: 0, localMax: 0, bidAvail: 0 };
+      if (o.expectedProfitUsd != null) g.profits.push(o.expectedProfitUsd);
+      g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
+      g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
+      if (o.bidAvailable === true) g.bidAvail++;
+      groups.set(gk, g);
+    }
+    const median = (a: number[]) => (a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
+    let recCount = 0;
+    const recByBrand = new Map<string, number>();
+    for (const g of groups.values()) {
+      const profit = median(g.profits);
+      const lowComp = g.localMax === 0 || (g.soldMax > 0 && g.localMax <= g.soldMax * 0.3);
+      if (profit >= 20 && g.soldMax >= 10 && lowComp && g.bidAvail > 0) {
+        recCount++;
+        const b = g.brand || "기타";
+        recByBrand.set(b, (recByBrand.get(b) ?? 0) + 1);
+      }
+    }
+    const topRecBrand = [...recByBrand.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
+
+    // 3) 액션 아이템 (실데이터 기반)
+    const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
+    type Action = { kind: string; priority: number; title: string; detail: string; href?: string };
+    const actions: Action[] = [];
+    if (recCount > 0)
+      actions.push({
+        kind: "buy", priority: 1,
+        title: topRecBrand ? `${topRecBrand[0]} 등 ${recCount}개 매입 추천` : `입찰 추천 ${recCount}개 검토`,
+        detail: "소싱 큐에서 국내가·방어선 확인 후 매입",
+        href: "/reverse/queue",
+      });
+    if (Number(pp?.inspectPending ?? 0) > 0)
+      actions.push({ kind: "inspect", priority: 2, title: `검수 결과 ${pp.inspectPending}건 확인`, detail: "합격/탈락 처리로 재고 확정", href: "/reverse/purchases" });
+    if (Number(pp?.settleAmount ?? 0) > 0)
+      actions.push({ kind: "settle", priority: 3, title: `정산 예정 ${won(pp.settleAmount)}`, detail: `예상 순이익 ${won(pp.settleProfit)}`, href: "/reverse/purchases" });
+    if (Number(pp?.listedCount ?? 0) > 0)
+      actions.push({ kind: "stock", priority: 4, title: `판매중 재고 ${pp.listedCount}건`, detail: "가격·경쟁 점검", href: "/reverse/purchases" });
+    if (Number(pp?.weekBuyAmount ?? 0) > 0)
+      actions.push({ kind: "cash", priority: 5, title: `이번 주 매입 ${won(pp.weekBuyAmount)}`, detail: `${pp.weekBuyCount}건 · 현금 흐름 점검` });
+
+    const metrics = {
+      recCount,
+      inspectPending: Number(pp?.inspectPending ?? 0),
+      listedCount: Number(pp?.listedCount ?? 0),
+      settleAmount: Number(pp?.settleAmount ?? 0),
+      settleProfit: Number(pp?.settleProfit ?? 0),
+      weekBuyAmount: Number(pp?.weekBuyAmount ?? 0),
+    };
+
+    if (actions.length === 0) {
+      return { headline: "오늘은 급한 액션이 없어요. 판매자 엑셀을 올리거나 소싱 큐를 살펴보세요.", actions: [], metrics };
+    }
+
+    // 4) AI 헤드라인 (지표 근거, 실패 시 규칙 기반)
+    const facts = actions.map(a => `- ${a.title} (${a.detail})`).join("\n");
+    let headline = `오늘 ${actions.length}가지 할 일이 있어요. 매입 추천부터 확인하세요.`;
+    try {
+      const res = await invokeLLM({
+        messages: [
+          { role: "system", content: "역직구 사업 비서. 아래 할 일 목록을 근거로 한 줄 브리핑만 한국어로. 숫자 왜곡 금지." },
+          { role: "user", content: `오늘의 할 일:\n${facts}\n\n사업가에게 동기부여되는 한 줄 브리핑(40자 내외)만 출력.` },
+        ],
+      });
+      const raw = res.choices?.[0]?.message?.content;
+      const t = (typeof raw === "string" ? raw : "").replace(/["`]/g, "").trim();
+      if (t) headline = t.slice(0, 80);
+    } catch {
+      /* 규칙 기반 유지 */
+    }
+
+    return { headline, actions, metrics };
+  }),
 
   // ===== AI 비서 (카탈로그 근거 대화) =====
   // "오늘 뭐 사?" 같은 질문에 카탈로그 상위 상품을 근거로 답. 데이터 밖 환각 금지.

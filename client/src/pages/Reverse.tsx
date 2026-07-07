@@ -3,7 +3,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { Globe2, Camera, Scale, Store, ListChecks, BarChart3, Package, Ship, Sparkles, Flame, Activity, Bell, ArrowRight } from "lucide-react";
+import { Globe2, Camera, Scale, Store, ListChecks, BarChart3, Package, Ship, Sparkles, Flame, Activity, Bell, ArrowRight, Bot } from "lucide-react";
 
 // 역직구 채널 홈 — 판매자 카탈로그(엑셀) 주도 소싱 엔진.
 const TOOLS = [
@@ -120,6 +120,62 @@ function WatchlistAlerts() {
   );
 }
 
+// 오늘 해야 할 일 — 사업가 관점. 데이터에서 액션을 뽑아 AI가 우선순위로 제안.
+const ACTION_STYLE: Record<string, { emoji: string; ring: string }> = {
+  buy: { emoji: "🛒", ring: "ring-fuchsia-400/30" },
+  inspect: { emoji: "🔍", ring: "ring-amber-400/30" },
+  settle: { emoji: "💵", ring: "ring-emerald-400/30" },
+  stock: { emoji: "📦", ring: "ring-cyan-400/30" },
+  cash: { emoji: "💰", ring: "ring-slate-400/20" },
+};
+interface Action { kind: string; priority: number; title: string; detail: string; href?: string }
+function DailyBriefing() {
+  const q = trpc.reverseDeals.dailyBriefing.useQuery(undefined, { refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 });
+  const d = q.data as { headline: string; actions: Action[]; metrics: any } | undefined;
+  return (
+    <section className="glass rounded-2xl p-5 sm:p-6 ring-1 ring-fuchsia-400/30">
+      <div className="flex items-center gap-2 mb-1">
+        <Bot className="h-5 w-5 text-fuchsia-300" />
+        <h2 className="text-lg font-black text-white">오늘 해야 할 일</h2>
+      </div>
+      {q.isLoading ? (
+        <p className="text-sm text-slate-500 py-4">브리핑 준비 중…</p>
+      ) : (
+        <>
+          <p className="text-slate-300 text-sm mb-4">{d?.headline}</p>
+          {d && d.actions.length > 0 ? (
+            <ol className="space-y-2">
+              {d.actions.map((a, i) => {
+                const st = ACTION_STYLE[a.kind] ?? { emoji: "•", ring: "ring-white/10" };
+                const inner = (
+                  <div className={`flex items-center gap-3 rounded-xl bg-white/5 ring-1 ${st.ring} px-3 py-2.5 ${a.href ? "hover:bg-white/10 transition-colors" : ""}`}>
+                    <span className="h-7 w-7 shrink-0 rounded-full bg-white/10 grid place-items-center text-sm font-black text-white">{i + 1}</span>
+                    <span className="text-lg shrink-0">{st.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-slate-100 text-sm truncate">{a.title}</p>
+                      <p className="text-[12px] text-slate-400 truncate">{a.detail}</p>
+                    </div>
+                    {a.href && <ArrowRight className="h-4 w-4 text-slate-500 shrink-0" />}
+                  </div>
+                );
+                return (
+                  <li key={i}>
+                    {a.href ? <Link href={a.href}>{inner}</Link> : inner}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="text-sm text-slate-500">
+              아직 액션이 없어요. <Link href="/reverse/seller" className="underline text-fuchsia-300">판매자 엑셀</Link>을 올리면 시작됩니다.
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 // 종합 관제 대시보드 — 소싱(브랜드·카탈로그·추천) + 운영(매입·순익·회전) 한눈에.
 function CommandDeck() {
   const brand = trpc.reverseDeals.brandDashboard.useQuery({ limit: 1 }, { refetchOnWindowFocus: false });
@@ -193,6 +249,9 @@ export default function Reverse() {
               <Sparkles className="h-3.5 w-3.5" /> 새 채널 · 도구 순차 오픈 중
             </span>
           </div>
+
+          {/* 오늘 해야 할 일 — 사업가용 첫 화면 */}
+          <DailyBriefing />
 
           {/* 종합 관제 대시보드 */}
           <CommandDeck />
