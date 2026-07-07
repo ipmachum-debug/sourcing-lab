@@ -11,7 +11,7 @@ const usd = (n: number) => `$${Math.round(n || 0).toLocaleString("en-US")}`;
 // POIZON 판매 기준 시장=중국(득물) → 시세는 $. 정산은 원. rate=원/$, 환전손실 1.5%.
 const DEFAULT_COST = {
   rate: 1350,
-  poizonFeePct: 9,
+  poizonFeePct: 6, // 판매 5% + 결제 1%
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,

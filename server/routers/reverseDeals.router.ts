@@ -1173,17 +1173,20 @@ export const reverseDealsRouter = router({
 
       // ① 모델 엔리치먼트 — 발굴 필터·리스크 점수·입찰 추천·사이즈 추천
       const enriched = list.map(g => {
-        // ★ 대표 사이즈(거래가 중앙값 SKU)의 실제 값 — 서로 다른 사이즈 값을 한 줄에 섞지 않음.
-        //   (기존 버그: 시세=중앙값·입찰=최소·수익=최대 → 다른 3개 사이즈가 섞여 말이 안 됨)
-        const priced = g.recs
-          .filter(r => r.price > 0)
-          .sort((a, b) => a.price - b.price);
+        // ★ 유동 사이즈만 사용 — 최저입찰가가 거래가보다 과도히 높으면(희귀/저유동)
+        //   현재가가 스파이크라 정산이 부풀려짐 → 제외해야 현실적. (예: 거래가 $85인데 입찰 $124)
+        const reliable = g.recs.filter(
+          r => r.price > 0 && (r.bid == null || r.bid <= r.price * 1.3)
+        );
+        const pool = reliable.length ? reliable : g.recs.filter(r => r.price > 0);
+        const priced = pool.slice().sort((a, b) => a.price - b.price);
         const rep = priced.length ? priced[Math.floor(priced.length / 2)] : null;
         const avgUsd = rep ? rep.price : median(g.prices);
         const lowestBidUsd = rep?.bid ?? null; // 대표 사이즈 최저입찰가
         const profitUsd = rep?.profit ?? null; // 대표 사이즈 POIZON 정산(예상)=판매가−수수료
-        const allProfits = g.recs.map(r => r.profit).filter((x): x is number => x != null);
-        const bestProfitUsd = allProfits.length ? Math.max(...allProfits) : null;
+        const poolProfits = pool.map(r => r.profit).filter((x): x is number => x != null);
+        const bestProfitUsd = poolProfits.length ? Math.max(...poolProfits) : null;
+        const minProfitUsd = poolProfits.length ? Math.min(...poolProfits) : null;
         const bidAvailCnt = g.recs.filter(r => r.bidAvailable === true).length;
         const unbidCnt = g.recs.filter(r => r.unbid).length;
         const localSeller = g.localSellerMax;
@@ -1206,8 +1209,8 @@ export const reverseDealsRouter = router({
           bidAvailCnt > 0 && unbidCnt > 0;
         // 추천 입찰가: 게이트 통과 시 대표 사이즈 최저입찰가에 매칭(약간 낮게)
         const recommendBidUsd = bidRec ? lowestBidUsd : null;
-        // 사이즈 추천: 정산(예상) 높은 순 + 입찰 공백 우선
-        const bestSizes = g.recs
+        // 사이즈 추천: 유동 사이즈 중 정산(예상) 높은 순 + 입찰 공백 우선
+        const bestSizes = pool
           .filter(r => r.size)
           .map(r => ({
             size: r.size as string, profit: r.profit ?? 0, bid: r.bid ?? 0,
@@ -1221,7 +1224,7 @@ export const reverseDealsRouter = router({
           lowUsd: g.prices.length ? Math.min(...g.prices) : 0,
           highUsd: g.prices.length ? Math.max(...g.prices) : 0,
           sizeCount: g.sizes.size,
-          profitUsd, bestProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
+          profitUsd, minProfitUsd, bestProfitUsd, lowestBidUsd, bidAvailCnt, unbidCnt, localSeller,
           riskScore, safe, blue, risk: riskFlag, bidRec, recommendBidUsd, bestSizes,
         };
       });

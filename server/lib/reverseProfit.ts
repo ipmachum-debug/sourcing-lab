@@ -28,7 +28,7 @@ export interface CostParams {
 //   revenue(원) = 시세($) × rate(원/달러). 기본 환율 1350, 환전손실 1.5%.
 export const DEFAULT_COST: CostParams = {
   rate: 1350,
-  poizonFeePct: 9,
+  poizonFeePct: 6, // 판매 수수료 5% + 결제 수수료 1%
   chinaShipKrw: 5000,
   fxLossPct: 1.5,
   packingKrw: 1000,

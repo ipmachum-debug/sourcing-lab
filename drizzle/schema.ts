@@ -1816,7 +1816,7 @@ export const reverseSkuWatch = mysqlTable("reverse_sku_watch", {
   domesticPrice: int("domestic_price").default(0),   // 국내 매입가(원)
   poizonCny: int("poizon_cny").default(0),            // POIZON 시세(중국시장 $, 필드명 유지)
   rate: int("rate").default(1350),                    // 환율(원/$, KRW per USD)
-  feePct: int("fee_pct").default(9),                  // POIZON 수수료(%)
+  feePct: int("fee_pct").default(6),                  // POIZON 수수료(판매 5%+결제 1%)
   note: varchar("note", { length: 300 }),
   createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", tsOpts).defaultNow().onUpdateNow().notNull(),

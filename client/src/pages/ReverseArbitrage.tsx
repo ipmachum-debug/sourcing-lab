@@ -4,7 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { Scale, TriangleAlert, Search, Check } from "lucide-react";
 
 // 역직구 아비트리지 순익 계산 — 국내매입 → POIZON 판매 기준.
-const DEFAULT_FEE = 9;      // POIZON 셀러 수수료(%) 대략
+const DEFAULT_FEE = 6;      // POIZON 셀러 수수료: 판매 5% + 결제 1%
 const DEFAULT_RATE = 1350;  // POIZON 판매 시장=중국(득물) → 시세 $, 환율(원/$)로 환산
 
 function calc(i: {
