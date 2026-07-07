@@ -1,15 +1,31 @@
 // ============================================================
 // poizonApi.ts — POIZON Open Platform 연동 (Phase 2, 스캐폴드)
 // ============================================================
-// 판매자센터 수동 엑셀(Phase 1)을 대체할 자동 동기화. 자격증명이 세팅되면 활성화된다.
+// 통합 방식: "Seller Integration with POIZON"(우리가 POIZON API 호출) + Manual Listing(가격 직접).
+// 워크플로우(문서 API Introduction):
+//   Step1 /intl-commodity   — 상품/카탈로그 (상품번호=articleNumber → globalSkuId)
+//   Step2 /recommend-bid    — POIZON이 추천 입찰가 제공 (개별/배치)
+//   Step3 /submit-bid       — 리스팅/입찰 (Ship-to-verify/Consignment/Pre-sale/Bonded)
+//   Step4 /order/delivery   — 주문 확인/조회
+//   Step5 /bill             — 정산 명세/대사
+//
 //   필요 env: POIZON_APP_KEY, POIZON_APP_SECRET, POIZON_ACCESS_TOKEN
 //   (선택) POIZON_API_BASE (기본 https://open.poizon.com)
 //
-// ⚠️ Sign 알고리즘은 POIZON 공식 "Sign 문서" 기준으로 최종 검증 필요.
+// ⚠️ Sign 알고리즘은 POIZON 공식 "Sign Tool" 기준으로 최종 검증 필요.
 //    아래는 오픈플랫폼 공통 패턴(파라미터 사전정렬 → key+value 연결 → secret 래핑 → MD5 대문자).
 //    실제 서명 규칙이 다르면 sign()만 교체하면 되도록 격리해 둠.
 
 import crypto from "crypto";
+
+// 문서 확인 워크플로우 base 엔드포인트
+export const POIZON_ENDPOINTS = {
+  commodity: "/intl-commodity", // Step1 상품/카탈로그
+  recommendBid: "/recommend-bid", // Step2 입찰 추천
+  submitBid: "/submit-bid", // Step3 리스팅/입찰
+  orderDelivery: "/order/delivery", // Step4 주문
+  bill: "/bill", // Step5 정산
+};
 
 export interface PoizonApiConfig {
   appKey: string;

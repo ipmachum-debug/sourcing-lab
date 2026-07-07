@@ -198,9 +198,9 @@ export const POIZON_GUIDE: GuideSection[] = [
   {
     id: "api-endpoints",
     cat: "API·기타",
-    title: "API 엔드포인트 지도 (기능 연결)",
-    keywords: ["api", "엔드포인트", "자동 입찰", "정산 api", "카탈로그", "automatic bidding"],
-    body: "Open API가 프로그램 전 기능을 커버 — 엑셀 수동 업로드를 대체할 수 있음:\n· Item(상품): Paginated Query by Category / by article number / by brand → 카탈로그 자동 수집\n· Listing&Inventory: ★ Submit Automatic Bidding(자동 입찰 제출) · Get Lowest Price(최저가) · Query Automatic Follow-Up(자동 따라잡기 조회) · Cancel Listing\n· Consignment(보관): Inbound Create/List/Inspection/Modify/Cancel\n· Order/Fulfillment: Order List · Confirm · Ship Order · Modify Tracking · Express Label\n· Bill(정산): Billing Cycle Invoice · Reconciliation · Real-Time Reconciliation → 실제 정산액 자동 수집\n· Return/Merchant: 반품·회수·SKU 코드\n★ 엔드게임: 카탈로그 수집 → 발굴/방어입찰가 계산 → Submit Automatic Bidding으로 자동 제출 → Bill로 정산 확인 = 완전 자동 루프.\n전제: 자격증명 + Sign 알고리즘.",
+    title: "API 워크플로우·엔드포인트 지도",
+    keywords: ["api", "엔드포인트", "워크플로우", "자동 입찰", "정산 api", "카탈로그", "recommend-bid", "submit-bid"],
+    body: "통합 방식: Seller Integration with POIZON(우리가 API 호출) + Manual Listing(가격 직접 설정).\n워크플로우 5단계:\n1) /intl-commodity — 상품/카탈로그. 상품번호(articleNumber, 예 FJ4170-004)+region → globalSkuId\n2) /recommend-bid — ★POIZON이 추천 입찰가 제공(개별·배치)\n3) /submit-bid — 리스팅/입찰. 이행유형: Ship-to-verify(일반)·Consignment(보관)·Pre-sale(예약)·Bonded(보세)\n4) /order/delivery — 주문 확인/조회\n5) /bill — 정산 명세·대사(실제 정산액 자동 수집)\n★ 엔드게임: 카탈로그 수집 → 발굴/방어입찰가 → recommend-bid 참고 → submit-bid 자동 제출 → bill 정산 = 완전 자동 루프.\n리스팅 타입: Manual(내가 가격) / Smart(POIZON 자동 마크업). 전제: 자격증명 3개 + Sign 알고리즘.",
   },
   {
     id: "bbc",

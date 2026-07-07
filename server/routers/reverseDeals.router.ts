@@ -13,6 +13,7 @@ import { z } from "zod";
 import {
   evaluateDeal,
   stableSellPrice,
+  bidForTargetNet,
   DEFAULT_COST,
   type CostParams,
   type PriceSample,
@@ -974,6 +975,7 @@ export const reverseDealsRouter = router({
         hasDomestic: boolean; domesticBuyKrw: number; domesticSource: string | null;
         domesticUrl: string | null; matchBy: "barcode" | "name" | null;
         netProfitKrw: number; marginPct: number; grade: string; recommendQty: number;
+        floorBidUsd: number; targetBidUsd: number;
         status: "hunt" | "deal" | "thin"; score: number;
       };
       const rows: Row[] = [];
@@ -1004,6 +1006,7 @@ export const reverseDealsRouter = router({
         }
 
         let netProfitKrw = 0, marginPct = 0, grade = "-", recommendQty = 0;
+        let floorBidUsd = 0, targetBidUsd = 0; // 방어선($, 손익분기) · 목표순익 확보가($)
         let status: "hunt" | "deal" | "thin";
         if (dom) {
           const v = evaluateDeal(dom.buy, g.samples, now, cost, g.soldMax, category);
@@ -1013,6 +1016,8 @@ export const reverseDealsRouter = router({
             grade = v.grade;
             recommendQty = v.recommendQty;
           }
+          floorBidUsd = bidForTargetNet(dom.buy, 0, cost, category);
+          targetBidUsd = bidForTargetNet(dom.buy, 20000, cost, category);
           status = marginPct >= input.minMargin ? "deal" : "thin";
         } else {
           // 국내가 미확보: 판매량 있으면 발굴 대상, 없으면 thin
@@ -1039,7 +1044,8 @@ export const reverseDealsRouter = router({
           soldCount: g.soldMax, volatilityPct: stable.volatilityPct,
           hasDomestic: !!dom, domesticBuyKrw: dom?.buy ?? 0,
           domesticSource: dom?.source ?? null, domesticUrl: dom?.url ?? null,
-          matchBy, netProfitKrw, marginPct, grade, recommendQty, status, score,
+          matchBy, netProfitKrw, marginPct, grade, recommendQty,
+          floorBidUsd, targetBidUsd, status, score,
         });
       }
 
