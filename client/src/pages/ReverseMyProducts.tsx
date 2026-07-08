@@ -8,14 +8,16 @@ import type { FieldSpec } from "@/lib/csv";
 import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
-const PLATFORM_LABEL: Record<string, string> = { coupang: "쿠팡", poizon: "POIZON", domestic: "국내" };
+// POIZON 역직구(국내 매입 → POIZON 판매) 기준 라벨.
+const PLATFORM_LABEL: Record<string, string> = { poizon: "POIZON 판매", domestic: "국내 매입", coupang: "쿠팡" };
+const PLATFORM_ORDER = ["poizon", "domestic", "coupang"];
 
 const MYP_SPECS: FieldSpec[] = [
   { key: "productName", alias: /(상품명|상품|productname|name|모델)/ },
   { key: "brand", alias: /^(브랜드|brand)/ },
-  { key: "sku", alias: /(sku|품번|모델번호)/ },
+  { key: "sku", alias: /(sku|품번|모델번호|skuid)/ },
   { key: "externalId", alias: /(상품id|externalid|spu|코드)/ },
-  { key: "myPriceKrw", alias: /(내판매가|판매가|내가격|price)/, type: "number" },
+  { key: "myPriceKrw", alias: /(국내매입가|매입가|원가|내판매가|판매가|내가격|price)/, type: "number" },
   { key: "targetStock", alias: /(목표재고|안전재고|재고기준|targetstock)/, type: "number" },
 ];
 
@@ -54,14 +56,14 @@ export default function ReverseMyProducts() {
   });
   const apiReady = !!syncStatus.data?.ready;
 
-  const [f, setF] = useState({ platform: "coupang", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
+  const [f, setF] = useState({ platform: "poizon", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
   const add = () => {
     if (!f.productName.trim()) return toast.error("상품명을 입력하세요");
     createMut.mutate({
       platform: f.platform as any, productName: f.productName, brand: f.brand || undefined,
       myPriceKrw: Number(f.myPriceKrw) || 0, targetStock: Number(f.targetStock) || 0,
     });
-    setF({ platform: "coupang", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
+    setF({ platform: "poizon", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
   };
 
   // 오늘 기록 인라인 입력 (상품별)
@@ -86,7 +88,8 @@ export default function ReverseMyProducts() {
               </span>
               <h1 className="text-3xl font-black mt-4 neon-text">내 상품 관리</h1>
               <p className="text-slate-300/80 mt-2">
-                내가 파는·관찰하는 SKU만 <b className="text-white">매일 1회</b> 확인해 추이를 쌓습니다.
+                <b className="text-white">국내 매입 → POIZON 판매</b> SKU의 매입가·시세·재고를
+                <b className="text-white"> 매일 1회</b> 확인해 추이를 쌓습니다.
                 활성 <b className="text-fuchsia-300">{activeN}/{cfg?.maxActiveSkus ?? 50}</b>개
               </p>
             </div>
@@ -95,17 +98,17 @@ export default function ReverseMyProducts() {
               importSpecs={MYP_SPECS}
               requiredKey="productName"
               importing={bulkMut.isPending}
-              templateHeaders={["상품명", "브랜드", "SKU", "상품ID", "내판매가", "목표재고"]}
+              templateHeaders={["상품명", "브랜드", "SKU", "상품ID", "국내 매입가", "목표재고"]}
               templateExample={[["크록스 클래식 클로그 블랙", "크록스", "10001-001", "", 39000, 5]]}
               onImport={rows => bulkMut.mutate({ rows: rows.map(r => ({
                 productName: r.productName, brand: r.brand || undefined, sku: r.sku || undefined,
                 externalId: r.externalId || undefined, myPriceKrw: r.myPriceKrw || 0, targetStock: r.targetStock || 0,
               })) })}
               onExport={() => ({
-                headers: ["상품명", "브랜드", "플랫폼", "내판매가", "목표재고", "재고", "POIZON($)", "경쟁사최저", "활성"],
+                headers: ["상품명", "브랜드", "구분", "국내매입가", "목표재고", "재고", "POIZON시세($)", "국내경쟁최저", "활성"],
                 rows: prods.map(p => {
                   const it = itemOf(p.id);
-                  return [p.productName, p.brand || "", PLATFORM_LABEL[p.platform || "coupang"], p.myPriceKrw || 0,
+                  return [p.productName, p.brand || "", PLATFORM_LABEL[p.platform || "poizon"], p.myPriceKrw || 0,
                     p.targetStock || 0, it?.latest?.stock ?? "", it?.latest?.poizonPriceCny ?? "", it?.latest?.competitorLowKrw ?? "", p.active ? "Y" : "N"];
                 }),
               })}
@@ -143,13 +146,13 @@ export default function ReverseMyProducts() {
                     {apiReady ? (
                       <span className="ml-2 text-[11px] text-fuchsia-300">연동됨</span>
                     ) : (
-                      <span className="ml-2 text-[11px] text-amber-300">승인 대기</span>
+                      <span className="ml-2 text-[11px] text-amber-300">연결 필요</span>
                     )}
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {apiReady
-                      ? "sku 칸에 POIZON skuId(숫자)를 넣은 활성 상품의 시세를 API로 한 번에 갱신합니다."
-                      : "POIZON 승인 후 /api/poizon/authorize 인증하면, 시세·경쟁가를 API로 자동 채웁니다."}
+                      ? "sku 칸에 POIZON skuId(숫자)를 넣은 활성 상품의 시세($)를 API로 한 번에 갱신합니다."
+                      : "서버 .env에 App Key/Secret 설정 시(Poizon Sellers 인증), 시세를 API로 자동 채웁니다."}
                   </p>
                 </div>
               </div>
@@ -202,11 +205,11 @@ export default function ReverseMyProducts() {
             <div className="grid sm:grid-cols-6 gap-2">
               <select value={f.platform} onChange={e => setF({ ...f, platform: e.target.value })}
                 className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60">
-                {["coupang", "poizon", "domestic"].map(p => <option key={p} value={p} className="bg-[#0a0b1e]">{PLATFORM_LABEL[p]}</option>)}
+                {PLATFORM_ORDER.map(p => <option key={p} value={p} className="bg-[#0a0b1e]">{PLATFORM_LABEL[p]}</option>)}
               </select>
               <In placeholder="상품명 *" value={f.productName} onChange={v => setF({ ...f, productName: v })} span2 />
               <In placeholder="브랜드" value={f.brand} onChange={v => setF({ ...f, brand: v })} />
-              <In placeholder="내판매가" value={f.myPriceKrw} onChange={v => setF({ ...f, myPriceKrw: v })} type="number" />
+              <In placeholder="국내 매입가 ₩" value={f.myPriceKrw} onChange={v => setF({ ...f, myPriceKrw: v })} type="number" />
               <In placeholder="목표재고" value={f.targetStock} onChange={v => setF({ ...f, targetStock: v })} type="number" />
             </div>
             <div className="flex justify-end mt-2">
@@ -223,10 +226,10 @@ export default function ReverseMyProducts() {
                 <thead className="bg-white/5 text-xs text-slate-400">
                   <tr>
                     <th className="text-left font-medium px-3 py-2.5">상품 / 브랜드</th>
-                    <th className="text-right font-medium px-3 py-2.5">내판매가</th>
-                    <th className="text-center font-medium px-3 py-2.5" colSpan={3}>오늘 기록 (재고 · POIZON$ · 경쟁사최저)</th>
-                    <th className="text-right font-medium px-3 py-2.5">매출/판매</th>
-                    <th className="text-center font-medium px-3 py-2.5">POIZON 7일</th>
+                    <th className="text-right font-medium px-3 py-2.5">국내 매입가</th>
+                    <th className="text-center font-medium px-3 py-2.5" colSpan={3}>오늘 기록 (재고 · POIZON 시세$ · 국내 경쟁최저)</th>
+                    <th className="text-right font-medium px-3 py-2.5">POIZON 판매(매출/개수)</th>
+                    <th className="text-center font-medium px-3 py-2.5">시세 7일</th>
                     <th className="text-center font-medium px-3 py-2.5">활성</th>
                     <th className="px-3 py-2.5" />
                   </tr>
@@ -241,14 +244,14 @@ export default function ReverseMyProducts() {
                       <tr key={p.id} className={`border-t border-white/8 ${!p.active ? "opacity-45" : ""}`}>
                         <td className="px-3 py-2">
                           <p className="font-medium text-slate-100 truncate max-w-[220px]">{p.productName}</p>
-                          <p className="text-[11px] text-slate-500">{PLATFORM_LABEL[p.platform || "coupang"]}{p.brand ? ` · ${p.brand}` : ""}</p>
+                          <p className="text-[11px] text-slate-500">{PLATFORM_LABEL[p.platform || "poizon"]}{p.brand ? ` · ${p.brand}` : ""}</p>
                         </td>
                         <td className="text-right px-3 py-2 text-slate-300">{won(p.myPriceKrw || 0)}</td>
                         <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.stock ?? "재고")} value={s.stock} onChange={v => set("stock", v)} /></td>
                         <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.poizonPriceCny ?? "$")} value={s.cny} onChange={v => set("cny", v)} /></td>
                         <td className="px-1 py-2">
                           <div className="flex items-center gap-1">
-                            <Mini placeholder={String(it?.latest?.competitorLowKrw ?? "경쟁")} value={s.comp} onChange={v => set("comp", v)} />
+                            <Mini placeholder={String(it?.latest?.competitorLowKrw ?? "국내경쟁")} value={s.comp} onChange={v => set("comp", v)} />
                             <button onClick={() => saveSnap(p.id)} className="text-fuchsia-300 hover:text-fuchsia-200"><Save className="h-4 w-4" /></button>
                           </div>
                         </td>
@@ -276,7 +279,7 @@ export default function ReverseMyProducts() {
               </table>
             </div>
           </div>
-          <p className="text-[11px] text-slate-500">💡 채우는 3가지: <b className="text-slate-400">수동/CSV</b> · <b className="text-slate-400">확장 스케줄러</b> · <b className="text-fuchsia-300">POIZON API(승인 후 자동)</b>. API 연동 시 sku=POIZON skuId 상품의 시세가 위 '지금 동기화'로 채워집니다.</p>
+          <p className="text-[11px] text-slate-500">💡 채우는 3가지: <b className="text-slate-400">수동/CSV</b> · <b className="text-slate-400">확장 스케줄러</b> · <b className="text-fuchsia-300">POIZON API(연동 시 자동)</b>. sku 칸에 POIZON skuId를 넣은 상품의 시세($)가 위 '지금 동기화'로 채워집니다.</p>
         </div>
       </div>
     </DashboardLayout>
@@ -319,9 +322,9 @@ function SkuCard({ it }: { it: DashItem }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mt-3">
-        <Metric label="매출" values={s.map(p => p.revenue)} value={latest ? won(latest.revenueKrw) : "-"} />
+        <Metric label="판매(₩)" values={s.map(p => p.revenue)} value={latest ? won(latest.revenueKrw) : "-"} />
         <Metric label="재고" values={s.map(p => p.stock)} value={latest ? `${latest.stock}개` : "-"} />
-        <Metric label="시세($)" values={s.map(p => p.cny)} value={latest?.poizonPriceCny ? `$${latest.poizonPriceCny.toLocaleString("en-US")}` : "-"} />
+        <Metric label="POIZON 시세($)" values={s.map(p => p.cny)} value={latest?.poizonPriceCny ? `$${latest.poizonPriceCny.toLocaleString("en-US")}` : "-"} />
       </div>
 
       <p className={`text-[11px] mt-3 ${hasData ? "text-slate-400" : "text-slate-600"}`}>{summary}</p>
