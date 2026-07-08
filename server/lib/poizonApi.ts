@@ -344,15 +344,21 @@ export async function callPoizon<T = unknown>(
 const zSpu = z
   .object({
     spuId: z.union([z.string(), z.number()]).optional(),
-    globalSpuId: z.union([z.string(), z.number()]).optional(),
+    globalSpuId: z.union([z.string(), z.number()]).optional(), // 자동추종 입찰 SPU 키
+    regionSpuId: z.union([z.string(), z.number()]).optional(), // 지역별 SPU
     spuName: z.string().optional(),
     articleNumber: z.string().optional(),
     brandName: z.string().optional(),
+    brandId: z.union([z.string(), z.number()]).optional(),
+    fitId: z.union([z.string(), z.number()]).optional(),
+    categoryId: z.union([z.string(), z.number()]).optional(),
+    level1CategoryId: z.union([z.string(), z.number()]).optional(),
+    level2CategoryId: z.union([z.string(), z.number()]).optional(),
+    skuIdList: z.array(z.union([z.string(), z.number()])).optional(), // batchPrice 조회용 skuId들
   })
   .passthrough();
-const zSpuList = z
-  .object({ list: z.array(zSpu).optional(), total: z.number().optional() })
-  .passthrough();
+// ✅ 확정: POIZON은 SPU 조회 결과 data를 배열로 직접 반환({list} 래핑 없음)
+const zSpuList = z.array(zSpu);
 
 // ✅ 확정 응답: data = 시장별 최저가 참조 배열.
 //   가격 단위는 최소단위(분/센트)일 수 있음 — 엔진 연동 시 ÷100 여부 검증 필요.
