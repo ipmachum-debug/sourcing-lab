@@ -1009,6 +1009,7 @@ export const reverseDealsRouter = router({
       const catFilter =
         input.category && input.category !== "전체" ? input.category : null;
       let huntCount = 0, dealCount = 0, thinCount = 0;
+      let limitCount = 0, roomCount = 0; // 🔴 한계선 도달 · 🟢 상향 여유
       const catCount = new Map<string, Set<string>>();
       type Row = {
         groupKey: string; normKey: string; spuId: string | null;
@@ -1022,6 +1023,7 @@ export const reverseDealsRouter = router({
         revenueKrw: number; feeKrw: number; vatRefundKrw: number;
         floorBidUsd: number; targetBidUsd: number;
         status: "hunt" | "deal" | "thin"; score: number;
+        bandState: "room" | "compete" | "limit" | "na"; autoEligible: boolean; spike: boolean;
       };
       const rows: Row[] = [];
       for (const g of groups.values()) {
@@ -1076,6 +1078,21 @@ export const reverseDealsRouter = router({
         else if (status === "hunt") huntCount++;
         else thinCount++;
 
+        // 밴드 상태(시세 vs 하한/상한) — 🟢 여유 / 🟡 경쟁 / 🔴 한계
+        const marketLow = stable.lowCny; // 시장 최저 시세($)
+        let bandState: "room" | "compete" | "limit" | "na" = "na";
+        if (status === "deal" && floorBidUsd > 0 && marketLow > 0) {
+          if (marketLow <= floorBidUsd) bandState = "limit";
+          else if (targetBidUsd > 0 && marketLow >= targetBidUsd) bandState = "room";
+          else bandState = "compete";
+        }
+        // 자동입찰 안전 게이트: 딜 + 판매량≥10 + 마진≥기준 + 한계선 아님 + 급변 아님
+        const spike = stable.volatilityPct >= 60; // 시세 급변 → 자동 제외
+        const autoEligible =
+          status === "deal" && g.soldMax >= 10 && marginPct >= input.minMargin && bandState !== "limit" && !spike;
+        if (bandState === "limit") limitCount++;
+        else if (bandState === "room") roomCount++;
+
         // 정렬 점수: 딜(마진) → 발굴(수요) → 기타
         const score =
           status === "deal"
@@ -1096,6 +1113,7 @@ export const reverseDealsRouter = router({
           matchBy, netProfitKrw, marginPct, grade, recommendQty,
           revenueKrw, feeKrw, vatRefundKrw,
           floorBidUsd, targetBidUsd, status, score,
+          bandState, autoEligible, spike,
         });
       }
 
@@ -1112,7 +1130,7 @@ export const reverseDealsRouter = router({
       return {
         rows: filtered,
         cost,
-        counts: { hunt: huntCount, deal: dealCount, thin: thinCount, total: groups.size },
+        counts: { hunt: huntCount, deal: dealCount, thin: thinCount, total: groups.size, limit: limitCount, room: roomCount },
         categories,
       };
     }),
@@ -1711,7 +1729,7 @@ ${facts}
       .orderBy(desc(poizonSaleObservations.observedAt))
       .limit(60000);
     const seen = new Set<string>();
-    type G = { brand: string; profits: number[]; soldMax: number; localMax: number; bidAvail: number };
+    type G = { brand: string; name: string; normKey: string; profits: number[]; prices: number[]; soldMax: number; localMax: number; bidAvail: number };
     const groups = new Map<string, G>();
     // SKU별 날짜 2개(최신·직전) — 입찰/시세 변동 감지
     const bySku = new Map<string, { date: string; bid: number; price: number }[]>();
@@ -1725,8 +1743,9 @@ ${facts}
       if (seen.has(k)) continue; // 최신 스냅샷만 그룹 집계
       seen.add(k);
       const gk = o.spuId || o.normKey;
-      const g = groups.get(gk) ?? { brand: o.brand ?? "", profits: [], soldMax: 0, localMax: 0, bidAvail: 0 };
+      const g = groups.get(gk) ?? { brand: o.brand ?? "", name: o.productName, normKey: o.normKey, profits: [], prices: [], soldMax: 0, localMax: 0, bidAvail: 0 };
       if (o.expectedProfitUsd != null) g.profits.push(o.expectedProfitUsd);
+      if (o.priceCny > 0) g.prices.push(o.priceCny);
       g.soldMax = Math.max(g.soldMax, o.soldCount30d ?? 0);
       g.localMax = Math.max(g.localMax, o.localSellerCount ?? 0);
       if (o.bidAvailable === true) g.bidAvail++;
@@ -1754,6 +1773,46 @@ ${facts}
     }
     const topRecBrand = [...recByBrand.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
 
+    // 2b) 밴드 알람 — 국내가 매칭된 상품의 시세 vs 한계선/목표가
+    //   🔴 한계선 도달(손해 위험) · 🟢 상향 여유(마진 회수)
+    const domMap = new Map<string, number>(); // normKey → 최저 매입가(원)
+    try {
+      const dpool = await db
+        .select()
+        .from(domesticPricePool)
+        .where(eq(domesticPricePool.inStock, true))
+        .limit(3000);
+      for (const dd of dpool) {
+        const buy = effectiveBuyKrw(dd);
+        if (buy <= 0) continue;
+        const prev = domMap.get(dd.normKey);
+        if (prev == null || buy < prev) domMap.set(dd.normKey, buy);
+      }
+      const wl = await db
+        .select({ brand: reverseSkuWatch.brand, productName: reverseSkuWatch.productName, domesticPrice: reverseSkuWatch.domesticPrice })
+        .from(reverseSkuWatch)
+        .where(eq(reverseSkuWatch.userId, uid))
+        .limit(300);
+      for (const s of wl) {
+        if ((s.domesticPrice ?? 0) <= 0) continue;
+        domMap.set(normKeyOf(s.brand, s.productName), s.domesticPrice ?? 0);
+      }
+    } catch {
+      /* 풀 조회 실패 시 밴드 알람만 생략 */
+    }
+    let limitHit = 0, roomUp = 0;
+    for (const g of groups.values()) {
+      const buy = domMap.get(g.normKey);
+      if (!buy || g.soldMax < 10) continue; // 국내가 없거나 저수요는 제외(안전)
+      const marketLow = g.prices.length ? Math.min(...g.prices) : 0;
+      if (marketLow <= 0) continue;
+      const cat = catOf({ category: null, productName: g.name });
+      const floor = bidForTargetNet(buy, 0, DEFAULT_COST, cat ?? undefined);
+      const target = bidForTargetNet(buy, 20000, DEFAULT_COST, cat ?? undefined);
+      if (floor > 0 && marketLow <= floor) limitHit++;
+      else if (target > 0 && marketLow >= target) roomUp++;
+    }
+
     // 3) 액션 아이템 (실데이터 기반)
     const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
     type Action = { kind: string; priority: number; title: string; detail: string; href?: string };
@@ -1763,6 +1822,20 @@ ${facts}
         kind: "buy", priority: 1,
         title: topRecBrand ? `${topRecBrand[0]} 등 ${recCount}개 매입 추천` : `입찰 추천 ${recCount}개 검토`,
         detail: "소싱 큐에서 국내가·방어선 확인 후 매입",
+        href: "/reverse/queue",
+      });
+    if (limitHit > 0)
+      actions.push({
+        kind: "limit", priority: 0.5,
+        title: `🔴 한계선 도달 ${limitHit}건 — 판단 필요`,
+        detail: "시세가 방어선 이하 — 재소싱/손절/유지 결정",
+        href: "/reverse/queue",
+      });
+    if (roomUp > 0)
+      actions.push({
+        kind: "room", priority: 1.8,
+        title: `🟢 상향 여유 ${roomUp}건 — 마진 회수`,
+        detail: "시세가 목표가 이상 — 입찰가 상향 재설정",
         href: "/reverse/queue",
       });
     if (bidChangeCount > 0)
@@ -1795,6 +1868,8 @@ ${facts}
     const metrics = {
       recCount,
       bidChangeCount,
+      limitHit,
+      roomUp,
       inspectPending: Number(pp?.inspectPending ?? 0),
       listedCount: Number(pp?.listedCount ?? 0),
       settleAmount: Number(pp?.settleAmount ?? 0),

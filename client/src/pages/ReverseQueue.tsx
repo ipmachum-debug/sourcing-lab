@@ -39,6 +39,7 @@ interface Row {
   revenueKrw: number; feeKrw: number; vatRefundKrw: number;
   floorBidUsd: number; targetBidUsd: number;
   status: "hunt" | "deal" | "thin";
+  bandState: "room" | "compete" | "limit" | "na"; autoEligible: boolean; spike: boolean;
 }
 
 type Status = "hunt" | "deal" | "all";
@@ -53,6 +54,7 @@ export default function ReverseQueue() {
   const [category, setCategory] = useState("전체");
   const [term, setTerm] = useState(initSearch);
   const [search, setSearch] = useState(initSearch);
+  const [band, setBand] = useState<"all" | "limit" | "room">("all");
 
   const fx = trpc.reverseDeals.fxRate.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
   const q = trpc.reverseDeals.sourcingQueue.useQuery({
@@ -65,9 +67,10 @@ export default function ReverseQueue() {
     limit: 100,
   });
   const data = q.data as
-    | { rows: Row[]; counts: { hunt: number; deal: number; thin: number; total: number }; categories: { name: string; count: number }[] }
+    | { rows: Row[]; counts: { hunt: number; deal: number; thin: number; total: number; limit: number; room: number }; categories: { name: string; count: number }[] }
     | undefined;
-  const rows = data?.rows ?? [];
+  const allRows = data?.rows ?? [];
+  const rows = band === "all" ? allRows : allRows.filter(r => r.bandState === band);
   const counts = data?.counts;
 
   // 국내가 즉시 입력 → 저장하면 해당 상품이 딜로 승격(방어선 계산)
@@ -167,6 +170,37 @@ export default function ReverseQueue() {
               <Tile label="🔥 딜 확정" value={counts.deal.toLocaleString()} tone="deal" />
               <Tile label="카탈로그 상품(SPU)" value={counts.total.toLocaleString()} />
               <Tile label="보류" value={counts.thin.toLocaleString()} />
+            </div>
+          )}
+
+          {/* 밴드 알람 — 🔴 한계 도달 / 🟢 상향 여유 (예외 관리) */}
+          {counts && (counts.limit > 0 || counts.room > 0) && (
+            <div className="flex flex-wrap gap-2">
+              {counts.limit > 0 && (
+                <button
+                  onClick={() => setBand(band === "limit" ? "all" : "limit")}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ring-1 transition-all ${band === "limit" ? "bg-red-500/20 ring-red-400/50" : "bg-red-500/10 ring-red-400/25 hover:bg-red-500/15"}`}
+                  title="시세가 방어선 이하 — 재소싱/손절/유지 판단 필요"
+                >
+                  🔴 <b className="text-red-300">한계 도달 {counts.limit}</b>
+                  <span className="text-[11px] text-slate-400">판단 필요</span>
+                </button>
+              )}
+              {counts.room > 0 && (
+                <button
+                  onClick={() => setBand(band === "room" ? "all" : "room")}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ring-1 transition-all ${band === "room" ? "bg-emerald-500/20 ring-emerald-400/50" : "bg-emerald-500/10 ring-emerald-400/25 hover:bg-emerald-500/15"}`}
+                  title="시세가 목표가 이상 — 입찰가 상향해 마진 회수 가능"
+                >
+                  🟢 <b className="text-emerald-300">상향 여유 {counts.room}</b>
+                  <span className="text-[11px] text-slate-400">마진 회수</span>
+                </button>
+              )}
+              {band !== "all" && (
+                <button onClick={() => setBand("all")} className="text-[12px] text-slate-400 hover:text-white px-2">
+                  전체 보기
+                </button>
+              )}
             </div>
           )}
 
@@ -347,6 +381,7 @@ function QueueRow({ r, onSaveDomestic, saving, onPurchase, purchasing }: { r: Ro
                 <Shield className="inline h-2.5 w-2.5 text-cyan-400/70" /> 방어 {usd(r.floorBidUsd)} · 목표 {usd(r.targetBidUsd)}
               </span>
             )}
+            <BandBadge state={r.bandState} spike={r.spike} />
           </button>
         ) : (
           <span className="text-slate-600 text-xs">-</span>
@@ -417,6 +452,28 @@ function NetProfitCard({ r }: { r: Row }) {
         </div>
       )}
     </div>
+  );
+}
+
+// 밴드 상태 배지 — 🟢 여유(상향 가능) / 🟡 경쟁(자동추종) / 🔴 한계(판단 필요)
+function BandBadge({ state, spike }: { state: Row["bandState"]; spike: boolean }) {
+  if (spike)
+    return (
+      <span className="inline-flex items-center gap-0.5 text-[10px] text-orange-300 mt-0.5" title="시세 급변 — 자동입찰 보류(안전장치)">
+        ⚠️ 급변 보류
+      </span>
+    );
+  const map: Record<string, { label: string; cls: string; title: string }> = {
+    room: { label: "🟢 상향 여유", cls: "text-emerald-300", title: "시세 ≥ 목표가 — 입찰가 상향해 마진 회수 가능" },
+    compete: { label: "🟡 경쟁", cls: "text-amber-300/90", title: "한계선~목표가 구간 — POIZON 자동추종에 맡김" },
+    limit: { label: "🔴 한계 도달", cls: "text-red-400", title: "시세 ≤ 방어선 — 자동 멈춤, 재소싱/손절 판단" },
+  };
+  const m = map[state];
+  if (!m) return null;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold mt-0.5 ${m.cls}`} title={m.title}>
+      {m.label}
+    </span>
   );
 }
 
