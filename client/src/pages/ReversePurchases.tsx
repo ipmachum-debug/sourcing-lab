@@ -2,7 +2,7 @@ import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Package, Plus, Trash2, Check, X, Clock } from "lucide-react";
+import { Package, Plus, Trash2, Check, X, Clock, Calculator } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 
@@ -73,6 +73,9 @@ export default function ReversePurchases() {
   const [view, setView] = useState("all");
   const activeView = VIEWS.find(v => v.key === view) ?? VIEWS[0];
   const shown = rows.filter(r => activeView.match(r.status));
+
+  // 한국시장(KRW) 실이익 계산기 — 정산액 = 판매가 − 고정비, 실이익 = 정산액 − 매입가
+  const [calc, setCalc] = useState({ buy: "", sell: "", fixed: "15000" });
 
   // 등록 폼 (판매처 기본 POIZON)
   const [f, setF] = useState({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new", sellChannel: "poizon" });
@@ -153,6 +156,55 @@ export default function ReversePurchases() {
             <Tile label="총 순익" value={won(s?.netProfit ?? 0)} tone="good" />
             <Tile label="평균 회전일" value={s?.avgTurnDays != null ? `${s.avgTurnDays}일` : "-"} />
           </div>
+
+          {/* 한국시장 실이익 판정 계산기 */}
+          {(() => {
+            const buy = Number(calc.buy) || 0;
+            const sell = Number(calc.sell) || 0;
+            const fixed = Number(calc.fixed) || 0;
+            const settle = sell - fixed; // POIZON 정산액
+            const net = settle - buy; // 실이익
+            const marginPct = sell > 0 ? Math.round((net / sell) * 1000) / 10 : 0;
+            const breakEven = buy + fixed; // 손익분기 판매가
+            const has = buy > 0 && sell > 0;
+            const ok = net >= 0;
+            return (
+              <div className="glass rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Calculator className="h-4 w-4 text-cyan-300" />
+                  <p className="text-sm font-semibold text-slate-100">한국시장 실이익 판정</p>
+                  <span className="text-[11px] text-slate-500">POIZON 정산액 = 판매가 − 고정비 · 실이익 = 정산액 − 매입가</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 items-end">
+                  <label className="block">
+                    <span className="text-[11px] text-slate-400">국내 매입가 ₩</span>
+                    <input type="number" inputMode="numeric" value={calc.buy} onChange={e => setCalc({ ...calc, buy: e.target.value })}
+                      placeholder="예: 57400" className="mt-1 w-full rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-cyan-400/50" />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] text-slate-400">POIZON 판매가 ₩</span>
+                    <input type="number" inputMode="numeric" value={calc.sell} onChange={e => setCalc({ ...calc, sell: e.target.value })}
+                      placeholder="예: 60000" className="mt-1 w-full rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-cyan-400/50" />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] text-slate-400">고정비 ₩ (수수료+배송)</span>
+                    <input type="number" inputMode="numeric" value={calc.fixed} onChange={e => setCalc({ ...calc, fixed: e.target.value })}
+                      placeholder="15000" className="mt-1 w-full rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-cyan-400/50" />
+                  </label>
+                  <Out label="정산액" value={has ? won(settle) : "-"} />
+                  <Out label="실이익" value={has ? won(net) : "-"} tone={has ? (ok ? "good" : "danger") : "normal"} />
+                  <Out label="손익분기가" value={buy > 0 ? won(breakEven) : "-"} />
+                </div>
+                {has && (
+                  <div className={`mt-3 rounded-lg px-3 py-2 text-[13px] font-medium ${ok ? "bg-emerald-500/10 text-emerald-200" : "bg-red-500/10 text-red-200"}`}>
+                    {ok
+                      ? `🟢 이익 ${won(net)} (이익률 ${marginPct}%) — 판매가가 손익분기 ${won(breakEven)} 이상`
+                      : `🔴 손해 ${won(net)} — 이 판매가는 손익분기 ${won(breakEven)}보다 ${won(breakEven - sell)} 낮음. 팔면 개당 ${won(-net)} 손해`}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 판매처별 정산·순익 */}
           {s?.byChannel && s.byChannel.length > 0 && (
@@ -324,6 +376,16 @@ function Tile({ label, value, tone = "normal" }: { label: string; value: string;
     <div className="glass rounded-xl p-3">
       <p className="text-[11px] text-slate-400">{label}</p>
       <p className={`text-lg font-black mt-1 ${c}`}>{value}</p>
+    </div>
+  );
+}
+
+function Out({ label, value, tone = "normal" }: { label: string; value: string; tone?: "normal" | "good" | "danger" }) {
+  const c = tone === "good" ? "text-emerald-300" : tone === "danger" ? "text-red-400" : "text-slate-100";
+  return (
+    <div className="rounded-lg bg-white/5 px-2.5 py-1.5">
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className={`text-sm font-bold ${c}`}>{value}</p>
     </div>
   );
 }
