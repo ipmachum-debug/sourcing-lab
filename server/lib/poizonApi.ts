@@ -835,7 +835,17 @@ export async function selfTest(
       await fn();
       results.push({ key, interfaceName, ok: true, skipped: false, message: "OK — 연결·서명·권한 정상" });
     } catch (e: any) {
-      const msg = e instanceof PoizonApiError ? e.message : String(e?.message ?? e);
+      // POIZON 원본 code·msg를 그대로 노출(진단용) — 서명/권한/토큰 구분에 필수
+      let msg = e instanceof PoizonApiError ? e.message : String(e?.message ?? e);
+      if (e instanceof PoizonApiError) {
+        const raw = e.raw as any;
+        const poizonMsg =
+          typeof raw === "string"
+            ? raw.slice(0, 200)
+            : raw?.msg ?? raw?.message ?? raw?.errorMsg ?? "";
+        const traceId = typeof raw === "object" ? raw?.trace_id ?? raw?.traceId ?? "" : "";
+        msg = `[code=${e.code}] ${poizonMsg ? `POIZON:"${poizonMsg}"` : e.message}${traceId ? ` · trace ${traceId}` : ""}`;
+      }
       results.push({ key, interfaceName, ok: false, skipped: false, message: msg });
     }
   };
