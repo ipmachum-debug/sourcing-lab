@@ -153,19 +153,53 @@ function urlEncodeJava(s: string): string {
   // Java URLEncoder 호환: 공백 → '+', 나머지는 encodeURIComponent
   return encodeURIComponent(s).replace(/%20/g, "+");
 }
-export function sign(params: Record<string, unknown>, appSecret: string): string {
+/** 서명 대상 문자열(stringA, secret 붙이기 전) — 디버그/Sign Tool 비교용. */
+export function signPreimage(params: Record<string, unknown>): string {
   const keys = Object.keys(params)
     .filter(k => k !== "sign" && params[k] != null && params[k] !== "")
     .sort(); // ASCII 오름차순
-  const stringA = keys
+  return keys
     .map(k => `${urlEncodeJava(k)}=${urlEncodeJava(signValue(params[k]))}`)
     .join("&");
-  const stringSignTemp = stringA + appSecret;
+}
+export function sign(params: Record<string, unknown>, appSecret: string): string {
+  const stringSignTemp = signPreimage(params) + appSecret;
   return crypto
     .createHash("md5")
     .update(stringSignTemp, "utf8")
     .digest("hex")
     .toUpperCase();
+}
+
+/** 서명 디버그: 고정 파라미터로 stringA·sign 산출(secret 값은 노출 안 함). Sign Tool과 비교용. */
+export function signDebug(): {
+  params: Record<string, unknown>;
+  stringA: string;
+  sign: string;
+  hasSecret: boolean;
+  secretLen: number;
+  appKeyTail: string;
+} {
+  const appKey = process.env.POIZON_APP_KEY || "";
+  const secret = process.env.POIZON_APP_SECRET || "";
+  const params: Record<string, unknown> = {
+    app_key: appKey,
+    timestamp: 1700000000000, // 고정값 — Sign Tool에 동일 입력
+    articleNumber: "FJ4170-004",
+    region: "US",
+    pageNum: 1,
+    pageSize: 20,
+    language: "ko",
+    timeZone: "Asia/Seoul",
+  };
+  return {
+    params,
+    stringA: signPreimage(params),
+    sign: sign(params, secret),
+    hasSecret: !!secret,
+    secretLen: secret.length,
+    appKeyTail: appKey ? appKey.slice(-4) : "",
+  };
 }
 
 /** 인증 공통 파라미터(app_key/timestamp/language/timeZone[/access_token]). sign은 별도로 전체 위에서 계산.

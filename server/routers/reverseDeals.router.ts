@@ -28,6 +28,7 @@ import {
   isConfigured as poizonApiConfigured,
   readiness as poizonReadiness,
   selfTest as poizonSelfTest,
+  signDebug as poizonSignDebugFn,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
 import { invokeLLM } from "../_core/llm";
@@ -1558,6 +1559,9 @@ export const reverseDealsRouter = router({
     .mutation(async ({ input }) => {
       return poizonSelfTest(input?.sampleArticleNumber || undefined);
     }),
+
+  // POIZON 서명 디버그 — .env 로드값 확인 + Sign Tool 비교용(stringA·sign, secret 값 미노출).
+  poizonSignDebug: protectedProcedure.query(() => poizonSignDebugFn()),
 
   // ===== AI 추천 이유 (on-demand) =====
   // 상품 지표를 근거로 "왜 사야/사지 말아야 하는지 + 몇 개" 한 줄 판단을 생성.
