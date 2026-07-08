@@ -29,6 +29,10 @@ import {
   readiness as poizonReadiness,
   selfTest as poizonSelfTest,
   signDebug as poizonSignDebugFn,
+  queryListingList as poizonListingList,
+  submitAutoFollowBid as poizonAutoFollowBid,
+  cancelListing as poizonCancelListing,
+  PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
 import { invokeLLM } from "../_core/llm";
@@ -1562,6 +1566,138 @@ export const reverseDealsRouter = router({
 
   // POIZON 서명 디버그 — .env 로드값 확인 + Sign Tool 비교용(stringA·sign, secret 값 미노출).
   poizonSignDebug: protectedProcedure.query(() => poizonSignDebugFn()),
+
+  // ===== 자동입찰(자동추종) 실행부 =====
+  //   read: 내 POIZON 리스팅 목록 → 밴드 상태·자동추종 여부 표시.
+  //   write: 자동추종 시작/중지·리스팅 취소. 모두 ready + confirm 게이트.
+
+  // 내 POIZON 리스팅(입찰) 목록. 자격증명 없거나 오류면 안전하게 빈 배열 반환(UI 크래시 방지).
+  poizonListings: protectedProcedure
+    .input(
+      z
+        .object({
+          region: z.string().max(4).optional(),
+          pageSize: z.number().int().min(1).max(50).optional(),
+          cursor: z.number().int().min(0).optional(),
+        })
+        .optional()
+    )
+    .query(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        return { ready: false, items: [] as any[], lastOffsetId: 0, note: "자격증명(App Key/Secret) 필요 — 서버 .env 확인." };
+      }
+      try {
+        const res: any = await poizonListingList({
+          region: input?.region ?? "KR",
+          pageSize: input?.pageSize ?? 50,
+          exclusiveStartOffsetId: input?.cursor ?? 0,
+          tradeStatus: 2, // 성공(활성) 리스팅만
+        });
+        const rawList: any[] = res?.list ?? [];
+        const items = rawList.map(it => {
+          // USD 등은 통화 최소단위(센트) → 표시금액으로 환산. KRW은 원 그대로.
+          const cur = String(it.currency ?? "").toUpperCase();
+          const minorUnit = cur && cur !== "KRW" ? 100 : 1;
+          const priceDisplay = typeof it.price === "number" ? it.price / minorUnit : null;
+          return {
+            sellerBiddingNo: it.sellerBiddingNo ?? null,
+            spuId: it.spuId ?? it.globalSpuId ?? null,
+            skuId: it.skuId ?? it.globalSkuId ?? null,
+            merchantSkuId: it.merchantSkuId ?? null,
+            price: priceDisplay,
+            currency: cur || null,
+            quantity: it.onSaleQuantity ?? null,
+            autoFollow: it.is_auto_bidding === true,
+          };
+        });
+        return { ready: true, items, lastOffsetId: res?.lastOffsetId ?? 0, note: "" };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        return { ready: true, items: [] as any[], lastOffsetId: 0, note: `조회 실패 [${code}]: ${e?.message ?? e}` };
+      }
+    }),
+
+  // 자동추종 시작/조정 — biddingNo에 방어선(lowestPrice) 이하로는 추격하지 않는 자동추종 설정.
+  //   ★안전장치: ready 필수 · confirm 필수 · lowestPrice 범위검증 · followType 제한 · 8(방어적) 기본.
+  poizonAutoFollowStart: protectedProcedure
+    .input(
+      z.object({
+        biddingNo: z.string().min(1).max(64),
+        lowestPrice: z.number().positive().max(1_000_000_000), // 방어선(통화 최소단위). fat-finger 상한.
+        followType: z.union([z.literal(6), z.literal(7), z.literal(8)]).optional(),
+        countryCode: z.string().max(4).optional(),
+        currency: z.string().max(8).optional(),
+        confirm: z.literal(true), // 실주문 방지: 명시적 확인 없으면 스키마에서 차단.
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const ok = await poizonAutoFollowBid({
+          biddingNo: input.biddingNo,
+          lowestPrice: input.lowestPrice,
+          followType: input.followType ?? 8, // 8=최저가보다 한 단계 낮게(방어선까지만)
+          autoSwitch: true,
+          countryCode: input.countryCode ?? "US",
+          currency: input.currency ?? "USD",
+        });
+        return { ok: ok === true };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `자동추종 설정 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
+
+  // 자동추종 중지 — autoSwitch=false. (lowestPrice는 무시되나 API가 >0을 요구 → 1 전달)
+  poizonAutoFollowStop: protectedProcedure
+    .input(
+      z.object({
+        biddingNo: z.string().min(1).max(64),
+        countryCode: z.string().max(4).optional(),
+        currency: z.string().max(8).optional(),
+        confirm: z.literal(true),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const ok = await poizonAutoFollowBid({
+          biddingNo: input.biddingNo,
+          lowestPrice: 1,
+          autoSwitch: false,
+          countryCode: input.countryCode ?? "US",
+          currency: input.currency ?? "USD",
+        });
+        return { ok: ok === true };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `자동추종 중지 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
+
+  // 리스팅 취소 — 단일 sellerBiddingNo. ready + confirm 게이트.
+  poizonCancelListing: protectedProcedure
+    .input(z.object({ sellerBiddingNo: z.string().min(1).max(64), confirm: z.literal(true) }))
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const ok = await poizonCancelListing(input.sellerBiddingNo);
+        return { ok: ok === true };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 취소 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
 
   // ===== AI 추천 이유 (on-demand) =====
   // 상품 지표를 근거로 "왜 사야/사지 말아야 하는지 + 몇 개" 한 줄 판단을 생성.
