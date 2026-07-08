@@ -2,7 +2,7 @@ import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { LineChart, Plus, Trash2, Bell, Save, Power, RefreshCw, Zap, Store } from "lucide-react";
+import { LineChart, Plus, Trash2, Bell, Save, Power, RefreshCw, Zap, Store, Download } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
@@ -49,7 +49,12 @@ export default function ReverseMyProducts() {
   // POIZON API 자동 동기화
   const syncStatus = trpc.myProducts.poizonSyncStatus.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const syncMut = trpc.myProducts.syncPoizon.useMutation({
-    onSuccess: r => { toast.success(r.message); inv(); },
+    onSuccess: r => { r.synced > 0 ? toast.success(r.message) : toast.info(r.message); inv(); },
+    onError: e => toast.error(e.message),
+  });
+  // POIZON 리스팅 → 내 상품 가져오기
+  const importMut = trpc.myProducts.importFromPoizonListings.useMutation({
+    onSuccess: r => { r.imported > 0 ? toast.success(r.message) : toast.info(r.message); inv(); },
     onError: e => toast.error(e.message),
   });
   const apiReady = !!syncStatus.data?.ready;
@@ -139,15 +144,26 @@ export default function ReverseMyProducts() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => syncMut.mutate()}
-                disabled={!apiReady || syncMut.isPending}
-                className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5 disabled:opacity-40 shrink-0"
-                title={apiReady ? "POIZON API로 시세 갱신" : "승인·인증 후 활성화"}
-              >
-                <RefreshCw className={`h-4 w-4 ${syncMut.isPending ? "animate-spin" : ""}`} />
-                {syncMut.isPending ? "동기화 중…" : "지금 동기화"}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => importMut.mutate()}
+                  disabled={!apiReady || importMut.isPending}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5 bg-white/5 text-slate-100 hover:bg-white/10 disabled:opacity-40"
+                  title={apiReady ? "내 POIZON 리스팅을 상품으로 가져오기" : "연결 후 활성화"}
+                >
+                  <Download className={`h-4 w-4 ${importMut.isPending ? "animate-pulse" : ""}`} />
+                  {importMut.isPending ? "가져오는 중…" : "리스팅 가져오기"}
+                </button>
+                <button
+                  onClick={() => syncMut.mutate()}
+                  disabled={!apiReady || syncMut.isPending}
+                  className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-1.5 disabled:opacity-40"
+                  title={apiReady ? "POIZON API로 시세 갱신" : "승인·인증 후 활성화"}
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncMut.isPending ? "animate-spin" : ""}`} />
+                  {syncMut.isPending ? "동기화 중…" : "지금 동기화"}
+                </button>
+              </div>
             </div>
           </div>
 
