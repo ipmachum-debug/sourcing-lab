@@ -271,10 +271,11 @@ export async function callPoizon<T = unknown>(
   };
   const timestamp = opts.timestampMs ?? Date.now();
   const auth = authParamsOf(cfg, timestamp);
-  // ★ 모든 파라미터(인증+비즈니스)를 하나의 객체로 → 서명(공식 Step 4: "all data as JSON object").
+  // ★ 모든 파라미터(인증+비즈니스+sign)를 단일 JSON 바디로 전송 — 쿼리스트링 미사용.
+  //   ✅ 실측 검증: POIZON gateway는 app_key를 BODY에서 읽음(QS의 app_key는 "app_key 为空"으로 무시).
+  //   전부 body → HTTP 200 "Successful" + 실제 SPU 데이터 확인(Nike DA8301-100).
   const allParams = { ...bizParams, ...auth };
   const signature = sign(allParams, cfg.appSecret);
-  // 전체 파라미터 + sign을 단일 JSON 바디로 전송(분리 없이). 쿼리스트링 미사용.
   const bodyObj = { ...allParams, sign: signature };
   const url = `${cfg.base}${ep.path}`;
   const method = (ep.method || "POST").toUpperCase();
