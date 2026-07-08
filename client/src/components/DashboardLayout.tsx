@@ -24,7 +24,7 @@ import {
   LayoutDashboard, LogOut, PanelLeft, FileText, Package,
   FlaskConical, CalendarCheck, User, Settings, Users, Sparkles, TrendingUp, ShoppingBag, Puzzle, BookOpen, BarChart3,
   Activity, Target, Search, Calculator, Gem, Megaphone, PenTool, Send, Bot, Sliders,
-  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar, ScanLine, Store, ListChecks, Tag,
+  Calendar, Building, FlaskConical as Flask, FileBarChart, Library, ChevronDown, Dices, Scale, Camera, Ship, Flame, Radar, ScanLine, Store, ListChecks, Tag, Plug,
 } from "lucide-react";
 import { CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -149,6 +149,7 @@ const menuItems: MenuItem[] = [
   { icon: BarChart3, label: "판매 분석", path: "/reverse/sales", emoji: "📈", section: "main", channel: "reverse", group: "ops" },
   { icon: Activity, label: "내 상품 관리", path: "/reverse/my-products", emoji: "📊", section: "main", channel: "reverse", group: "ops" },
   { icon: BookOpen, label: "판매자 가이드", path: "/reverse/guide", emoji: "📖", section: "main", channel: "reverse", group: "ops" },
+  { icon: Plug, label: "POIZON 연동", path: "/reverse/api", emoji: "🔌", section: "main", channel: "reverse", group: "ops" },
   // 숨김(중복) — 라우트/딥링크는 유지, 사이드바에서만 감춤
   { icon: Flame, label: "오늘 사야 할 상품", path: "/reverse/deals", emoji: "🔥", section: "main", channel: "reverse", group: "ops", hidden: true },
   { icon: FileBarChart, label: "엑셀 업로드", path: "/reverse/import", emoji: "📄", section: "main", channel: "reverse", group: "ops", hidden: true },
