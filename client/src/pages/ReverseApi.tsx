@@ -28,7 +28,10 @@ export default function ReverseApi() {
               <Plug className="h-3.5 w-3.5" /> POIZON API
             </span>
             <h1 className="text-3xl sm:text-4xl font-black mt-4 neon-text">POIZON 연동</h1>
-            <p className="text-slate-300/80 mt-2">인증 → 자가진단 → 자동입찰. 승인 후 여기서 실제 연결을 켭니다.</p>
+            <p className="text-slate-300/80 mt-2">
+              <b className="text-white">Poizon Sellers 인증</b>(자체 개발 툴) — App Key+Secret+서명이면 동작합니다.
+              <b className="text-fuchsia-300"> access_token(OAuth) 불필요.</b> 바로 자가진단을 실행하세요.
+            </p>
           </div>
 
           {/* 준비 상태 */}
@@ -45,7 +48,7 @@ export default function ReverseApi() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Step ok={!!r?.appKey} label="App Key" />
               <Step ok={!!r?.appSecret} label="App Secret" />
-              <Step ok={!!(r?.accessToken || r?.hasStoredToken)} label="Access Token" />
+              <Step ok={!!(r?.accessToken || r?.hasStoredToken)} label="Access Token (선택)" />
               <Step ok={!!r?.ready} label="가동 준비" />
             </div>
             {s?.storedToken?.hasToken && (
@@ -57,31 +60,15 @@ export default function ReverseApi() {
             {s?.note && <p className="text-[12px] text-slate-400 mt-2">{s.note}</p>}
           </div>
 
-          {/* 1단계: 인증 */}
-          <div className="glass rounded-2xl p-5">
+          {/* 1단계: 자가진단 (메인) */}
+          <div className="glass rounded-2xl p-5 ring-1 ring-fuchsia-400/30">
             <div className="flex items-center gap-2 mb-2">
               <span className="h-6 w-6 rounded-full grid place-items-center text-xs font-black text-white" style={{ background: "linear-gradient(135deg,#db2777,#a855f7)" }}>1</span>
-              <h2 className="text-sm font-semibold text-slate-100">판매자 인증 (Access Token 발급)</h2>
+              <h2 className="text-sm font-semibold text-slate-100">자가진단 (지금 바로 실행)</h2>
             </div>
             <p className="text-[12px] text-slate-400 mb-3">
-              아래 버튼 → POIZON 로그인·동의 → 토큰이 서버에 자동 저장됩니다. (App Secret이 .env에 반영돼 있어야 함)
-            </p>
-            <a
-              href="/api/poizon/authorize"
-              className="neon-btn rounded-lg px-4 py-2 text-sm font-semibold inline-flex items-center gap-1.5"
-            >
-              <ExternalLink className="h-4 w-4" /> POIZON 인증하기
-            </a>
-          </div>
-
-          {/* 2단계: 자가진단 */}
-          <div className="glass rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="h-6 w-6 rounded-full grid place-items-center text-xs font-black text-white" style={{ background: "linear-gradient(135deg,#db2777,#a855f7)" }}>2</span>
-              <h2 className="text-sm font-semibold text-slate-100">자가진단 (인터페이스 연결 확인)</h2>
-            </div>
-            <p className="text-[12px] text-slate-400 mb-3">
-              읽기형 인터페이스를 실제 호출해 연결·서명·권한을 검증합니다. 쓰기형(입찰)은 안전상 자동 실행하지 않습니다.
+              App Key+Secret+서명으로 읽기형 인터페이스를 실제 호출해 연결·서명·권한을 검증합니다.
+              (Poizon Sellers 방식 — 로그인/토큰 불필요) 쓰기형(입찰)은 안전상 자동 실행하지 않습니다.
             </p>
             <button
               onClick={() => test.mutate({})}
@@ -116,6 +103,13 @@ export default function ReverseApi() {
 
           <p className="text-[11px] text-slate-600 text-center">
             자가진단이 통과하면 자동입찰(자동추종) 실행부를 연결합니다.
+          </p>
+          <p className="text-[11px] text-slate-600 text-center">
+            (선택) 특정 API가 access_token을 요구하면 →{" "}
+            <a href="/api/poizon/authorize" className="underline text-slate-500 hover:text-fuchsia-300">
+              ERP/ISV OAuth 인증
+            </a>{" "}
+            으로 토큰 발급. 대부분의 셀러 자체 툴은 불필요합니다.
           </p>
         </div>
       </div>

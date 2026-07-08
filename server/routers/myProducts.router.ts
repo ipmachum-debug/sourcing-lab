@@ -241,7 +241,8 @@ export const myProductsRouter = router({
         /* db 미연결 */
       }
     }
-    return { ready: !!(r.appKey && r.appSecret && hasToken), hasToken: !!hasToken };
+    // Poizon Sellers 인증: App Key+Secret이면 가동(토큰 불필요)
+    return { ready: !!(r.appKey && r.appSecret), hasToken: !!hasToken };
   }),
 
   // POIZON API로 내 상품 시세 자동 동기화 (승인·인증 후 활성).
@@ -253,19 +254,11 @@ export const myProductsRouter = router({
 
     const { readiness, queryListingRecommendations } = await import("../lib/poizonApi");
     const r = readiness();
-    let hasToken = r.accessToken;
-    if (!hasToken) {
-      try {
-        const st = await import("../lib/poizonTokenStore");
-        hasToken = (await st.resolveAccessToken()) != null;
-      } catch {
-        /* db */
-      }
-    }
-    if (!r.appKey || !r.appSecret || !hasToken) {
+    // Poizon Sellers 인증: App Key+Secret이면 동작(access_token 불필요)
+    if (!r.appKey || !r.appSecret) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
-        message: "POIZON API 미연동 — 승인 후 /api/poizon/authorize 인증하면 자동 동기화가 활성화됩니다.",
+        message: "POIZON API 미연동 — 서버 .env에 POIZON_APP_KEY/POIZON_APP_SECRET가 필요합니다.",
       });
     }
 

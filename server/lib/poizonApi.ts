@@ -59,7 +59,9 @@ export function readiness(): {
   const appKey = !!process.env.POIZON_APP_KEY;
   const appSecret = !!process.env.POIZON_APP_SECRET;
   const accessToken = !!process.env.POIZON_ACCESS_TOKEN;
-  return { appKey, appSecret, accessToken, ready: appKey && appSecret && accessToken };
+  // ★ Poizon Sellers 인증(자체 개발 툴) = App Key + Secret + 서명. access_token 불필요.
+  //   (ERP/ISV OAuth 방식일 때만 access_token 사용) → 가동 준비 = key+secret만으로 충족.
+  return { appKey, appSecret, accessToken, ready: appKey && appSecret };
 }
 
 // ── 엔드포인트 맵 (문서 확정 시 여기만 수정) ──────────────
@@ -166,18 +168,20 @@ export function sign(params: Record<string, unknown>, appSecret: string): string
     .toUpperCase();
 }
 
-/** 인증 공통 파라미터(app_key/access_token/timestamp/language/timeZone). sign은 별도로 전체 위에서 계산. */
+/** 인증 공통 파라미터(app_key/timestamp/language/timeZone[/access_token]). sign은 별도로 전체 위에서 계산.
+ *  Poizon Sellers 방식은 access_token 없이 동작 → 토큰이 있을 때만 포함. */
 function authParamsOf(
   cfg: PoizonApiConfig,
   timestampMs: number
 ): Record<string, string | number> {
-  return {
+  const p: Record<string, string | number> = {
     app_key: cfg.appKey,
-    access_token: cfg.accessToken,
     timestamp: timestampMs,
     language: "ko",
     timeZone: "Asia/Seoul",
   };
+  if (cfg.accessToken) p.access_token = cfg.accessToken;
+  return p;
 }
 
 // ── 범용 호출기 ─────────────────────────────────────────
@@ -222,13 +226,9 @@ export async function callPoizon<T = unknown>(
       "POIZON_APP_KEY/POIZON_APP_SECRET 미설정 — 서버 .env에 설정 필요."
     );
   }
-  const accessToken = await resolveAccessTokenFor();
-  if (!accessToken) {
-    throw new PoizonApiError(
-      "MISSING_TOKEN",
-      "Access Token 없음 — Seller Authorization(/api/poizon/authorize)으로 발급하세요."
-    );
-  }
+  // ★ Poizon Sellers 인증(자체 개발 툴): access_token 불필요 — App Key+Secret+서명만.
+  //   토큰이 있으면(ERP/ISV 방식) 함께 실어 보내고, 없으면 생략.
+  const accessToken = await resolveAccessTokenFor(); // "" 가능
   const cfg: PoizonApiConfig = {
     appKey,
     appSecret,

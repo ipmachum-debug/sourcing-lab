@@ -1537,18 +1537,16 @@ export const reverseDealsRouter = router({
   openApiStatus: protectedProcedure.query(async () => {
     const r = poizonReadiness();
     const stored = await poizonStoredInfo().catch(() => null);
-    // 실사용 가능 = appKey/secret 있고 + (env 토큰 || DB 저장 토큰)
     const hasToken = r.accessToken || !!stored?.hasToken;
-    const ready = r.appKey && r.appSecret && hasToken;
+    // ★ Poizon Sellers 인증(자체 개발 툴): App Key+Secret+서명이면 가동. 토큰 불필요.
+    const ready = r.appKey && r.appSecret;
     return {
       configured: poizonApiConfigured(),
       readiness: { ...r, hasStoredToken: !!stored?.hasToken, ready },
-      storedToken: stored, // { hasToken, openId, accessExpiresAt, accessExpired, ... }
+      storedToken: stored,
       note: ready
-        ? "POIZON Open API 가동 준비 완료 — 서명 검증 통과, 토큰 확보. 자가진단으로 각 인터페이스 확인 가능."
-        : r.appKey && r.appSecret
-          ? "App Key/Secret 확인됨. Access Token 필요 — /api/poizon/authorize 로 Seller Authorization 진행."
-          : "Default 패키지 심사 대기(已申请). 승인 후 Seller Authorization으로 원클릭 토큰 발급 → 즉시 가동.",
+        ? "가동 준비 완료 — Poizon Sellers 인증(App Key+Secret+서명). access_token 불필요. 자가진단으로 각 인터페이스를 바로 확인하세요."
+        : "POIZON_APP_KEY/POIZON_APP_SECRET 설정 필요 — 서버 .env 확인.",
     };
   }),
 
