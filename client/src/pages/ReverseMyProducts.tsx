@@ -2,15 +2,17 @@ import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { LineChart, Plus, Trash2, ShieldCheck, Bell, Save, Power, RefreshCw, Zap } from "lucide-react";
+import { LineChart, Plus, Trash2, Bell, Save, Power, RefreshCw, Zap, Store } from "lucide-react";
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
-// POIZON 역직구(국내 매입 → POIZON 판매) 기준 라벨.
-const PLATFORM_LABEL: Record<string, string> = { poizon: "POIZON 판매", domestic: "국내 매입", coupang: "쿠팡" };
-const PLATFORM_ORDER = ["poizon", "domestic", "coupang"];
+// 판매는 POIZON 고정(이후 쇼피 예정). platform 컬럼은 매입처로 사용.
+//   enum 값 coupang/domestic만 매입처로 노출(poizon은 판매 채널이라 매입처에서 제외).
+const SOURCE_LABEL: Record<string, string> = { coupang: "쿠팡", domestic: "국내(기타)", poizon: "국내(기타)" };
+const SOURCE_ORDER = ["coupang", "domestic"];
+const srcLabel = (p: string | null) => SOURCE_LABEL[p || "coupang"] ?? "국내(기타)";
 
 const MYP_SPECS: FieldSpec[] = [
   { key: "productName", alias: /(상품명|상품|productname|name|모델)/ },
@@ -56,14 +58,14 @@ export default function ReverseMyProducts() {
   });
   const apiReady = !!syncStatus.data?.ready;
 
-  const [f, setF] = useState({ platform: "poizon", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
+  const [f, setF] = useState({ platform: "coupang", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
   const add = () => {
     if (!f.productName.trim()) return toast.error("상품명을 입력하세요");
     createMut.mutate({
       platform: f.platform as any, productName: f.productName, brand: f.brand || undefined,
       myPriceKrw: Number(f.myPriceKrw) || 0, targetStock: Number(f.targetStock) || 0,
     });
-    setF({ platform: "poizon", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
+    setF({ platform: "coupang", productName: "", brand: "", myPriceKrw: "", targetStock: "" });
   };
 
   // 오늘 기록 인라인 입력 (상품별)
@@ -88,10 +90,15 @@ export default function ReverseMyProducts() {
               </span>
               <h1 className="text-3xl font-black mt-4 neon-text">내 상품 관리</h1>
               <p className="text-slate-300/80 mt-2">
-                <b className="text-white">국내 매입 → POIZON 판매</b> SKU의 매입가·시세·재고를
-                <b className="text-white"> 매일 1회</b> 확인해 추이를 쌓습니다.
+                <b className="text-white">국내 매입 → POIZON 판매</b> 상품의 매입가·시세·재고를 관리합니다.
                 활성 <b className="text-fuchsia-300">{activeN}/{cfg?.maxActiveSkus ?? 50}</b>개
               </p>
+              <div className="flex items-center gap-2 mt-3">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-fuchsia-200 bg-fuchsia-500/15 border border-fuchsia-400/25 px-2.5 py-1 rounded-full">
+                  <Store className="h-3.5 w-3.5" /> 판매 채널 · POIZON
+                </span>
+                <span className="text-[11px] text-slate-500">쇼피(Shopee) 등 추가 예정</span>
+              </div>
             </div>
             <ImportExportBar
               filename="내상품"
@@ -105,35 +112,15 @@ export default function ReverseMyProducts() {
                 externalId: r.externalId || undefined, myPriceKrw: r.myPriceKrw || 0, targetStock: r.targetStock || 0,
               })) })}
               onExport={() => ({
-                headers: ["상품명", "브랜드", "구분", "국내매입가", "목표재고", "재고", "POIZON시세($)", "국내경쟁최저", "활성"],
+                headers: ["상품명", "브랜드", "매입처", "국내매입가", "목표재고", "재고", "POIZON시세($)", "국내경쟁최저", "활성"],
                 rows: prods.map(p => {
                   const it = itemOf(p.id);
-                  return [p.productName, p.brand || "", PLATFORM_LABEL[p.platform || "poizon"], p.myPriceKrw || 0,
+                  return [p.productName, p.brand || "", srcLabel(p.platform), p.myPriceKrw || 0,
                     p.targetStock || 0, it?.latest?.stock ?? "", it?.latest?.poizonPriceCny ?? "", it?.latest?.competitorLowKrw ?? "", p.active ? "Y" : "N"];
                 }),
               })}
             />
           </div>
-
-          {/* 안전장치 배너 */}
-          {cfg && (
-            <div className="glass rounded-2xl p-4 border border-emerald-400/20">
-              <div className="flex items-center gap-2 mb-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-300" />
-                <p className="text-sm font-semibold text-emerald-200">밴 방지 안전장치 (코드로 강제)</p>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-300">
-                <Guard>SKU 최대 {cfg.maxActiveSkus}개</Guard>
-                <Guard>하루 {cfg.frequencyPerDay}회만</Guard>
-                <Guard>딜레이 {cfg.minDelayMs / 1000}~{cfg.maxDelayMs / 1000}초/페이지</Guard>
-                <Guard>실패 시 즉시 중단</Guard>
-                <Guard>동시 접속 금지</Guard>
-                <Guard>무차별 검색 금지</Guard>
-                <Guard>CAPTCHA→사람 처리</Guard>
-                <Guard>숫자만 저장(HTML✗)</Guard>
-              </div>
-            </div>
-          )}
 
           {/* POIZON API 자동 동기화 */}
           <div className={`glass rounded-2xl p-4 border ${apiReady ? "border-fuchsia-400/30" : "border-white/10"}`}>
@@ -204,8 +191,9 @@ export default function ReverseMyProducts() {
           <div className="glass rounded-2xl p-4">
             <div className="grid sm:grid-cols-6 gap-2">
               <select value={f.platform} onChange={e => setF({ ...f, platform: e.target.value })}
+                title="매입처"
                 className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60">
-                {PLATFORM_ORDER.map(p => <option key={p} value={p} className="bg-[#0a0b1e]">{PLATFORM_LABEL[p]}</option>)}
+                {SOURCE_ORDER.map(p => <option key={p} value={p} className="bg-[#0a0b1e]">매입처 · {SOURCE_LABEL[p]}</option>)}
               </select>
               <In placeholder="상품명 *" value={f.productName} onChange={v => setF({ ...f, productName: v })} span2 />
               <In placeholder="브랜드" value={f.brand} onChange={v => setF({ ...f, brand: v })} />
@@ -244,7 +232,7 @@ export default function ReverseMyProducts() {
                       <tr key={p.id} className={`border-t border-white/8 ${!p.active ? "opacity-45" : ""}`}>
                         <td className="px-3 py-2">
                           <p className="font-medium text-slate-100 truncate max-w-[220px]">{p.productName}</p>
-                          <p className="text-[11px] text-slate-500">{PLATFORM_LABEL[p.platform || "poizon"]}{p.brand ? ` · ${p.brand}` : ""}</p>
+                          <p className="text-[11px] text-slate-500">매입 {srcLabel(p.platform)}{p.brand ? ` · ${p.brand}` : ""}</p>
                         </td>
                         <td className="text-right px-3 py-2 text-slate-300">{won(p.myPriceKrw || 0)}</td>
                         <td className="px-1 py-2"><Mini placeholder={String(it?.latest?.stock ?? "재고")} value={s.stock} onChange={v => set("stock", v)} /></td>
@@ -284,10 +272,6 @@ export default function ReverseMyProducts() {
       </div>
     </DashboardLayout>
   );
-}
-
-function Guard({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span>{children}</div>;
 }
 
 function statusOf(it: DashItem): { dot: string; ring: string; label: string; tone: string } {
