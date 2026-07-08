@@ -32,6 +32,7 @@ import {
   queryListingList as poizonListingList,
   submitAutoFollowBid as poizonAutoFollowBid,
   cancelListing as poizonCancelListing,
+  queryListingRecommendations as poizonRecommendations,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1697,6 +1698,101 @@ export const reverseDealsRouter = router({
         const code = e instanceof PoizonApiError ? e.code : "ERROR";
         throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 취소 실패 [${code}]: ${e?.message ?? e}` });
       }
+    }),
+
+  // ① 엔진 → 자동입찰: 국내 매입가 기준 방어선(손익분기$)·목표순익가($) 계산.
+  //   외부 호출 없음(순수 계산). UI가 방어선 입력을 자동으로 채우는 데 사용.
+  poizonDefenseLine: protectedProcedure
+    .input(
+      z.object({
+        buyKrw: z.number().positive().max(100_000_000),
+        category: z.string().max(40).optional(),
+        targetNetKrw: z.number().min(0).max(100_000_000).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const cat = input.category ? catOf({ category: input.category, productName: "" }) : null;
+      const floorUsd = bidForTargetNet(input.buyKrw, 0, DEFAULT_COST, cat ?? undefined);
+      const targetUsd = bidForTargetNet(
+        input.buyKrw,
+        input.targetNetKrw ?? 20000,
+        DEFAULT_COST,
+        cat ?? undefined
+      );
+      const fx = await getKrwUsdRate().catch(() => null);
+      return {
+        floorUsd, // 손익분기($) — 이 아래로 팔면 손해
+        targetUsd, // 목표순익 확보가($)
+        targetNetKrw: input.targetNetKrw ?? 20000,
+        category: cat,
+        fxRate: fx?.rate ?? null,
+      };
+    }),
+
+  // ② 밴드 스캔(모니터링): 리스팅 SKU들의 현재 시세를 조회해 방어선/목표가 대비 밴드 판정.
+  //   🟢여유(상향 가능) · 🟡경쟁(추종 유지) · 🔴한계(중지·재검토) → 인간 판단은 UI에서.
+  //   읽기 전용. 자동 실행/자동 재조정은 하지 않음(안전).
+  poizonBandScan: protectedProcedure
+    .input(
+      z.object({
+        items: z
+          .array(
+            z.object({
+              skuId: z.union([z.string(), z.number()]),
+              floorUsd: z.number().positive().max(1_000_000),
+              targetUsd: z.number().positive().max(1_000_000).optional(),
+            })
+          )
+          .min(1)
+          .max(20),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      const skuIds = input.items.map(x => x.skuId);
+      let recs: any[] = [];
+      try {
+        const res: any = await poizonRecommendations(skuIds);
+        recs = Array.isArray(res) ? res : (res?.list ?? []);
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `시세 조회 실패 [${code}]: ${e?.message ?? e}` });
+      }
+      // skuId → 최저가($). 응답 가격은 통화 최소단위(센트)로 가정 → ÷100.
+      const lowOf = (rec: any): number | null => {
+        const cands = [rec?.localMinPrice, rec?.globalMinPrice, rec?.asiaMinPrice, rec?.usMinPrice, rec?.otherPlatformMinPrice]
+          .filter((v: any) => typeof v === "number" && v > 0)
+          .map((v: number) => v / 100);
+        return cands.length ? Math.min(...cands) : null;
+      };
+      const byId = new Map<string, any>();
+      for (const rec of recs) {
+        const id = String(rec?.skuId ?? rec?.globalSkuId ?? "");
+        if (id) byId.set(id, rec);
+      }
+      const results = input.items.map(it => {
+        const rec = byId.get(String(it.skuId));
+        const marketLow = rec ? lowOf(rec) : null;
+        let band: "room" | "compete" | "limit" | "na" = "na";
+        let recommend = "시세 미확인";
+        if (marketLow != null) {
+          if (marketLow <= it.floorUsd) {
+            band = "limit";
+            recommend = "🔴 한계선 이하 — 자동추종 중지·재검토";
+          } else if (it.targetUsd && marketLow >= it.targetUsd) {
+            band = "room";
+            recommend = "🟢 여유 — 방어선 상향 재조정 가능";
+          } else {
+            band = "compete";
+            recommend = "🟡 경쟁 구간 — 자동추종 유지";
+          }
+        }
+        return { skuId: it.skuId, marketLow, floorUsd: it.floorUsd, targetUsd: it.targetUsd ?? null, band, recommend };
+      });
+      return { results };
     }),
 
   // ===== AI 추천 이유 (on-demand) =====
