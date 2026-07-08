@@ -7,7 +7,6 @@ import { z } from "zod";
 
 const CONDITION = ["new", "a_grade", "b_grade"] as const;
 const INSPECT = ["pending", "pass", "fail"] as const;
-const SELL_CHANNEL = ["poizon", "danggeun", "amazon", "other"] as const;
 const STATUS = ["purchased", "inspecting", "listed", "sold", "settled", "returned"] as const;
 
 // POIZON 시세 풀 매칭키 (브랜드+상품 정규화)
@@ -112,6 +111,7 @@ export const reversePurchaseRouter = router({
         qty: z.number().int().min(1).default(1),
         buyDate: z.string().max(10).optional(),
         condition: z.enum(CONDITION).default("new"),
+        sellChannel: z.string().max(16).optional(), // 판매처 (POIZON/쇼피/당근…)
         memo: z.string().max(500).optional(),
       })
     )
@@ -138,7 +138,7 @@ export const reversePurchaseRouter = router({
               buyDate: z.string().max(10).optional(),
               condition: z.enum(CONDITION).default("new"),
               soldPrice: z.number().int().min(0).default(0),
-              sellChannel: z.enum(SELL_CHANNEL).optional(),
+              sellChannel: z.string().max(16).optional(),
               sellDate: z.string().max(10).optional(),
               status: z.enum(STATUS).default("purchased"),
               memo: z.string().max(500).optional(),
@@ -171,7 +171,7 @@ export const reversePurchaseRouter = router({
         buyDate: z.string().max(10).optional(),
         condition: z.enum(CONDITION).optional(),
         inspectStatus: z.enum(INSPECT).optional(),
-        sellChannel: z.enum(SELL_CHANNEL).optional(),
+        sellChannel: z.string().max(16).optional(),
         listPrice: z.number().int().min(0).optional(),
         soldPrice: z.number().int().min(0).optional(),
         sellDate: z.string().max(10).optional(),

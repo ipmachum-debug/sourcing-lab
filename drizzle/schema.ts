@@ -1786,8 +1786,8 @@ export const reversePurchases = mysqlTable("reverse_purchases", {
   condition: mysqlEnum("condition", ["new", "a_grade", "b_grade"]).default("new"),
   // 검수
   inspectStatus: mysqlEnum("inspect_status", ["pending", "pass", "fail"]).default("pending"),
-  // 판매
-  sellChannel: mysqlEnum("sell_channel", ["poizon", "danggeun", "amazon", "other"]),
+  // 판매 — 채널 자유 확장(poizon/shopee/danggeun/…). varchar로 유지.
+  sellChannel: varchar("sell_channel", { length: 16 }),
   listPrice: int("list_price").default(0),                    // 등록/시세
   soldPrice: int("sold_price").default(0),
   sellDate: varchar("sell_date", { length: 10 }),
