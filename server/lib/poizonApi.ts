@@ -237,13 +237,12 @@ export async function callPoizon<T = unknown>(
   };
   const timestamp = opts.timestampMs ?? Date.now();
   const auth = authParamsOf(cfg, timestamp);
-  // ★ 서명은 인증+비즈니스 전체 파라미터 위에서 계산(공식 Step 4).
-  const signature = sign({ ...bizParams, ...auth }, cfg.appSecret);
-  // 인증 파라미터(+sign)는 쿼리스트링, 비즈니스 파라미터는 JSON 바디로 전송.
-  const qs = new URLSearchParams(
-    Object.entries({ ...auth, sign: signature }).map(([k, v]) => [k, String(v)])
-  ).toString();
-  const url = `${cfg.base}${ep.path}?${qs}`;
+  // ★ 모든 파라미터(인증+비즈니스)를 하나의 객체로 → 서명(공식 Step 4: "all data as JSON object").
+  const allParams = { ...bizParams, ...auth };
+  const signature = sign(allParams, cfg.appSecret);
+  // 전체 파라미터 + sign을 단일 JSON 바디로 전송(분리 없이). 쿼리스트링 미사용.
+  const bodyObj = { ...allParams, sign: signature };
+  const url = `${cfg.base}${ep.path}`;
   const method = (ep.method || "POST").toUpperCase();
 
   let res: Response;
@@ -251,7 +250,7 @@ export async function callPoizon<T = unknown>(
     res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: method === "GET" ? undefined : JSON.stringify(bizParams),
+      body: method === "GET" ? undefined : JSON.stringify(bodyObj),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 15000),
     });
   } catch (e: any) {
