@@ -79,8 +79,8 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
 
   const refetch = () => listings.refetch();
 
-  // ① 국내 매입가 → 손익분기 방어선($) 계산 후 방어선 필드 자동 채움
-  const calcDefense = async (no: string) => {
+  // ① 국내 매입가 → 손익분기 방어선 계산 후 방어선 필드 자동 채움 (리스팅 통화에 맞춰)
+  const calcDefense = async (no: string, currency: string | null) => {
     const buyKrw = Number(buy[no]);
     if (!(buyKrw > 0)) {
       toast.error("국내 매입가(₩)를 입력하세요.");
@@ -91,10 +91,12 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
       const res = await utils.reverseDeals.poizonDefenseLine.fetch({
         buyKrw,
         category: cat[no] || undefined,
+        currency: currency || undefined,
       });
-      setFloor(f => ({ ...f, [no]: String(res.floorUsd) }));
-      setTarget(t => ({ ...t, [no]: res.targetUsd }));
-      toast.success(`손익분기 $${res.floorUsd} · 목표가 $${res.targetUsd} (방어선 적용됨)`);
+      setFloor(f => ({ ...f, [no]: String(res.floor) }));
+      setTarget(t => ({ ...t, [no]: res.target }));
+      const cur = res.currency === "KRW" ? "₩" : "$";
+      toast.success(`손익분기 ${cur}${res.floor.toLocaleString()} · 목표가 ${cur}${res.target.toLocaleString()} (방어선 적용됨)`);
     } catch (e: any) {
       toast.error(e?.message ?? "방어선 계산 실패");
     } finally {
@@ -327,7 +329,7 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
                           ))}
                         </select>
                         <button
-                          onClick={() => calcDefense(no)}
+                          onClick={() => calcDefense(no, row.currency)}
                           disabled={calcing === no}
                           className="rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
                         >
@@ -336,7 +338,7 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
                       </div>
                       {target[no] != null && (
                         <p className="text-[10px] text-slate-400">
-                          목표순익가(참고): <b className="text-emerald-300">${target[no].toLocaleString()}</b> · 방어선 이상~목표가 사이는 경쟁 구간
+                          목표순익가(참고): <b className="text-emerald-300">{row.currency === "KRW" ? "₩" : "$"}{target[no].toLocaleString()}</b> · 방어선 이상~목표가 사이는 경쟁 구간
                         </p>
                       )}
                     </div>

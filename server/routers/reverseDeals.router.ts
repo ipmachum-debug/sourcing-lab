@@ -1700,7 +1700,9 @@ export const reverseDealsRouter = router({
       }
     }),
 
-  // ① 엔진 → 자동입찰: 국내 매입가 기준 방어선(손익분기$)·목표순익가($) 계산.
+  // ① 엔진 → 자동입찰: 국내 매입가 기준 방어선·목표가 계산. 리스팅 통화에 맞춰 산출.
+  //   · KRW(한국시장): 정산액 = 판매가 − 고정비 → 손익분기 판매가 = 매입가 + 고정비.
+  //   · USD(중국/글로벌): 매입차익 엔진(bidForTargetNet).
   //   외부 호출 없음(순수 계산). UI가 방어선 입력을 자동으로 채우는 데 사용.
   poizonDefenseLine: protectedProcedure
     .input(
@@ -1708,23 +1710,46 @@ export const reverseDealsRouter = router({
         buyKrw: z.number().positive().max(100_000_000),
         category: z.string().max(40).optional(),
         targetNetKrw: z.number().min(0).max(100_000_000).optional(),
+        currency: z.string().max(8).optional(), // 리스팅 통화(KRW/USD). KRW면 한국시장 단순모델.
+        fixedCostKrw: z.number().min(0).max(10_000_000).optional(), // 한국시장 고정비(수수료+배송)
       })
     )
     .query(async ({ input }) => {
       const cat = input.category ? catOf({ category: input.category, productName: "" }) : null;
+      const targetNet = input.targetNetKrw ?? 20000;
+      const cur = (input.currency || "").toUpperCase();
+
+      // 한국시장(KRW): 손익분기 = 매입가 + 고정비. 방어선/목표가 모두 원 단위.
+      if (cur === "KRW") {
+        const fixed = input.fixedCostKrw ?? 15000;
+        const floor = input.buyKrw + fixed;
+        const target = input.buyKrw + fixed + targetNet;
+        return {
+          floor, // 손익분기 판매가(원) — 이 아래로 팔면 손해
+          target, // 목표순익 확보가(원)
+          currency: "KRW",
+          fixedCostKrw: fixed,
+          targetNetKrw: targetNet,
+          category: cat,
+          floorUsd: null,
+          targetUsd: null,
+          fxRate: null,
+        };
+      }
+
+      // 글로벌(중국/USD) 매입차익 엔진
       const floorUsd = bidForTargetNet(input.buyKrw, 0, DEFAULT_COST, cat ?? undefined);
-      const targetUsd = bidForTargetNet(
-        input.buyKrw,
-        input.targetNetKrw ?? 20000,
-        DEFAULT_COST,
-        cat ?? undefined
-      );
+      const targetUsd = bidForTargetNet(input.buyKrw, targetNet, DEFAULT_COST, cat ?? undefined);
       const fx = await getKrwUsdRate().catch(() => null);
       return {
-        floorUsd, // 손익분기($) — 이 아래로 팔면 손해
-        targetUsd, // 목표순익 확보가($)
-        targetNetKrw: input.targetNetKrw ?? 20000,
+        floor: floorUsd, // 손익분기($)
+        target: targetUsd, // 목표순익 확보가($)
+        currency: "USD",
+        fixedCostKrw: null,
+        targetNetKrw: targetNet,
         category: cat,
+        floorUsd,
+        targetUsd,
         fxRate: fx?.rate ?? null,
       };
     }),
