@@ -153,19 +153,53 @@ function urlEncodeJava(s: string): string {
   // Java URLEncoder 호환: 공백 → '+', 나머지는 encodeURIComponent
   return encodeURIComponent(s).replace(/%20/g, "+");
 }
-export function sign(params: Record<string, unknown>, appSecret: string): string {
+/** 서명 대상 문자열(stringA, secret 붙이기 전) — 디버그/Sign Tool 비교용. */
+export function signPreimage(params: Record<string, unknown>): string {
   const keys = Object.keys(params)
     .filter(k => k !== "sign" && params[k] != null && params[k] !== "")
     .sort(); // ASCII 오름차순
-  const stringA = keys
+  return keys
     .map(k => `${urlEncodeJava(k)}=${urlEncodeJava(signValue(params[k]))}`)
     .join("&");
-  const stringSignTemp = stringA + appSecret;
+}
+export function sign(params: Record<string, unknown>, appSecret: string): string {
+  const stringSignTemp = signPreimage(params) + appSecret;
   return crypto
     .createHash("md5")
     .update(stringSignTemp, "utf8")
     .digest("hex")
     .toUpperCase();
+}
+
+/** 서명 디버그: 고정 파라미터로 stringA·sign 산출(secret 값은 노출 안 함). Sign Tool과 비교용. */
+export function signDebug(): {
+  params: Record<string, unknown>;
+  stringA: string;
+  sign: string;
+  hasSecret: boolean;
+  secretLen: number;
+  appKeyTail: string;
+} {
+  const appKey = process.env.POIZON_APP_KEY || "";
+  const secret = process.env.POIZON_APP_SECRET || "";
+  const params: Record<string, unknown> = {
+    app_key: appKey,
+    timestamp: 1700000000000, // 고정값 — Sign Tool에 동일 입력
+    articleNumber: "FJ4170-004",
+    region: "US",
+    pageNum: 1,
+    pageSize: 20,
+    language: "ko",
+    timeZone: "Asia/Seoul",
+  };
+  return {
+    params,
+    stringA: signPreimage(params),
+    sign: sign(params, secret),
+    hasSecret: !!secret,
+    secretLen: secret.length,
+    appKeyTail: appKey ? appKey.slice(-4) : "",
+  };
 }
 
 /** 인증 공통 파라미터(app_key/timestamp/language/timeZone[/access_token]). sign은 별도로 전체 위에서 계산.
@@ -237,13 +271,13 @@ export async function callPoizon<T = unknown>(
   };
   const timestamp = opts.timestampMs ?? Date.now();
   const auth = authParamsOf(cfg, timestamp);
-  // ★ 서명은 인증+비즈니스 전체 파라미터 위에서 계산(공식 Step 4).
-  const signature = sign({ ...bizParams, ...auth }, cfg.appSecret);
-  // 인증 파라미터(+sign)는 쿼리스트링, 비즈니스 파라미터는 JSON 바디로 전송.
-  const qs = new URLSearchParams(
-    Object.entries({ ...auth, sign: signature }).map(([k, v]) => [k, String(v)])
-  ).toString();
-  const url = `${cfg.base}${ep.path}?${qs}`;
+  // ★ 모든 파라미터(인증+비즈니스+sign)를 단일 JSON 바디로 전송 — 쿼리스트링 미사용.
+  //   ✅ 실측 검증: POIZON gateway는 app_key를 BODY에서 읽음(QS의 app_key는 "app_key 为空"으로 무시).
+  //   전부 body → HTTP 200 "Successful" + 실제 SPU 데이터 확인(Nike DA8301-100).
+  const allParams = { ...bizParams, ...auth };
+  const signature = sign(allParams, cfg.appSecret);
+  const bodyObj = { ...allParams, sign: signature };
+  const url = `${cfg.base}${ep.path}`;
   const method = (ep.method || "POST").toUpperCase();
 
   let res: Response;
@@ -251,7 +285,7 @@ export async function callPoizon<T = unknown>(
     res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: method === "GET" ? undefined : JSON.stringify(bizParams),
+      body: method === "GET" ? undefined : JSON.stringify(bodyObj),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 15000),
     });
   } catch (e: any) {
