@@ -154,6 +154,33 @@ export default function ReversePurchases() {
             <Tile label="평균 회전일" value={s?.avgTurnDays != null ? `${s.avgTurnDays}일` : "-"} />
           </div>
 
+          {/* 판매처별 정산·순익 */}
+          {s?.byChannel && s.byChannel.length > 0 && (
+            <div className="glass rounded-2xl p-4">
+              <p className="text-sm font-semibold text-slate-100 mb-3">판매처별 정산·순익</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {s.byChannel.map(c => (
+                  <div key={c.channel} className="rounded-xl bg-white/5 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-fuchsia-200">{c.channel === "unknown" ? "미지정" : sellLabel(c.channel)}</span>
+                      <span className="text-[11px] text-slate-500">{c.soldCount}건 판매</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
+                      <span className="text-slate-400">매출</span>
+                      <span className="text-right text-slate-200">{won(c.revenue)}</span>
+                      <span className="text-slate-400">순익</span>
+                      <span className={`text-right font-semibold ${c.net >= 0 ? "text-emerald-300" : "text-red-400"}`}>{won(c.net)}</span>
+                      <span className="text-slate-400">순익률</span>
+                      <span className={`text-right ${c.marginPct >= 0 ? "text-emerald-300/90" : "text-red-400"}`}>{c.marginPct}%</span>
+                      <span className="text-slate-400">평균 회전</span>
+                      <span className="text-right text-slate-300">{c.avgTurnDays != null ? `${c.avgTurnDays}일` : "-"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 등록 폼 */}
           <div className="glass rounded-2xl p-4">
             <datalist id="buy-sources">

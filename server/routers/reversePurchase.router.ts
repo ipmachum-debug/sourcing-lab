@@ -89,6 +89,42 @@ export const reversePurchaseRouter = router({
     const pass = Number(agg?.passCnt ?? 0);
     const fail = Number(agg?.failCnt ?? 0);
     const inspected = pass + fail;
+
+    // 판매처별 정산·순익 (판매완료/정산완료 로트만) — POIZON/쇼피/당근 채널 비교.
+    const chRows = await db
+      .select({
+        channel: reversePurchases.sellChannel,
+        soldCount: sql<number>`count(*)`,
+        revenue: sql<number>`coalesce(sum(${reversePurchases.soldPrice}), 0)`,
+        cost: sql<number>`coalesce(sum(${reversePurchases.buyPrice}), 0)`,
+        net: sql<number>`coalesce(sum(${reversePurchases.soldPrice} - ${reversePurchases.buyPrice}), 0)`,
+        avgTurnDays: sql<number>`avg(case when ${reversePurchases.sellDate} is not null and ${reversePurchases.buyDate} is not null then datediff(${reversePurchases.sellDate}, ${reversePurchases.buyDate}) else null end)`,
+      })
+      .from(reversePurchases)
+      .where(
+        and(
+          eq(reversePurchases.userId, uid),
+          sql`${reversePurchases.status} in ('sold','settled')`
+        )
+      )
+      .groupBy(reversePurchases.sellChannel);
+
+    const byChannel = chRows
+      .map((r: any) => {
+        const revenue = Number(r.revenue ?? 0);
+        const net = Number(r.net ?? 0);
+        return {
+          channel: r.channel || "unknown", // 미지정 판매처
+          soldCount: Number(r.soldCount ?? 0),
+          revenue,
+          cost: Number(r.cost ?? 0),
+          net,
+          marginPct: revenue > 0 ? Math.round((net / revenue) * 1000) / 10 : 0,
+          avgTurnDays: r.avgTurnDays != null ? Math.round(Number(r.avgTurnDays) * 10) / 10 : null,
+        };
+      })
+      .sort((a, b) => b.net - a.net);
+
     return {
       total: Number(agg?.total ?? 0),
       buyAmount: Number(agg?.buyAmount ?? 0),
@@ -97,6 +133,7 @@ export const reversePurchaseRouter = router({
       inspectFailRate: inspected > 0 ? Math.round((fail / inspected) * 1000) / 10 : 0, // %
       inspected,
       avgTurnDays: agg?.avgTurnDays != null ? Math.round(Number(agg.avgTurnDays) * 10) / 10 : null,
+      byChannel,
     };
   }),
 
