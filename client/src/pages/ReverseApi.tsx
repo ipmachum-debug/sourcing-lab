@@ -1,6 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
-import { Plug, CheckCircle2, XCircle, MinusCircle, ExternalLink, PlayCircle, KeyRound } from "lucide-react";
+import { Plug, CheckCircle2, XCircle, MinusCircle, PlayCircle, KeyRound } from "lucide-react";
+import AutoBidControl from "@/components/reverse/AutoBidControl";
 
 interface SelfTestResult { key: string; interfaceName: string; ok: boolean; skipped: boolean; message: string }
 
@@ -101,9 +102,9 @@ export default function ReverseApi() {
             {test.isError && <p className="text-red-300 text-sm mt-3">{test.error.message}</p>}
           </div>
 
-          <p className="text-[11px] text-slate-600 text-center">
-            자가진단이 통과하면 자동입찰(자동추종) 실행부를 연결합니다.
-          </p>
+          {/* 2단계: 자동입찰(자동추종) 관제 — 실연동 성공 시 실행부 */}
+          <AutoBidControl ready={!!r?.ready} />
+
           <p className="text-[11px] text-slate-600 text-center">
             (선택) 특정 API가 access_token을 요구하면 →{" "}
             <a href="/api/poizon/authorize" className="underline text-slate-500 hover:text-fuchsia-300">
