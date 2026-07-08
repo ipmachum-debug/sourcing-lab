@@ -25,6 +25,7 @@ interface Row {
   buyDate: string | null;
   condition: string | null;
   inspectStatus: string | null;
+  sellChannel: string | null;
   soldPrice: number | null;
   sellDate: string | null;
   status: string;
@@ -34,6 +35,15 @@ const STATUS_LABEL: Record<string, string> = {
   purchased: "매입", inspecting: "검수중", listed: "판매중", sold: "판매완료", settled: "정산완료", returned: "반품",
 };
 const STATUS_OPTS = ["purchased", "inspecting", "listed", "sold", "settled", "returned"];
+
+// 매입처 프리셋 (자유입력 허용 — datalist). 판매처(POIZON/쇼피/당근)와 분리.
+const BUY_SOURCES = ["B2B(오프라인)", "아울렛", "ABC마트", "브랜드 홈페이지", "쿠팡", "다나와", "무신사"];
+const SELL_CHANNELS: { v: string; l: string }[] = [
+  { v: "poizon", l: "POIZON" },
+  { v: "shopee", l: "쇼피" },
+  { v: "danggeun", l: "당근" },
+];
+const sellLabel = (v: string | null) => SELL_CHANNELS.find(c => c.v === v)?.l ?? (v || "");
 
 // 상태별 뷰 — 별도 페이지 없이 검수/재고/판매 관리를 탭으로.
 const VIEWS: { key: string; label: string; emoji: string; match: (s: string) => boolean }[] = [
@@ -64,8 +74,8 @@ export default function ReversePurchases() {
   const activeView = VIEWS.find(v => v.key === view) ?? VIEWS[0];
   const shown = rows.filter(r => activeView.match(r.status));
 
-  // 등록 폼
-  const [f, setF] = useState({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new" });
+  // 등록 폼 (판매처 기본 POIZON)
+  const [f, setF] = useState({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new", sellChannel: "poizon" });
   const submit = () => {
     if (!f.productName.trim()) return toast.error("상품명을 입력하세요");
     createMut.mutate({
@@ -76,8 +86,9 @@ export default function ReversePurchases() {
       qty: Number(f.qty) || 1,
       buyDate: today(),
       condition: f.condition as any,
+      sellChannel: f.sellChannel || undefined,
     });
-    setF({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new" });
+    setF({ brand: "", productName: "", buyChannel: "", buyPrice: "", qty: "1", condition: "new", sellChannel: "poizon" });
   };
 
   const setStatus = (r: Row, status: string) => {
@@ -87,6 +98,7 @@ export default function ReversePurchases() {
   };
   const setInspect = (r: Row, inspectStatus: string) => updateMut.mutate({ id: r.id, inspectStatus: inspectStatus as any });
   const setSold = (r: Row, v: number) => updateMut.mutate({ id: r.id, soldPrice: v });
+  const setSellChannel = (r: Row, v: string) => updateMut.mutate({ id: r.id, sellChannel: v });
 
   const s = stats.data;
 
@@ -122,11 +134,11 @@ export default function ReversePurchases() {
                 })
               }
               onExport={() => ({
-                headers: ["브랜드", "상품명", "매입처", "매입가", "수량", "매입액", "검수", "상태", "판매가", "매입일", "판매일"],
+                headers: ["브랜드", "상품명", "매입처", "매입가", "수량", "매입액", "검수", "상태", "판매처", "판매가", "매입일", "판매일"],
                 rows: rows.map(r => [
                   r.brand || "", r.productName, r.buyChannel || "", r.buyPrice || 0, r.qty || 1,
                   (r.buyPrice || 0) * (r.qty || 1), r.inspectStatus || "", STATUS_LABEL[r.status] || r.status,
-                  r.soldPrice || 0, r.buyDate || "", r.sellDate || "",
+                  sellLabel(r.sellChannel), r.soldPrice || 0, r.buyDate || "", r.sellDate || "",
                 ]),
               })}
             />
@@ -144,10 +156,29 @@ export default function ReversePurchases() {
 
           {/* 등록 폼 */}
           <div className="glass rounded-2xl p-4">
-            <div className="grid sm:grid-cols-6 gap-2">
-              <In placeholder="브랜드" value={f.brand} onChange={v => setF({ ...f, brand: v })} />
+            <datalist id="buy-sources">
+              {BUY_SOURCES.map(s => <option key={s} value={s} />)}
+            </datalist>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <In placeholder="상품명 *" value={f.productName} onChange={v => setF({ ...f, productName: v })} span2 />
-              <In placeholder="매입처" value={f.buyChannel} onChange={v => setF({ ...f, buyChannel: v })} />
+              <In placeholder="브랜드" value={f.brand} onChange={v => setF({ ...f, brand: v })} />
+              {/* 매입처: 프리셋 + 자유입력 */}
+              <input
+                list="buy-sources"
+                placeholder="매입처 (예: ABC마트·아울렛)"
+                value={f.buyChannel}
+                onChange={e => setF({ ...f, buyChannel: e.target.value })}
+                className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-slate-500 outline-none focus:border-fuchsia-400/60"
+              />
+              {/* 판매처 */}
+              <select
+                value={f.sellChannel}
+                title="판매처"
+                onChange={e => setF({ ...f, sellChannel: e.target.value })}
+                className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60"
+              >
+                {SELL_CHANNELS.map(c => <option key={c.v} value={c.v} className="bg-[#0a0b1e]">판매 · {c.l}</option>)}
+              </select>
               <In placeholder="매입가" value={f.buyPrice} onChange={v => setF({ ...f, buyPrice: v })} type="number" />
               <In placeholder="수량" value={f.qty} onChange={v => setF({ ...f, qty: v })} type="number" />
             </div>
@@ -188,6 +219,7 @@ export default function ReversePurchases() {
                     <th className="text-right font-medium px-3 py-2.5">매입</th>
                     <th className="text-center font-medium px-3 py-2.5">검수</th>
                     <th className="text-center font-medium px-3 py-2.5">상태</th>
+                    <th className="text-center font-medium px-3 py-2.5">판매처</th>
                     <th className="text-right font-medium px-3 py-2.5">판매가</th>
                     <th className="text-right font-medium px-3 py-2.5">순익</th>
                     <th className="px-3 py-2.5" />
@@ -195,7 +227,7 @@ export default function ReversePurchases() {
                 </thead>
                 <tbody>
                   {shown.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-slate-500 py-10">
+                    <tr><td colSpan={8} className="text-center text-slate-500 py-10">
                       {rows.length === 0 ? "아직 매입 기록이 없어요. 위에서 등록하거나 소싱 큐에서 '매입'을 누르세요." : "이 상태의 매입이 없어요."}
                     </td></tr>
                   )}
@@ -224,6 +256,13 @@ export default function ReversePurchases() {
                           <select value={r.status} onChange={e => setStatus(r, e.target.value)}
                             className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 outline-none focus:border-fuchsia-400/60">
                             {STATUS_OPTS.map(o => <option key={o} value={o} className="bg-[#0a0b1e]">{STATUS_LABEL[o]}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <select value={r.sellChannel ?? ""} onChange={e => setSellChannel(r, e.target.value)}
+                            className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 outline-none focus:border-fuchsia-400/60">
+                            <option value="" className="bg-[#0a0b1e]">—</option>
+                            {SELL_CHANNELS.map(c => <option key={c.v} value={c.v} className="bg-[#0a0b1e]">{c.l}</option>)}
                           </select>
                         </td>
                         <td className="text-right px-3 py-2.5">

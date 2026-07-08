@@ -61,6 +61,10 @@ if [ -f drizzle/0038_reverse_settings.sql ]; then
   echo "  Applying 0038_reverse_settings.sql..."
   mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0038_reverse_settings.sql 2>&1 || echo "  (already applied or skipped)"
 fi
+if [ -f drizzle/0039_purchase_channels.sql ]; then
+  echo "  Applying 0039_purchase_channels.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0039_purchase_channels.sql 2>&1 || echo "  (already applied or skipped)"
+fi
 
 # 4. Build
 echo "[4/5] Building..."
