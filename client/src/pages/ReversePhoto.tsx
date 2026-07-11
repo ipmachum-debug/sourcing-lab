@@ -16,7 +16,7 @@ const VERDICT: Record<string, { label: string; cls: string; dot: string }> = {
 };
 
 interface Item {
-  normKey: string; productName: string; brand: string | null; color: string | null; sizes: string | null;
+  normKey: string; productName: string; brand: string | null; articleNumber: string | null; color: string | null; sizes: string | null;
   listPrice: number; salePrice: number; discountPct: number; buyKrw: number; verdict: string;
   deal: null | { stableCny: number; revenueKrw: number; netProfitKrw: number; marginPct: number; grade: string; recommendQty: number; stars: number; hasObservations: boolean };
 }
@@ -143,6 +143,7 @@ export default function ReversePhoto() {
                           <div className="min-w-0">
                             <p className="text-[11px] text-slate-500">{it.brand || "-"}{it.color ? ` · ${it.color}` : ""}</p>
                             <p className="font-bold text-slate-100 leading-tight line-clamp-2">{it.productName}</p>
+                            {it.articleNumber && <p className="text-[11px] text-cyan-300/80 mt-0.5">모델번호 {it.articleNumber}</p>}
                             {it.sizes && <p className="text-[11px] text-slate-500 mt-0.5">사이즈 {it.sizes}</p>}
                           </div>
                           <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-slate-200">
@@ -172,7 +173,7 @@ export default function ReversePhoto() {
                             </div>
                           ) : <span />}
                           <button
-                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 1350, feePct: 6 })}
+                            onClick={() => watchMut.mutate({ productName: it.productName, brand: it.brand || undefined, sku: it.articleNumber || undefined, domesticPrice: it.buyKrw, poizonCny: it.deal?.stableCny || 0, rate: 1350, feePct: 6 })}
                             className="text-[11px] neon-chip rounded-lg px-2 py-1 text-slate-200 flex items-center gap-1">
                             <Star className="h-3 w-3" /> 워치
                           </button>
