@@ -10,6 +10,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { invokeLLM } from "../_core/llm";
 import { rateLimit } from "../lib/rateLimit";
+import { fetchWatchPriceUsd } from "../lib/watchCollector";
+import { readiness as poizonReadiness } from "../lib/poizonApi";
 import {
   evaluateDeal,
   DEFAULT_COST,
@@ -33,6 +35,7 @@ const EXTRACT_SCHEMA = {
           properties: {
             productName: { type: "string", description: "상품명(모델명 포함)" },
             brand: { type: "string", description: "브랜드" },
+            articleNumber: { type: "string", description: "모델번호/품번/스타일코드(예: FJ4170-004, 207937-2YJ). 없으면 빈 문자열" },
             color: { type: "string", description: "색상(있으면)" },
             sizes: { type: "string", description: "사이즈(여러 개면 쉼표)" },
             listPrice: { type: "number", description: "정상가(원)" },
@@ -50,13 +53,14 @@ const EXTRACT_SCHEMA = {
 
 const SYS = `너는 오프라인 매장(아울렛·백화점)의 가격표 사진을 읽는 소싱 비서다.
 사진에서 상품마다 다음을 정확히 추출한다:
-- brand(브랜드), productName(상품/모델명), color(색상), sizes(사이즈, 여러 개면 쉼표로)
+- brand(브랜드), productName(상품/모델명), articleNumber(모델번호/품번/스타일코드), color(색상), sizes(사이즈, 여러 개면 쉼표로)
 - listPrice(정상가, 원), salePrice(할인가/실판매가, 원), discountPct(할인율 %)
 규칙:
 1) "SALE 50%", "50% OFF" 같은 표시가 있으면 discountPct에 반영하고, 정상가·할인가를 구분한다. 할인가만 보이면 salePrice, 정상가만 보이면 listPrice.
 2) 가격은 원화 숫자만(콤마·₩·원 제거). 못 읽는 값은 0 또는 "".
 3) 사진에 여러 상품이 있으면 모두 배열로. 없으면 빈 배열.
 4) 브랜드/모델은 영문 표기 그대로(예: Crocs Classic Clog, Nike Dunk Low).
+5) 모델번호/품번/스타일코드(태그·박스의 영숫자 코드, 예: FJ4170-004, DA8301-100, 207937-2YJ)를 보이면 articleNumber에 정확히. 없으면 "".
 반드시 JSON 스키마로만 응답.`;
 
 function parseJson(content: any): { items: any[] } {
@@ -142,6 +146,7 @@ export const photoSourcingRouter = router({
           seen.add(dedup);
           return {
             normKey, productName, brand,
+            articleNumber: String(r.articleNumber || "").trim().slice(0, 64) || null,
             color: String(r.color || "").trim().slice(0, 60) || null,
             sizes: String(r.sizes || "").trim().slice(0, 80) || null,
             listPrice, salePrice,
@@ -183,6 +188,20 @@ export const photoSourcingRouter = router({
           .where(inArray(poizonPricePool.normKey, missing))
           .limit(2000);
         for (const p of pool) { const pc = p.priceCny ?? 0; if (pc > 0) byKey.set(p.normKey, [{ priceCny: pc, at: now }]); }
+      }
+      // 공유 풀에도 없고 모델번호가 있는 상품 → POIZON 라이브 조회(매장 즉시 판정).
+      //   순차·상한(8) — 밴 안전. 자격증명 없으면 skip.
+      const pr = poizonReadiness();
+      if (pr.appKey && pr.appSecret) {
+        const liveTargets = items.filter(it => !byKey.has(it.normKey) && it.articleNumber).slice(0, 8);
+        for (const it of liveTargets) {
+          try {
+            const usd = await fetchWatchPriceUsd(it.articleNumber);
+            if (usd != null && usd > 0) byKey.set(it.normKey, [{ priceCny: usd, at: now }]);
+          } catch {
+            /* 개별 실패 무시 */
+          }
+        }
       }
 
       const cost = { ...DEFAULT_COST, rate: input.rate };
