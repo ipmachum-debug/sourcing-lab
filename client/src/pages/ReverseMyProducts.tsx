@@ -6,6 +6,9 @@ import { LineChart, Plus, Trash2, Bell, Save, Power, RefreshCw, Zap, Store, Down
 import ImportExportBar from "@/components/ImportExportBar";
 import type { FieldSpec } from "@/lib/csv";
 import Sparkline, { trendOf, TrendArrow } from "@/components/Sparkline";
+import ListingCreate from "@/components/reverse/ListingCreate";
+import AutoBidControl from "@/components/reverse/AutoBidControl";
+import Reconciliation from "@/components/reverse/Reconciliation";
 
 const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 // 내 상품 관리 = POIZON 판매 상품의 모니터링 원장. 매입(매입처·매입가)은 매입 관리 소관.
@@ -274,6 +277,16 @@ export default function ReverseMyProducts() {
             </div>
           </div>
           <p className="text-[11px] text-slate-500">💡 채우는 3가지: <b className="text-slate-400">수동/CSV</b> · <b className="text-slate-400">확장 스케줄러</b> · <b className="text-fuchsia-300">POIZON API(연동 시 자동)</b>. sku 칸에 POIZON skuId를 넣은 상품의 시세($)가 위 '지금 동기화'로 채워집니다.</p>
+
+          {/* ── POIZON 운영 (등록·관제·정산) ── */}
+          <div className="pt-2">
+            <h2 className="text-lg font-black neon-text mb-3">POIZON 운영</h2>
+            <div className="space-y-4">
+              <ListingCreate ready={apiReady} />
+              <AutoBidControl ready={apiReady} />
+              <Reconciliation ready={apiReady} />
+            </div>
+          </div>
         </div>
       </div>
     </DashboardLayout>
