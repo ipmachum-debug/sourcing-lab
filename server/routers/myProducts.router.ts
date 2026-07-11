@@ -296,6 +296,67 @@ export const myProductsRouter = router({
     return { synced, skipped: prods.length - withSku.length, message: `${synced}건 POIZON 시세 갱신` };
   }),
 
+  // POIZON 리스팅 → 내 상품 자동 가져오기.
+  //   내 POIZON 직접입찰 리스팅(general-type-bidding)을 조회해, 각 SKU를 모니터링 원장에 등록.
+  //   리스팅엔 상품명이 없어 임시명(POIZON SPU/ SKU)으로 넣고, sku=skuId로 시세 동기화 가능하게 함.
+  //   기존 sku 중복은 건너뛰고, 활성 상한(50)을 넘으면 비활성으로 등록.
+  importFromPoizonListings: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const uid = ctx.user!.id;
+
+    const { readiness, queryListingList } = await import("../lib/poizonApi");
+    const r = readiness();
+    if (!r.appKey || !r.appSecret) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "POIZON API 미연동 — 서버 .env에 POIZON_APP_KEY/POIZON_APP_SECRET가 필요합니다.",
+      });
+    }
+
+    const res: any = await queryListingList({ region: "KR", pageSize: 50, tradeStatus: 2 });
+    const listings: any[] = res?.list ?? [];
+    if (listings.length === 0) {
+      return { imported: 0, skipped: 0, message: "POIZON에 활성 리스팅이 없습니다." };
+    }
+
+    // 기존 sku(중복 방지)
+    const existing = await db
+      .select({ sku: myProducts.sku })
+      .from(myProducts)
+      .where(eq(myProducts.userId, uid));
+    const existingSkus = new Set(existing.map(e => String(e.sku)).filter(Boolean));
+
+    let slots = Math.max(0, SCAN_CONFIG.maxActiveSkus - (await activeCount(db, uid)));
+    const toInsert: any[] = [];
+    for (const it of listings) {
+      const skuId = it.skuId ?? it.globalSkuId;
+      if (skuId == null) continue;
+      const skuStr = String(skuId);
+      if (existingSkus.has(skuStr)) continue;
+      existingSkus.add(skuStr);
+      const spu = it.spuId ?? it.globalSpuId ?? "";
+      const active = slots > 0;
+      if (active) slots--;
+      toInsert.push({
+        userId: uid,
+        productName: `POIZON ${spu ? `SPU${spu} · ` : ""}SKU${skuStr}`.slice(0, 300),
+        sku: skuStr,
+        externalId: spu ? String(spu) : null,
+        active,
+      });
+    }
+    if (toInsert.length === 0) {
+      return { imported: 0, skipped: listings.length, message: "이미 모두 가져온 리스팅입니다." };
+    }
+    await db.insert(myProducts).values(toInsert);
+    return {
+      imported: toInsert.length,
+      skipped: listings.length - toInsert.length,
+      message: `${toInsert.length}개 상품을 가져왔습니다. 상품명은 편집해 주세요.`,
+    };
+  }),
+
   // 상품별 추이 (기본 30일)
   trend: protectedProcedure
     .input(
