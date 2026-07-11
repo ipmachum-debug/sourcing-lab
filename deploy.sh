@@ -65,6 +65,10 @@ if [ -f drizzle/0039_purchase_channels.sql ]; then
   echo "  Applying 0039_purchase_channels.sql..."
   mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0039_purchase_channels.sql 2>&1 || echo "  (already applied or skipped)"
 fi
+if [ -f drizzle/0040_reverse_watch_snapshot.sql ]; then
+  echo "  Applying 0040_reverse_watch_snapshot.sql..."
+  mysql -u root -p"$MYSQL_ROOT_PASS" sourcing_lab < drizzle/0040_reverse_watch_snapshot.sql 2>&1 || echo "  (already applied or skipped)"
+fi
 
 # 4. Build
 echo "[4/5] Building..."

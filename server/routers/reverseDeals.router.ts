@@ -6,10 +6,12 @@ import {
   poizonPricePool,
   poizonTrending,
   reverseSkuWatch,
+  reverseWatchSnapshot,
   reversePurchases,
   reverseSettings,
 } from "../../drizzle/schema";
-import { and, desc, eq, gte, like, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, sql } from "drizzle-orm";
+import { collectWatchesForUser } from "../lib/watchCollector";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -1929,6 +1931,34 @@ export const reverseDealsRouter = router({
       .where(eq(reverseSkuWatch.userId, ctx.user!.id))
       .orderBy(desc(reverseSkuWatch.createdAt))
       .limit(200);
+    // 변동폭: 최근 30일 스냅샷 → 각 워치의 ~7일 전 시세 대비 변화율.
+    const ids = rows.map(r => r.id);
+    const deltaByWatch = new Map<number, number>();
+    if (ids.length) {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const snaps = await db
+        .select()
+        .from(reverseWatchSnapshot)
+        .where(and(inArray(reverseWatchSnapshot.watchId, ids), gte(reverseWatchSnapshot.capturedDate, since)))
+        .orderBy(desc(reverseWatchSnapshot.capturedDate))
+        .limit(2000);
+      const byWatch = new Map<number, typeof snaps>();
+      for (const s of snaps) {
+        const arr = byWatch.get(s.watchId) ?? [];
+        arr.push(s);
+        byWatch.set(s.watchId, arr);
+      }
+      for (const [wid, arr] of byWatch) {
+        const latest = arr[0];
+        const weekAgo = arr.find(s => {
+          const diff = (new Date(latest.capturedDate).getTime() - new Date(s.capturedDate).getTime()) / 86400000;
+          return diff >= 6;
+        });
+        if (latest && weekAgo && (weekAgo.sellUsd ?? 0) > 0) {
+          deltaByWatch.set(wid, Math.round(((latest.sellUsd - weekAgo.sellUsd) / weekAgo.sellUsd) * 1000) / 10);
+        }
+      }
+    }
     return rows.map(r => {
       const buy = r.domesticPrice ?? 0;
       const sellUsd = r.poizonCny ?? 0; // 관례상 USD
@@ -1943,6 +1973,7 @@ export const reverseDealsRouter = router({
       return {
         id: r.id, brand: r.brand, productName: r.productName, sku: r.sku, category: cat,
         domesticPrice: buy, sellUsd, net, margin, verdict,
+        delta7d: deltaByWatch.get(r.id) ?? null,
         updatedAt: r.updatedAt,
       };
     });
@@ -1957,49 +1988,8 @@ export const reverseDealsRouter = router({
     if (!(r.appKey && r.appSecret)) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
     }
-    const rows = await db
-      .select()
-      .from(reverseSkuWatch)
-      .where(eq(reverseSkuWatch.userId, ctx.user!.id))
-      .limit(100);
-    const targets = rows.filter(x => x.sku && String(x.sku).trim());
-    let updated = 0;
-    const results: { id: number; sku: string; sellUsd: number | null; ok: boolean }[] = [];
-    for (const row of targets) {
-      // 순차 — POIZON API에 부담 없이 하나씩.
-      try {
-        const spuRes: any = await poizonSpuByArticle(String(row.sku), "US");
-        const list: any[] = Array.isArray(spuRes) ? spuRes : (spuRes?.list ?? []);
-        const skuIds: any[] = (list[0]?.skuIdList ?? []).slice(0, 20);
-        let low: number | null = null;
-        if (skuIds.length) {
-          const recs: any = await poizonRecommendations(skuIds);
-          const arr: any[] = Array.isArray(recs) ? recs : (recs?.list ?? []);
-          const lows = arr
-            .map(rec => {
-              const cands = [rec?.usMinPrice, rec?.globalMinPrice, rec?.asiaMinPrice, rec?.localMinPrice]
-                .filter((v: any) => typeof v === "number" && v > 0)
-                .map((v: number) => v / 100);
-              return cands.length ? Math.min(...cands) : null;
-            })
-            .filter((v): v is number => v != null);
-          if (lows.length) low = Math.round(Math.min(...lows));
-        }
-        if (low != null && low > 0) {
-          await db
-            .update(reverseSkuWatch)
-            .set({ poizonCny: low })
-            .where(and(eq(reverseSkuWatch.id, row.id), eq(reverseSkuWatch.userId, ctx.user!.id)));
-          updated++;
-          results.push({ id: row.id, sku: String(row.sku), sellUsd: low, ok: true });
-        } else {
-          results.push({ id: row.id, sku: String(row.sku), sellUsd: null, ok: false });
-        }
-      } catch {
-        results.push({ id: row.id, sku: String(row.sku), sellUsd: null, ok: false });
-      }
-    }
-    return { updated, total: targets.length, skipped: rows.length - targets.length, results };
+    // 공용 수집기 사용(시세 갱신 + 일별 스냅샷 저장 → 변동폭 추적).
+    return collectWatchesForUser(db, ctx.user!.id);
   }),
 
   // 모델번호 → POIZON 자동 조회. 상품번호(articleNumber)로 SPU 검색 → skuId → 시세($).
