@@ -16,6 +16,7 @@ import {
   evaluateDeal,
   stableSellPrice,
   bidForTargetNet,
+  computeProfit,
   DEFAULT_COST,
   type CostParams,
   type PriceSample,
@@ -1751,6 +1752,48 @@ export const reverseDealsRouter = router({
         floorUsd,
         targetUsd,
         fxRate: fx?.rate ?? null,
+      };
+    }),
+
+  // 단건 판매가능 판정 — 기타 사이트에서 찾은 모델/국내가/POIZON 시세($)를 넣으면
+  //   POIZON 중국 판매 기준(수수료·중국배송·환손실·부가세환급)으로 실이익·판매가능 즉시 판정.
+  //   외부 호출 없음(순수 계산). 카테고리는 상품명에서 추론.
+  sellabilityCheck: protectedProcedure
+    .input(
+      z.object({
+        productName: z.string().min(1).max(300),
+        brand: z.string().max(100).optional(),
+        buyKrw: z.number().positive().max(100_000_000),
+        sellUsd: z.number().positive().max(1_000_000),
+        size: z.string().max(40).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const cat = catOf({ category: null, productName: `${input.brand ?? ""} ${input.productName}` });
+      const p = computeProfit(input.buyKrw, input.sellUsd, DEFAULT_COST, cat ?? undefined);
+      const breakEvenUsd = bidForTargetNet(input.buyKrw, 0, DEFAULT_COST, cat ?? undefined);
+      const target30Usd = bidForTargetNet(
+        input.buyKrw,
+        Math.round(input.buyKrw * 0.3),
+        DEFAULT_COST,
+        cat ?? undefined
+      );
+      // 판정: 순익>0 판매가능(마진 25%+면 양호), 아니면 불가.
+      const sellable = p.netProfitKrw > 0;
+      const verdict = !sellable ? "불가" : p.marginPct >= 25 ? "추천" : "가능";
+      return {
+        category: cat,
+        sellUsd: input.sellUsd,
+        revenueKrw: p.revenueKrw, // 판매가 원화 환산
+        feeKrw: p.feeKrw,
+        deductKrw: p.deductKrw, // 총 차감(수수료+배송+환손실+검수+포장)
+        vatRefundKrw: p.vatRefundKrw,
+        netProfitKrw: p.netProfitKrw, // 실이익(원)
+        marginPct: p.marginPct,
+        breakEvenUsd, // 손익분기 판매가($)
+        target30Usd, // 마진30% 목표가($)
+        sellable,
+        verdict, // 추천 | 가능 | 불가
       };
     }),
 
