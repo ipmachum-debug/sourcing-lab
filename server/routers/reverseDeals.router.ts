@@ -35,6 +35,7 @@ import {
   cancelListing as poizonCancelListing,
   queryListingRecommendations as poizonRecommendations,
   submitManualListing as poizonSubmitListing,
+  updateManualListing as poizonUpdateListingFn,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1760,6 +1761,43 @@ export const reverseDealsRouter = router({
       } catch (e: any) {
         const code = e instanceof PoizonApiError ? e.code : "ERROR";
         throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 등록 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
+
+  // 직접 입찰 수정 (Update Manual Listing/Direct) — 가격·수량 변경.
+  //   ★안전장치: ready + confirm + 범위검증. sellerBiddingNo(대상) + oldQuantity(기존 수량) 필수.
+  poizonUpdateListing: protectedProcedure
+    .input(
+      z.object({
+        sellerBiddingNo: z.string().min(1).max(64),
+        skuId: z.union([z.string(), z.number()]),
+        price: z.number().positive().max(1_000_000_000), // 통화 최소단위
+        quantity: z.number().int().min(1).max(999),
+        oldQuantity: z.number().int().min(0).max(999),
+        currency: z.string().max(8).optional(),
+        countryCode: z.string().max(4).optional(),
+        confirm: z.literal(true),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const res = await poizonUpdateListingFn({
+          sellerBiddingNo: input.sellerBiddingNo,
+          skuId: input.skuId,
+          price: input.price,
+          quantity: input.quantity,
+          oldQuantity: input.oldQuantity,
+          currency: input.currency ?? "USD",
+          countryCode: input.countryCode ?? "US",
+        });
+        return { ok: !!res?.sellerBiddingNo, sellerBiddingNo: res?.sellerBiddingNo ?? null, tips: res?.tips ?? "" };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 수정 실패 [${code}]: ${e?.message ?? e}` });
       }
     }),
 

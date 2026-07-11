@@ -74,6 +74,7 @@ export const POIZON_API = {
   listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
   submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
   submitDirectListing: { path: "/dop/api/v1/pop/api/v1/submit-bid/direct-autonomous-bidding", method: "POST" }, // ✅ 확정(직접입찰 등록)
+  updateDirectListing: { path: "/dop/api/v1/pop/api/v1/update-bid/direct-autonomous-bidding", method: "POST" }, // ✅ 확정(직접입찰 수정)
   autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
   listingList: { path: "/dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple", method: "POST" }, // ✅ 확정
   cancelListing: { path: "/dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding", method: "POST" }, // ✅ 확정
@@ -633,6 +634,51 @@ export async function submitManualListing(
   if (params.globalSkuId != null) body.globalSkuId = Number(params.globalSkuId);
   if (uid != null && Number.isFinite(uid)) body.uid = uid;
   return callPoizon(POIZON_API.submitDirectListing, body, {
+    schema: zManualListingResult,
+    ...opts,
+  });
+}
+
+export interface UpdateListingParams extends ManualListingParams {
+  /** 수정 대상 입찰번호(Query Listing List의 sellerBiddingNo). */
+  sellerBiddingNo: string;
+  /** 기존 수량(변경 전) — 스펙 요구 필드. */
+  oldQuantity: number;
+}
+
+/**
+ * 직접 입찰(수동) 리스팅 수정 — 가격·수량 변경. ★실제 리스팅 변경.
+ *   경로: /submit-bid... 의 update 버전(update-bid/direct-autonomous-bidding).
+ *   sellerBiddingNo(대상) + oldQuantity(기존 수량) 필수. skuId/globalSkuId 중 하나.
+ */
+export async function updateManualListing(
+  params: UpdateListingParams,
+  opts: CallOpts<z.infer<typeof zManualListingResult>> = {}
+) {
+  if (!params.sellerBiddingNo)
+    throw new PoizonApiError("EMPTY", "sellerBiddingNo(수정 대상)가 필요합니다.");
+  if (params.skuId == null && params.globalSkuId == null)
+    throw new PoizonApiError("EMPTY", "skuId 또는 globalSkuId 중 하나는 필요합니다.");
+  if (!(params.price > 0))
+    throw new PoizonApiError("EMPTY", "price(최소단위)는 0보다 커야 합니다.");
+  if (!(params.quantity > 0))
+    throw new PoizonApiError("EMPTY", "quantity(수량)는 0보다 커야 합니다.");
+  const uid =
+    params.uid ?? (process.env.POIZON_UID ? Number(process.env.POIZON_UID) : undefined);
+  const body: Record<string, unknown> = {
+    sellerBiddingNo: params.sellerBiddingNo,
+    price: Math.round(params.price),
+    quantity: Math.round(params.quantity),
+    oldQuantity: Math.round(params.oldQuantity),
+    currency: params.currency ?? "USD",
+    countryCode: params.countryCode ?? "US",
+    deliveryCountryCode: params.deliveryCountryCode ?? params.countryCode ?? "US",
+    requestId: params.requestId ?? `ul-${randomRequestId()}`,
+  };
+  if (params.skuId != null) body.skuId = Number(params.skuId);
+  if (params.globalSkuId != null) body.globalSkuId = Number(params.globalSkuId);
+  if (uid != null && Number.isFinite(uid)) body.uid = uid;
+  return callPoizon(POIZON_API.updateDirectListing, body, {
     schema: zManualListingResult,
     ...opts,
   });
