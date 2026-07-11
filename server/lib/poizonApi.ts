@@ -84,7 +84,7 @@ export const POIZON_API = {
   skuBasicInfoBySku: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/sku/sku-basic-info/by-sku", method: "POST" }, // ⚠️ 패턴 추정
   orderListV2: { path: "/dop/api/v1/order/list/v2", method: "POST" },
   orderConfirm: { path: "/dop/api/v1/order/confirm", method: "POST" },
-  realtimeReconciliation: { path: "/dop/api/v1/pop/api/v1/bill/realtime_list", method: "POST" }, // ✅ 확정(실시간 정산)
+  realtimeReconciliation: { path: "/dop/api/v1/pop/api/v1/bill/realtime_list", method: "GET" }, // ✅ 확정(실시간 정산 — GET)
   hostedUnmatched: { path: "/dop/api/v1/hosted/unmatched/list", method: "POST" },
   hostedRecommendMatch: { path: "/dop/api/v1/hosted/recommend-match/list", method: "POST" },
   hostedConfirmMatch: { path: "/dop/api/v1/hosted/confirm-match", method: "POST" },
@@ -279,8 +279,21 @@ export async function callPoizon<T = unknown>(
   const allParams = { ...bizParams, ...auth };
   const signature = sign(allParams, cfg.appSecret);
   const bodyObj = { ...allParams, sign: signature };
-  const url = `${cfg.base}${ep.path}`;
   const method = (ep.method || "POST").toUpperCase();
+
+  // GET은 파라미터를 쿼리스트링에, POST는 JSON 바디에 실는다.
+  //   값 인코딩은 서명과 동일 규칙(배열=콤마조인, 객체=JSON) 유지.
+  let url = `${cfg.base}${ep.path}`;
+  if (method === "GET") {
+    const qs = Object.entries(bodyObj)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => {
+        const val = Array.isArray(v) ? v.join(",") : typeof v === "object" ? JSON.stringify(v) : String(v);
+        return `${encodeURIComponent(k)}=${encodeURIComponent(val)}`;
+      })
+      .join("&");
+    url += (url.includes("?") ? "&" : "?") + qs;
+  }
 
   let res: Response;
   try {
