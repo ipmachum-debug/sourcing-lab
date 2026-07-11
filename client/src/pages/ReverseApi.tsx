@@ -4,6 +4,7 @@ import { Plug, CheckCircle2, XCircle, MinusCircle, PlayCircle, KeyRound } from "
 import AutoBidControl from "@/components/reverse/AutoBidControl";
 import RecommendRaw from "@/components/reverse/RecommendRaw";
 import ListingCreate from "@/components/reverse/ListingCreate";
+import Reconciliation from "@/components/reverse/Reconciliation";
 
 interface SelfTestResult { key: string; interfaceName: string; ok: boolean; skipped: boolean; message: string }
 
@@ -109,6 +110,9 @@ export default function ReverseApi() {
 
           {/* 2단계: 자동입찰(자동추종) 관제 — 실연동 성공 시 실행부 */}
           <AutoBidControl ready={!!r?.ready} />
+
+          {/* 실시간 정산 내역 — 실제 받은 돈 */}
+          <Reconciliation ready={!!r?.ready} />
 
           {/* 시세 원본 필드 확인 — 운영제안 데이터가 오픈 API에 있는지 판별 */}
           <RecommendRaw ready={!!r?.ready} />

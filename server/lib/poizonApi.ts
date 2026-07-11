@@ -84,7 +84,7 @@ export const POIZON_API = {
   skuBasicInfoBySku: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/sku/sku-basic-info/by-sku", method: "POST" }, // ⚠️ 패턴 추정
   orderListV2: { path: "/dop/api/v1/order/list/v2", method: "POST" },
   orderConfirm: { path: "/dop/api/v1/order/confirm", method: "POST" },
-  realtimeReconciliation: { path: "/dop/api/v1/bill/realtime/list", method: "POST" },
+  realtimeReconciliation: { path: "/dop/api/v1/pop/api/v1/bill/realtime_list", method: "POST" }, // ✅ 확정(실시간 정산)
   hostedUnmatched: { path: "/dop/api/v1/hosted/unmatched/list", method: "POST" },
   hostedRecommendMatch: { path: "/dop/api/v1/hosted/recommend-match/list", method: "POST" },
   hostedConfirmMatch: { path: "/dop/api/v1/hosted/confirm-match", method: "POST" },
@@ -680,6 +680,69 @@ export async function updateManualListing(
   if (uid != null && Number.isFinite(uid)) body.uid = uid;
   return callPoizon(POIZON_API.updateDirectListing, body, {
     schema: zManualListingResult,
+    ...opts,
+  });
+}
+
+// ── 실시간 정산 조회 (Real-Time Reconciliation) — ✅확정 스펙 ──────
+//   경로: /dop/api/v1/pop/api/v1/bill/realtime_list
+//   ★ amount_receivable(판매가) → stmt_fee(실수령 정산액) · sum_plate_fee(총수수료).
+//   금액은 문자열 — 파싱 시 Number() 필요. 통화는 정산 채널 기준(CNY 추정).
+const zReconRow = z
+  .object({
+    order_no: z.string().optional(),
+    order_type: z.string().optional(),
+    product_name: z.string().optional(),
+    article_number: z.string().optional(),
+    props: z.string().optional(), // 옵션/사이즈
+    num: z.number().optional(),
+    sku_price: z.string().optional(),
+    amount_receivable: z.string().optional(), // 판매가(받을 금액)
+    stmt_fee: z.string().optional(), // ★ 실수령 정산액
+    sum_plate_fee: z.string().optional(), // 총 플랫폼 수수료
+    sum_technical_fee_total: z.string().optional(),
+    transfer_fee: z.string().optional(),
+    operation_fee: z.string().optional(),
+    standard_rate: z.number().optional(),
+    stmt_status: z.string().optional(),
+    order_pay_time: z.string().optional(),
+    real_stmt_time: z.string().optional(),
+  })
+  .passthrough();
+const zReconList = z
+  .object({
+    total_results: z.number().optional(),
+    page_no: z.number().optional(),
+    page_size: z.number().optional(),
+    list: z.array(zReconRow).optional(),
+  })
+  .passthrough();
+
+export interface ReconciliationParams {
+  /** 정산 시작일 YYYY-MM-DD. */
+  startDate: string;
+  /** 정산 종료일 YYYY-MM-DD. */
+  endDate: string;
+  /** 특정 주문번호로 필터(선택). */
+  orderNo?: string;
+  pageNo?: number;
+  pageSize?: number;
+}
+
+/** 실시간 정산 내역 조회 — 실제 받은 금액(stmt_fee)·수수료를 기간별로. */
+export async function queryReconciliation(
+  params: ReconciliationParams,
+  opts: CallOpts<z.infer<typeof zReconList>> = {}
+) {
+  const body: Record<string, unknown> = {
+    settle_start_time: params.startDate,
+    settle_end_time: params.endDate,
+    page_no: params.pageNo ?? 1,
+    page_size: params.pageSize ?? 50,
+  };
+  if (params.orderNo) body.order_no = params.orderNo;
+  return callPoizon(POIZON_API.realtimeReconciliation, body, {
+    schema: zReconList,
     ...opts,
   });
 }

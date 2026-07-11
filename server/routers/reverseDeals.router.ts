@@ -36,6 +36,7 @@ import {
   queryListingRecommendations as poizonRecommendations,
   submitManualListing as poizonSubmitListing,
   updateManualListing as poizonUpdateListingFn,
+  queryReconciliation as poizonReconciliationFn,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1853,6 +1854,67 @@ export const reverseDealsRouter = router({
         targetUsd,
         fxRate: fx?.rate ?? null,
       };
+    }),
+
+  // 실시간 정산 조회 — POIZON이 실제 지급한 정산액(stmt_fee)·수수료를 기간별로.
+  //   읽기 전용. 실수령액 합계·건수 집계. 자격증명/오류는 안전하게 반환.
+  poizonReconciliation: protectedProcedure
+    .input(
+      z.object({
+        startDate: z.string().max(10),
+        endDate: z.string().max(10),
+        orderNo: z.string().max(64).optional(),
+        pageNo: z.number().int().min(1).max(1000).optional(),
+        pageSize: z.number().int().min(1).max(100).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        return { ready: false, rows: [] as any[], total: 0, pageNo: 1, totals: null, note: "자격증명 필요(.env)." };
+      }
+      const num = (s: any) => {
+        const n = Number(String(s ?? "").replace(/,/g, ""));
+        return Number.isFinite(n) ? n : 0;
+      };
+      try {
+        const res: any = await poizonReconciliationFn({
+          startDate: input.startDate,
+          endDate: input.endDate,
+          orderNo: input.orderNo,
+          pageNo: input.pageNo ?? 1,
+          pageSize: input.pageSize ?? 50,
+        });
+        const list: any[] = res?.list ?? [];
+        const rows = list.map(it => {
+          const sale = num(it.amount_receivable ?? it.sku_price);
+          const settle = num(it.stmt_fee);
+          return {
+            orderNo: it.order_no ?? null,
+            orderType: it.order_type ?? null,
+            productName: it.product_name ?? null,
+            articleNumber: it.article_number ?? null,
+            size: it.props ?? null,
+            qty: it.num ?? 1,
+            salePrice: sale,
+            settleAmount: settle, // 실수령 정산액
+            totalFee: Math.round((sale - settle) * 100) / 100, // 총 수수료
+            status: it.stmt_status ?? null,
+            payTime: it.order_pay_time ?? null,
+            settleTime: it.real_stmt_time ?? null,
+          };
+        });
+        const totals = {
+          count: rows.length,
+          saleSum: Math.round(rows.reduce((a, x) => a + x.salePrice, 0) * 100) / 100,
+          settleSum: Math.round(rows.reduce((a, x) => a + x.settleAmount, 0) * 100) / 100,
+          feeSum: Math.round(rows.reduce((a, x) => a + x.totalFee, 0) * 100) / 100,
+        };
+        return { ready: true, rows, total: res?.total_results ?? rows.length, pageNo: res?.page_no ?? 1, totals, note: "" };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        return { ready: true, rows: [] as any[], total: 0, pageNo: 1, totals: null, note: `조회 실패 [${code}]: ${e?.message ?? e}` };
+      }
     }),
 
   // 단건 판매가능 판정 — 기타 사이트에서 찾은 모델/국내가/POIZON 시세($)를 넣으면
