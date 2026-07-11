@@ -140,6 +140,7 @@ const menuItems: MenuItem[] = [
   { icon: Store, label: "판매자 엑셀", path: "/reverse/seller", emoji: "🏬", section: "main", channel: "reverse", group: "engine" },
   { icon: BarChart3, label: "상품 발굴", path: "/reverse/insights", emoji: "📊", section: "main", channel: "reverse", group: "engine" },
   { icon: ListChecks, label: "소싱 큐", path: "/reverse/queue", emoji: "🧭", section: "main", channel: "reverse", group: "engine" },
+  { icon: Radar, label: "발굴 워치", path: "/reverse/watch", emoji: "📡", section: "main", channel: "reverse", group: "engine" },
   { icon: ScanLine, label: "사진 소싱", path: "/reverse/photo", emoji: "📸", section: "main", channel: "reverse", group: "engine" },
   { icon: Scale, label: "정밀 계산기", path: "/reverse/arbitrage", emoji: "⚖️", section: "main", channel: "reverse", group: "engine" },
   { icon: Bot, label: "AI 비서", path: "/reverse/assistant", emoji: "🤖", section: "main", channel: "reverse", group: "engine" },

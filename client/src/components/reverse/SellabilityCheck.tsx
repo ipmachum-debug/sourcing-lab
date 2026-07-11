@@ -30,6 +30,31 @@ export default function SellabilityCheck() {
   const [res, setRes] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [looking, setLooking] = useState(false);
+  // 모델번호(상품번호)로 POIZON 자동 조회 → 시세($) 자동 채움
+  const lookup = async () => {
+    const art = f.productName.trim();
+    if (!art) return toast.error("모델/상품번호를 입력하세요.");
+    setLooking(true);
+    try {
+      const r = await utils.reverseDeals.poizonModelLookup.fetch({ articleNumber: art });
+      if (!r.found) {
+        toast.error(r.note || "POIZON에서 못 찾았습니다.");
+        return;
+      }
+      if (r.marketLowUsd != null) {
+        setF(s => ({ ...s, sellUsd: String(r.marketLowUsd), brand: s.brand || r.spu?.brandName || "" }));
+        toast.success(`POIZON 시세 $${r.marketLowUsd} 자동 입력 (SKU ${r.skuCount}개)`);
+      } else {
+        toast.info(`상품은 찾았으나 시세 미확보 (SKU ${r.skuCount}개). 시세를 직접 입력하세요.`);
+      }
+    } catch (e: any) {
+      toast.error(e?.message ?? "POIZON 조회 실패");
+    } finally {
+      setLooking(false);
+    }
+  };
+
   const run = async () => {
     const buyKrw = Number(f.buyKrw);
     const sellUsd = Number(f.sellUsd);
@@ -73,11 +98,17 @@ export default function SellabilityCheck() {
       <div className="flex items-center gap-2 mb-1">
         <Gavel className="h-4 w-4 text-cyan-300" />
         <h2 className="text-sm font-semibold text-slate-100">단건 판매가능 판정 (POIZON 중국)</h2>
-        <span className="text-[11px] text-slate-500">모델·국내가·시세($) → 실이익 즉시 판정</span>
+        <span className="text-[11px] text-slate-500">상품번호로 POIZON 시세 자동조회 → 국내가만 넣으면 판정</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
-        <input value={f.productName} onChange={e => setF({ ...f, productName: e.target.value })} placeholder="모델/상품명 *"
-          className="col-span-2 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-cyan-400/50" />
+        <div className="col-span-2 flex gap-1.5">
+          <input value={f.productName} onChange={e => setF({ ...f, productName: e.target.value })} placeholder="모델/상품번호 * (예: FJ4170-004)"
+            className="flex-1 min-w-0 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-cyan-400/50" />
+          <button onClick={lookup} disabled={looking} title="상품번호로 POIZON 시세 자동조회"
+            className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50 inline-flex items-center gap-1">
+            <Search className="h-3.5 w-3.5" /> {looking ? "조회…" : "POIZON"}
+          </button>
+        </div>
         <input value={f.brand} onChange={e => setF({ ...f, brand: e.target.value })} placeholder="브랜드"
           className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-cyan-400/50" />
         <input type="number" value={f.buyKrw} onChange={e => setF({ ...f, buyKrw: e.target.value })} placeholder="국내 매입가 ₩"

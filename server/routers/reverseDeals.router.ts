@@ -37,6 +37,7 @@ import {
   submitManualListing as poizonSubmitListing,
   updateManualListing as poizonUpdateListingFn,
   queryReconciliation as poizonReconciliationFn,
+  querySpuByArticleNumber as poizonSpuByArticle,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1914,6 +1915,145 @@ export const reverseDealsRouter = router({
       } catch (e: any) {
         const code = e instanceof PoizonApiError ? e.code : "ERROR";
         return { ready: true, rows: [] as any[], total: 0, pageNo: 1, totals: null, note: `조회 실패 [${code}]: ${e?.message ?? e}` };
+      }
+    }),
+
+  // 발굴 워치 — 등록된 모델(국내가+시세)에 판매가능/불가 판정을 붙여 반환.
+  //   시세(poizonCny 필드)는 관례상 USD 값. computeProfit(중국 판매 기준)으로 판정.
+  watchBoard: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const rows = await db
+      .select()
+      .from(reverseSkuWatch)
+      .where(eq(reverseSkuWatch.userId, ctx.user!.id))
+      .orderBy(desc(reverseSkuWatch.createdAt))
+      .limit(200);
+    return rows.map(r => {
+      const buy = r.domesticPrice ?? 0;
+      const sellUsd = r.poizonCny ?? 0; // 관례상 USD
+      const cat = catOf({ category: r.category ?? null, productName: `${r.brand ?? ""} ${r.productName}` });
+      let net: number | null = null, margin: number | null = null, verdict = "미확보";
+      if (buy > 0 && sellUsd > 0) {
+        const p = computeProfit(buy, sellUsd, DEFAULT_COST, cat ?? undefined);
+        net = p.netProfitKrw;
+        margin = p.marginPct;
+        verdict = net > 0 ? (margin >= 25 ? "추천" : "가능") : "불가";
+      }
+      return {
+        id: r.id, brand: r.brand, productName: r.productName, sku: r.sku, category: cat,
+        domesticPrice: buy, sellUsd, net, margin, verdict,
+        updatedAt: r.updatedAt,
+      };
+    });
+  }),
+
+  // 발굴 워치 전체 자동수집 — 각 모델번호(sku)로 POIZON 시세를 순차 조회해 갱신.
+  //   순차 실행(밴 안전). 시세($)를 poizonCny 필드에 저장. 반환: 갱신 건수·건별 결과.
+  watchCollect: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const r = poizonReadiness();
+    if (!(r.appKey && r.appSecret)) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+    }
+    const rows = await db
+      .select()
+      .from(reverseSkuWatch)
+      .where(eq(reverseSkuWatch.userId, ctx.user!.id))
+      .limit(100);
+    const targets = rows.filter(x => x.sku && String(x.sku).trim());
+    let updated = 0;
+    const results: { id: number; sku: string; sellUsd: number | null; ok: boolean }[] = [];
+    for (const row of targets) {
+      // 순차 — POIZON API에 부담 없이 하나씩.
+      try {
+        const spuRes: any = await poizonSpuByArticle(String(row.sku), "US");
+        const list: any[] = Array.isArray(spuRes) ? spuRes : (spuRes?.list ?? []);
+        const skuIds: any[] = (list[0]?.skuIdList ?? []).slice(0, 20);
+        let low: number | null = null;
+        if (skuIds.length) {
+          const recs: any = await poizonRecommendations(skuIds);
+          const arr: any[] = Array.isArray(recs) ? recs : (recs?.list ?? []);
+          const lows = arr
+            .map(rec => {
+              const cands = [rec?.usMinPrice, rec?.globalMinPrice, rec?.asiaMinPrice, rec?.localMinPrice]
+                .filter((v: any) => typeof v === "number" && v > 0)
+                .map((v: number) => v / 100);
+              return cands.length ? Math.min(...cands) : null;
+            })
+            .filter((v): v is number => v != null);
+          if (lows.length) low = Math.round(Math.min(...lows));
+        }
+        if (low != null && low > 0) {
+          await db
+            .update(reverseSkuWatch)
+            .set({ poizonCny: low })
+            .where(and(eq(reverseSkuWatch.id, row.id), eq(reverseSkuWatch.userId, ctx.user!.id)));
+          updated++;
+          results.push({ id: row.id, sku: String(row.sku), sellUsd: low, ok: true });
+        } else {
+          results.push({ id: row.id, sku: String(row.sku), sellUsd: null, ok: false });
+        }
+      } catch {
+        results.push({ id: row.id, sku: String(row.sku), sellUsd: null, ok: false });
+      }
+    }
+    return { updated, total: targets.length, skipped: rows.length - targets.length, results };
+  }),
+
+  // 모델번호 → POIZON 자동 조회. 상품번호(articleNumber)로 SPU 검색 → skuId → 시세($).
+  //   발굴 자동화의 핵심: 국내 모델번호만 넣으면 POIZON 시세를 자동 확보(엑셀·수동입력 불필요).
+  poizonModelLookup: protectedProcedure
+    .input(z.object({ articleNumber: z.string().min(1).max(64), region: z.string().max(4).optional() }))
+    .query(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        return { ready: false, found: false, note: "자격증명 필요(.env).", spu: null, marketLowUsd: null, skuCount: 0 };
+      }
+      try {
+        const res: any = await poizonSpuByArticle(input.articleNumber, input.region ?? "US");
+        const list: any[] = Array.isArray(res) ? res : (res?.list ?? []);
+        if (list.length === 0) {
+          return { ready: true, found: false, note: "POIZON에서 이 상품번호를 못 찾았습니다.", spu: null, marketLowUsd: null, skuCount: 0 };
+        }
+        const spu = list[0];
+        const skuIds: any[] = (spu?.skuIdList ?? []).slice(0, 20);
+        let marketLowUsd: number | null = null;
+        if (skuIds.length > 0) {
+          try {
+            const recs: any = await poizonRecommendations(skuIds);
+            const arr: any[] = Array.isArray(recs) ? recs : (recs?.list ?? []);
+            const lows = arr
+              .map(rec => {
+                const cands = [rec?.usMinPrice, rec?.globalMinPrice, rec?.asiaMinPrice, rec?.localMinPrice]
+                  .filter((v: any) => typeof v === "number" && v > 0)
+                  .map((v: number) => v / 100); // 최소단위(센트) → $
+                return cands.length ? Math.min(...cands) : null;
+              })
+              .filter((v): v is number => v != null);
+            if (lows.length) marketLowUsd = Math.min(...lows);
+          } catch {
+            /* 시세 조회 실패 → SPU 정보만 반환 */
+          }
+        }
+        return {
+          ready: true,
+          found: true,
+          note: "",
+          spu: {
+            globalSpuId: spu?.globalSpuId ?? null,
+            articleNumber: spu?.articleNumber ?? input.articleNumber,
+            brandName: spu?.brandName ?? null,
+            spuName: spu?.spuName ?? null,
+          },
+          skuIds,
+          skuCount: skuIds.length,
+          marketLowUsd, // 이 모델 최저 시세($)
+        };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        return { ready: true, found: false, note: `조회 실패 [${code}]: ${e?.message ?? e}`, spu: null, marketLowUsd: null, skuCount: 0 };
       }
     }),
 
