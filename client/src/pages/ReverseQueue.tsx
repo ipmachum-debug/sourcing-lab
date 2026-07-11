@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { domesticSearchLinks } from "@/lib/domesticSearch";
+import SellabilityCheck from "@/components/reverse/SellabilityCheck";
 import { toCsv, downloadCsv, stamp } from "@/lib/csv";
 import {
   ListChecks,
@@ -162,6 +163,9 @@ export default function ReverseQueue() {
               <Download className="h-4 w-4" /> 입찰가 CSV {bidCount > 0 && `(${bidCount})`}
             </button>
           </div>
+
+          {/* 단건 판매가능 판정 — 기타 사이트에서 찾은 모델 즉시 판정 */}
+          <SellabilityCheck />
 
           {/* 요약 */}
           {counts && (

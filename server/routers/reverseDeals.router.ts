@@ -16,6 +16,7 @@ import {
   evaluateDeal,
   stableSellPrice,
   bidForTargetNet,
+  computeProfit,
   DEFAULT_COST,
   type CostParams,
   type PriceSample,
@@ -33,6 +34,7 @@ import {
   submitAutoFollowBid as poizonAutoFollowBid,
   cancelListing as poizonCancelListing,
   queryListingRecommendations as poizonRecommendations,
+  submitManualListing as poizonSubmitListing,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1568,6 +1570,33 @@ export const reverseDealsRouter = router({
   // POIZON 서명 디버그 — .env 로드값 확인 + Sign Tool 비교용(stringA·sign, secret 값 미노출).
   poizonSignDebug: protectedProcedure.query(() => poizonSignDebugFn()),
 
+  // 시세/권장 원본 필드 확인 — 내 리스팅 skuId로 batchPrice 호출해 POIZON이 주는
+  //   모든 필드를 그대로 노출. "운영 제안(예상판매량·점유율 등)이 오픈 API에 있는지" 판별용.
+  poizonRecommendRaw: protectedProcedure.query(async () => {
+    const r = poizonReadiness();
+    if (!(r.appKey && r.appSecret)) {
+      return { ready: false, skuIds: [] as any[], count: 0, keys: [] as string[], sample: null, note: "자격증명 필요(.env)." };
+    }
+    try {
+      const listings: any = await poizonListingList({ region: "KR", pageSize: 20, tradeStatus: 2 });
+      const skuIds = (listings?.list ?? [])
+        .map((it: any) => it.skuId ?? it.globalSkuId)
+        .filter((x: any) => x != null)
+        .slice(0, 20);
+      if (skuIds.length === 0) {
+        return { ready: true, skuIds: [], count: 0, keys: [], sample: null, note: "활성 리스팅 없음 — 먼저 POIZON에 입찰 등록 필요." };
+      }
+      const recs: any = await poizonRecommendations(skuIds);
+      const arr: any[] = Array.isArray(recs) ? recs : (recs?.list ?? []);
+      const sample = arr[0] ?? null;
+      const keys = sample ? Object.keys(sample) : [];
+      return { ready: true, skuIds, count: arr.length, keys, sample, note: "" };
+    } catch (e: any) {
+      const code = e instanceof PoizonApiError ? e.code : "ERROR";
+      return { ready: true, skuIds: [], count: 0, keys: [], sample: null, note: `조회 실패 [${code}]: ${e?.message ?? e}` };
+    }
+  }),
+
   // ===== 자동입찰(자동추종) 실행부 =====
   //   read: 내 POIZON 리스팅 목록 → 밴드 상태·자동추종 여부 표시.
   //   write: 자동추종 시작/중지·리스팅 취소. 모두 ready + confirm 게이트.
@@ -1700,6 +1729,40 @@ export const reverseDealsRouter = router({
       }
     }),
 
+  // 직접 입찰 등록 (Manual Listing/Direct) — ★실제 리스팅 생성(돈).
+  //   ★안전장치: ready 필수 · confirm 필수 · price/quantity 범위검증 · skuId 필수 ·
+  //     price는 통화 최소단위(USD 센트/KRW 원)로 받음(클라가 환산).
+  poizonCreateListing: protectedProcedure
+    .input(
+      z.object({
+        skuId: z.union([z.string(), z.number()]),
+        price: z.number().positive().max(1_000_000_000), // 통화 최소단위
+        quantity: z.number().int().min(1).max(999),
+        currency: z.string().max(8).optional(),
+        countryCode: z.string().max(4).optional(),
+        confirm: z.literal(true),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const res = await poizonSubmitListing({
+          skuId: input.skuId,
+          price: input.price,
+          quantity: input.quantity,
+          currency: input.currency ?? "USD",
+          countryCode: input.countryCode ?? "US",
+        });
+        return { ok: !!res?.sellerBiddingNo, sellerBiddingNo: res?.sellerBiddingNo ?? null, tips: res?.tips ?? "" };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 등록 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
+
   // ① 엔진 → 자동입찰: 국내 매입가 기준 방어선·목표가 계산. 리스팅 통화에 맞춰 산출.
   //   · KRW(한국시장): 정산액 = 판매가 − 고정비 → 손익분기 판매가 = 매입가 + 고정비.
   //   · USD(중국/글로벌): 매입차익 엔진(bidForTargetNet).
@@ -1751,6 +1814,48 @@ export const reverseDealsRouter = router({
         floorUsd,
         targetUsd,
         fxRate: fx?.rate ?? null,
+      };
+    }),
+
+  // 단건 판매가능 판정 — 기타 사이트에서 찾은 모델/국내가/POIZON 시세($)를 넣으면
+  //   POIZON 중국 판매 기준(수수료·중국배송·환손실·부가세환급)으로 실이익·판매가능 즉시 판정.
+  //   외부 호출 없음(순수 계산). 카테고리는 상품명에서 추론.
+  sellabilityCheck: protectedProcedure
+    .input(
+      z.object({
+        productName: z.string().min(1).max(300),
+        brand: z.string().max(100).optional(),
+        buyKrw: z.number().positive().max(100_000_000),
+        sellUsd: z.number().positive().max(1_000_000),
+        size: z.string().max(40).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const cat = catOf({ category: null, productName: `${input.brand ?? ""} ${input.productName}` });
+      const p = computeProfit(input.buyKrw, input.sellUsd, DEFAULT_COST, cat ?? undefined);
+      const breakEvenUsd = bidForTargetNet(input.buyKrw, 0, DEFAULT_COST, cat ?? undefined);
+      const target30Usd = bidForTargetNet(
+        input.buyKrw,
+        Math.round(input.buyKrw * 0.3),
+        DEFAULT_COST,
+        cat ?? undefined
+      );
+      // 판정: 순익>0 판매가능(마진 25%+면 양호), 아니면 불가.
+      const sellable = p.netProfitKrw > 0;
+      const verdict = !sellable ? "불가" : p.marginPct >= 25 ? "추천" : "가능";
+      return {
+        category: cat,
+        sellUsd: input.sellUsd,
+        revenueKrw: p.revenueKrw, // 판매가 원화 환산
+        feeKrw: p.feeKrw,
+        deductKrw: p.deductKrw, // 총 차감(수수료+배송+환손실+검수+포장)
+        vatRefundKrw: p.vatRefundKrw,
+        netProfitKrw: p.netProfitKrw, // 실이익(원)
+        marginPct: p.marginPct,
+        breakEvenUsd, // 손익분기 판매가($)
+        target30Usd, // 마진30% 목표가($)
+        sellable,
+        verdict, // 추천 | 가능 | 불가
       };
     }),
 

@@ -73,6 +73,7 @@ export const POIZON_API = {
   spuByGlobalSpuId: { path: "/dop/api/v1/pop/api/v1/intl-commodity/intl/spu/spu-basic-info/by-global-spu-id", method: "POST" }, // ⚠️ 패턴 추정
   listingRecommendBatch: { path: "/dop/api/v1/pop/api/v1/recommend-bid/batchPrice", method: "POST" }, // ✅ 확정
   submitAutoBid: { path: "/dop/api/v1/pop/api/v1/bidding/auto/submit", method: "POST" }, // ⚠️ 추정
+  submitDirectListing: { path: "/dop/api/v1/pop/api/v1/submit-bid/direct-autonomous-bidding", method: "POST" }, // ✅ 확정(직접입찰 등록)
   autoFollowBidSubmit: { path: "/dop/api/v1/pop/api/v1/auto-follow-bidding/submit", method: "POST" }, // ✅ 확정
   listingList: { path: "/dop/api/v1/pop/api/v1/retrieve-bid/general-type-bidding-list/simple", method: "POST" }, // ✅ 확정
   cancelListing: { path: "/dop/api/v1/pop/api/v1/cancel-bid/cancel-bidding", method: "POST" }, // ✅ 확정
@@ -561,6 +562,80 @@ export async function submitAutoFollowBid(
     },
     { schema: zBoolResult, ...opts }
   );
+}
+
+// 멱등 키 생성 — requestId는 매 호출 고유해야 함(중복 등록 방지).
+function randomRequestId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c?.randomUUID) return c.randomUUID();
+  } catch {
+    /* web crypto 미지원 → 폴백 */
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ── 직접 입찰 등록 (Manual Listing / Direct) — ✅확정 스펙 ──────
+//   경로: /dop/api/v1/pop/api/v1/submit-bid/direct-autonomous-bidding
+//   price·quantity는 통화 최소단위(USD=센트, KRW=원). skuId 권장.
+//   응답 data = { sellerBiddingNo, tips }. ⚠️ 실제 리스팅 생성(돈) — 호출부에서 확인 게이트 필수.
+const zManualListingResult = z
+  .object({
+    sellerBiddingNo: z.string().optional(),
+    tips: z.string().optional(),
+  })
+  .passthrough();
+
+export interface ManualListingParams {
+  /** DW skuId(권장). skuId/globalSkuId 중 하나 필수. */
+  skuId?: string | number;
+  globalSkuId?: string | number;
+  /** 판매가(통화 최소단위: USD 센트 / KRW 원). */
+  price: number;
+  /** 등록 수량. */
+  quantity: number;
+  currency?: string; // USD·KRW…
+  countryCode?: string; // 판매지역
+  deliveryCountryCode?: string; // 발송지역(미지정 시 countryCode)
+  /** 멱등 키(중복 방지). 미지정 시 자동 생성. */
+  requestId?: string;
+  /** 판매자 uid(미지정 시 env POIZON_UID). */
+  uid?: number;
+}
+
+/**
+ * 직접 입찰(수동) 리스팅 등록. ★실제 리스팅 생성 — 방어선 이상 가격만 넣어 호출.
+ *   skuId 또는 globalSkuId 필수. 응답의 sellerBiddingNo로 등록 성공 확인/자동추종 연결.
+ */
+export async function submitManualListing(
+  params: ManualListingParams,
+  opts: CallOpts<z.infer<typeof zManualListingResult>> = {}
+) {
+  if (params.skuId == null && params.globalSkuId == null)
+    throw new PoizonApiError("EMPTY", "skuId 또는 globalSkuId 중 하나는 필요합니다(skuId 권장).");
+  if (!(params.price > 0))
+    throw new PoizonApiError("EMPTY", "price(최소단위)는 0보다 커야 합니다.");
+  if (!(params.quantity > 0))
+    throw new PoizonApiError("EMPTY", "quantity(수량)는 0보다 커야 합니다.");
+  const uid =
+    params.uid ?? (process.env.POIZON_UID ? Number(process.env.POIZON_UID) : undefined);
+  const body: Record<string, unknown> = {
+    price: Math.round(params.price),
+    quantity: Math.round(params.quantity),
+    currency: params.currency ?? "USD",
+    countryCode: params.countryCode ?? "US",
+    deliveryCountryCode: params.deliveryCountryCode ?? params.countryCode ?? "US",
+    refererSource: "pop",
+    sourceApp: "app",
+    requestId: params.requestId ?? `sl-${randomRequestId()}`,
+  };
+  if (params.skuId != null) body.skuId = Number(params.skuId);
+  if (params.globalSkuId != null) body.globalSkuId = Number(params.globalSkuId);
+  if (uid != null && Number.isFinite(uid)) body.uid = uid;
+  return callPoizon(POIZON_API.submitDirectListing, body, {
+    schema: zManualListingResult,
+    ...opts,
+  });
 }
 
 export interface ListingListParams {
