@@ -1569,6 +1569,33 @@ export const reverseDealsRouter = router({
   // POIZON 서명 디버그 — .env 로드값 확인 + Sign Tool 비교용(stringA·sign, secret 값 미노출).
   poizonSignDebug: protectedProcedure.query(() => poizonSignDebugFn()),
 
+  // 시세/권장 원본 필드 확인 — 내 리스팅 skuId로 batchPrice 호출해 POIZON이 주는
+  //   모든 필드를 그대로 노출. "운영 제안(예상판매량·점유율 등)이 오픈 API에 있는지" 판별용.
+  poizonRecommendRaw: protectedProcedure.query(async () => {
+    const r = poizonReadiness();
+    if (!(r.appKey && r.appSecret)) {
+      return { ready: false, skuIds: [] as any[], count: 0, keys: [] as string[], sample: null, note: "자격증명 필요(.env)." };
+    }
+    try {
+      const listings: any = await poizonListingList({ region: "KR", pageSize: 20, tradeStatus: 2 });
+      const skuIds = (listings?.list ?? [])
+        .map((it: any) => it.skuId ?? it.globalSkuId)
+        .filter((x: any) => x != null)
+        .slice(0, 20);
+      if (skuIds.length === 0) {
+        return { ready: true, skuIds: [], count: 0, keys: [], sample: null, note: "활성 리스팅 없음 — 먼저 POIZON에 입찰 등록 필요." };
+      }
+      const recs: any = await poizonRecommendations(skuIds);
+      const arr: any[] = Array.isArray(recs) ? recs : (recs?.list ?? []);
+      const sample = arr[0] ?? null;
+      const keys = sample ? Object.keys(sample) : [];
+      return { ready: true, skuIds, count: arr.length, keys, sample, note: "" };
+    } catch (e: any) {
+      const code = e instanceof PoizonApiError ? e.code : "ERROR";
+      return { ready: true, skuIds: [], count: 0, keys: [], sample: null, note: `조회 실패 [${code}]: ${e?.message ?? e}` };
+    }
+  }),
+
   // ===== 자동입찰(자동추종) 실행부 =====
   //   read: 내 POIZON 리스팅 목록 → 밴드 상태·자동추종 여부 표시.
   //   write: 자동추종 시작/중지·리스팅 취소. 모두 ready + confirm 게이트.
