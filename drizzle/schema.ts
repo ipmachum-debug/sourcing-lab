@@ -1825,6 +1825,25 @@ export const reverseSkuWatch = mysqlTable("reverse_sku_watch", {
 export type ReverseSkuWatch = typeof reverseSkuWatch.$inferSelect;
 export type InsertReverseSkuWatch = typeof reverseSkuWatch.$inferInsert;
 
+// ==================== 발굴 워치 시세 스냅샷 (reverse_watch_snapshot) ====================
+// ★ 자동수집 때마다 일별 1행 저장 → 변동폭(7일/30일) 추적. (watch_id, captured_date) 유니크.
+export const reverseWatchSnapshot = mysqlTable(
+  "reverse_watch_snapshot",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    watchId: int("watch_id").notNull(),
+    capturedDate: varchar("captured_date", { length: 10 }).notNull(),
+    sellUsd: int("sell_usd").default(0).notNull(),
+    createdAt: timestamp("created_at", tsOpts).defaultNow().notNull(),
+  },
+  t => ({
+    uniq: uniqueIndex("rws_unique").on(t.watchId, t.capturedDate),
+    watchIdx: index("idx_rws_watch").on(t.watchId),
+  })
+);
+
+export type ReverseWatchSnapshot = typeof reverseWatchSnapshot.$inferSelect;
+
 // ==================== 공유 POIZON 시세 풀 (poizon_price_pool) ====================
 // ★ 패시브 수집: 유저가 자기 POIZON에서 본 시세를 여기로 공유(userId 무관).
 //   대량 크롤 없이 "본 것만" 저빈도로 쌓아 전 유저가 공유 → 밴 리스크↓.

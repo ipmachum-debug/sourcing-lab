@@ -337,6 +337,8 @@ async function startServer() {
     import("../modules/marketing/publishScheduler").then(m => m.startPublishScheduler()).catch(() => {});
     import("../modules/marketing/analyticsCollector").then(m => m.startAnalyticsCollector()).catch(() => {});
     import("../modules/marketing/feedbackAnalyzer").then(m => m.startFeedbackAnalyzer()).catch(() => {});
+    // 발굴 워치 시세 자동수집 스케줄러
+    import("../modules/watchScheduler").then(m => m.startWatchScheduler()).catch(() => {});
   });
 }
 

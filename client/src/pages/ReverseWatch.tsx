@@ -9,6 +9,7 @@ const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
 interface Row {
   id: number; brand: string | null; productName: string; sku: string | null; category: string | null;
   domesticPrice: number; sellUsd: number; net: number | null; margin: number | null; verdict: string;
+  delta7d: number | null;
 }
 
 const V: Record<string, { cls: string; label: string }> = {
@@ -98,13 +99,14 @@ export default function ReverseWatch() {
                     <th className="text-left font-medium px-3 py-2.5">모델 / 브랜드</th>
                     <th className="text-right font-medium px-3 py-2.5">국내 매입가</th>
                     <th className="text-right font-medium px-3 py-2.5">POIZON 시세$</th>
+                    <th className="text-center font-medium px-3 py-2.5">7일 변동</th>
                     <th className="text-right font-medium px-3 py-2.5">예상 순익</th>
                     <th className="text-center font-medium px-3 py-2.5">판정</th>
                     <th className="px-3 py-2.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 && <tr><td colSpan={6} className="text-center text-slate-500 py-10">관심 모델을 위에서 등록하세요.</td></tr>}
+                  {rows.length === 0 && <tr><td colSpan={7} className="text-center text-slate-500 py-10">관심 모델을 위에서 등록하세요.</td></tr>}
                   {rows.map(r => {
                     const v = V[r.verdict] ?? V.미확보;
                     return (
@@ -115,6 +117,13 @@ export default function ReverseWatch() {
                         </td>
                         <td className="text-right px-3 py-2.5 text-slate-300">{won(r.domesticPrice)}</td>
                         <td className="text-right px-3 py-2.5 text-slate-300">{r.sellUsd > 0 ? `$${r.sellUsd.toLocaleString()}` : "-"}</td>
+                        <td className="text-center px-3 py-2.5">
+                          {r.delta7d == null ? <span className="text-slate-600 text-xs">-</span> : (
+                            <span className={`text-xs font-semibold ${r.delta7d < 0 ? "text-red-300" : r.delta7d > 0 ? "text-emerald-300" : "text-slate-400"}`}>
+                              {r.delta7d > 0 ? "+" : ""}{r.delta7d}%
+                            </span>
+                          )}
+                        </td>
                         <td className={`text-right px-3 py-2.5 font-semibold ${r.net == null ? "text-slate-600" : r.net >= 0 ? "text-emerald-300" : "text-red-400"}`}>
                           {r.net == null ? "-" : `${won(r.net)}${r.margin != null ? ` (${r.margin}%)` : ""}`}
                         </td>
@@ -133,7 +142,7 @@ export default function ReverseWatch() {
           </div>
           <p className="text-[11px] text-slate-600">
             💡 「전체 POIZON 자동수집」은 모델번호가 있는 워치를 <b className="text-slate-400">하나씩 순차</b> 조회합니다(밴 안전).
-            반복 수집하면 시세 변동을 추적할 수 있습니다. (자동 스케줄 수집은 다음 단계)
+            <b className="text-emerald-400"> 서버가 6시간마다 자동으로도 수집</b>하며, 일별 스냅샷으로 <b className="text-slate-400">7일 변동</b>을 추적합니다.
           </p>
         </div>
       </div>
