@@ -41,6 +41,7 @@ import ReverseDeals from "./pages/ReverseDeals";
 import ReverseImport from "./pages/ReverseImport";
 import ReverseSeller from "./pages/ReverseSeller";
 import ReverseQueue from "./pages/ReverseQueue";
+import ReverseWatch from "./pages/ReverseWatch";
 import ReverseBrands from "./pages/ReverseBrands";
 import ReverseAssistant from "./pages/ReverseAssistant";
 import ReverseApi from "./pages/ReverseApi";
@@ -77,6 +78,7 @@ function Router() {
       <Route path="/reverse/import" component={ReverseImport} />
       <Route path="/reverse/seller" component={ReverseSeller} />
       <Route path="/reverse/queue" component={ReverseQueue} />
+      <Route path="/reverse/watch" component={ReverseWatch} />
       <Route path="/reverse/brands" component={ReverseBrands} />
       <Route path="/reverse/assistant" component={ReverseAssistant} />
       <Route path="/reverse/api" component={ReverseApi} />
