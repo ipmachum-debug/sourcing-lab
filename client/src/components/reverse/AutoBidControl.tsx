@@ -58,6 +58,7 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
   const start = trpc.reverseDeals.poizonAutoFollowStart.useMutation();
   const stop = trpc.reverseDeals.poizonAutoFollowStop.useMutation();
   const cancel = trpc.reverseDeals.poizonCancelListing.useMutation();
+  const update = trpc.reverseDeals.poizonUpdateListing.useMutation();
   const bandScan = trpc.reverseDeals.poizonBandScan.useMutation();
 
   const [open, setOpen] = useState<string | null>(null);
@@ -70,12 +71,53 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
   const [calcing, setCalcing] = useState<string | null>(null);
   // ② 밴드 스캔 결과 (skuId → 판정)
   const [scan, setScan] = useState<Record<string, ScanResult>>({});
+  // 가격/수량 수정 입력 (리스팅별)
+  const [edit, setEdit] = useState<Record<string, { price: string; qty: string }>>({});
 
   const data = listings.data as
     | { ready: boolean; items: Listing[]; note: string }
     | undefined;
   const items = data?.items ?? [];
-  const busy = start.isPending || stop.isPending || cancel.isPending;
+  const busy = start.isPending || stop.isPending || cancel.isPending || update.isPending;
+
+  // 가격/수량 수정 — 최소단위 환산(USD 센트/KRW 원), oldQuantity=현재 수량.
+  const onUpdate = async (row: Listing) => {
+    const no = row.sellerBiddingNo;
+    if (!no || row.skuId == null) return;
+    const e = edit[no] ?? { price: "", qty: "" };
+    const newPrice = Number(e.price);
+    const newQty = Number(e.qty || row.quantity || 0);
+    if (!(newPrice > 0)) return toast.error("새 가격을 입력하세요.");
+    if (!(newQty > 0)) return toast.error("새 수량을 입력하세요.");
+    const cur = row.currency ?? "USD";
+    const minor = cur !== "KRW" ? Math.round(newPrice * 100) : Math.round(newPrice);
+    const unit = cur === "KRW" ? "₩" : "$";
+    if (
+      !window.confirm(
+        `리스팅 가격/수량을 수정합니다.\n${no}\n새 가격 ${unit}${newPrice.toLocaleString()} · 수량 ${newQty}\n진행할까요?`
+      )
+    )
+      return;
+    try {
+      const res = await update.mutateAsync({
+        sellerBiddingNo: no,
+        skuId: row.skuId,
+        price: minor,
+        quantity: newQty,
+        oldQuantity: row.quantity ?? 0,
+        currency: cur,
+        confirm: true,
+      });
+      if (res.ok) {
+        toast.success(`수정 요청 완료 — ${res.sellerBiddingNo ?? no}`);
+        refetch();
+      } else {
+        toast.error("수정 응답에 입찰번호가 없습니다. POIZON에서 확인하세요.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "리스팅 수정 실패");
+    }
+  };
 
   const refetch = () => listings.refetch();
 
@@ -378,6 +420,42 @@ export default function AutoBidControl({ ready }: { ready: boolean }) {
                     <p className="text-[10px] text-slate-500">
                       {FOLLOW_TYPES.find(t => t.value === (ftype[no] ?? 8))?.hint}
                     </p>
+
+                    {/* 가격/수량 수정 (Update Manual Listing) */}
+                    <div className="rounded-lg bg-fuchsia-500/5 border border-fuchsia-400/15 p-2.5">
+                      <p className="text-[11px] font-semibold text-fuchsia-300 mb-2">가격/수량 수정 (실주문)</p>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="block">
+                          <span className="text-[10px] text-slate-400">새 가격 · {row.currency ?? "USD"}</span>
+                          <input
+                            type="number"
+                            value={edit[no]?.price ?? ""}
+                            onChange={e => setEdit(s => ({ ...s, [no]: { price: e.target.value, qty: s[no]?.qty ?? "" } }))}
+                            placeholder={row.price != null ? String(row.price) : "가격"}
+                            className="mt-1 w-28 rounded-lg bg-black/30 border border-white/10 px-2.5 py-1.5 text-sm text-slate-100 focus:border-fuchsia-400/50 outline-none"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-[10px] text-slate-400">새 수량</span>
+                          <input
+                            type="number"
+                            value={edit[no]?.qty ?? ""}
+                            onChange={e => setEdit(s => ({ ...s, [no]: { price: s[no]?.price ?? "", qty: e.target.value } }))}
+                            placeholder={row.quantity != null ? String(row.quantity) : "수량"}
+                            className="mt-1 w-20 rounded-lg bg-black/30 border border-white/10 px-2.5 py-1.5 text-sm text-slate-100 focus:border-fuchsia-400/50 outline-none"
+                          />
+                        </label>
+                        <button
+                          onClick={() => onUpdate(row)}
+                          disabled={busy || !row.sellerBiddingNo}
+                          className="rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-fuchsia-500/15 text-fuchsia-200 hover:bg-fuchsia-500/25 disabled:opacity-50"
+                        >
+                          수정
+                        </button>
+                        <span className="text-[10px] text-slate-500">현재 {row.price != null ? row.price.toLocaleString() : "—"} {row.currency ?? ""} · 수량 {row.quantity ?? "—"}</span>
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => onStart(row)}
