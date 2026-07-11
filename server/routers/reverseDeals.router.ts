@@ -34,6 +34,7 @@ import {
   submitAutoFollowBid as poizonAutoFollowBid,
   cancelListing as poizonCancelListing,
   queryListingRecommendations as poizonRecommendations,
+  submitManualListing as poizonSubmitListing,
   PoizonApiError,
 } from "../lib/poizonApi";
 import { getStoredInfo as poizonStoredInfo } from "../lib/poizonTokenStore";
@@ -1725,6 +1726,40 @@ export const reverseDealsRouter = router({
       } catch (e: any) {
         const code = e instanceof PoizonApiError ? e.code : "ERROR";
         throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 취소 실패 [${code}]: ${e?.message ?? e}` });
+      }
+    }),
+
+  // 직접 입찰 등록 (Manual Listing/Direct) — ★실제 리스팅 생성(돈).
+  //   ★안전장치: ready 필수 · confirm 필수 · price/quantity 범위검증 · skuId 필수 ·
+  //     price는 통화 최소단위(USD 센트/KRW 원)로 받음(클라가 환산).
+  poizonCreateListing: protectedProcedure
+    .input(
+      z.object({
+        skuId: z.union([z.string(), z.number()]),
+        price: z.number().positive().max(1_000_000_000), // 통화 최소단위
+        quantity: z.number().int().min(1).max(999),
+        currency: z.string().max(8).optional(),
+        countryCode: z.string().max(4).optional(),
+        confirm: z.literal(true),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const r = poizonReadiness();
+      if (!(r.appKey && r.appSecret)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "POIZON 자격증명이 없습니다(.env 확인)." });
+      }
+      try {
+        const res = await poizonSubmitListing({
+          skuId: input.skuId,
+          price: input.price,
+          quantity: input.quantity,
+          currency: input.currency ?? "USD",
+          countryCode: input.countryCode ?? "US",
+        });
+        return { ok: !!res?.sellerBiddingNo, sellerBiddingNo: res?.sellerBiddingNo ?? null, tips: res?.tips ?? "" };
+      } catch (e: any) {
+        const code = e instanceof PoizonApiError ? e.code : "ERROR";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `리스팅 등록 실패 [${code}]: ${e?.message ?? e}` });
       }
     }),
 
